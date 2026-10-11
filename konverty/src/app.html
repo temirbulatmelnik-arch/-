@@ -1,0 +1,2275 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Сортировка конвертов</title>
+<!-- Запрет любых сетевых запросов: данные не могут покинуть компьютер -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval' blob:; worker-src blob:; style-src 'unsafe-inline'; font-src data:; img-src data: blob:; media-src blob: mediastream:; connect-src blob: data:; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<!--FONTS-->
+<style>
+:root {
+  --paper: #F2F2F6;
+  --sheet: #FFFFFF;
+  --sheet-2: #F7F7FA;
+  --ink: #1C1D2E;
+  --ink-2: #555870;
+  --ink-3: #8A8DA3;
+  --rule: #DADBE5;
+  --rule-2: #E8E8EF;
+  --stamp: #4A4EA8;
+  --stamp-ink: #FFFFFF;
+  --stamp-soft: #E7E8F7;
+  --ok: #1F7A4D;
+  --ok-soft: #E0F2E7;
+  --warn: #A8650F;
+  --warn-soft: #FAEEDA;
+  --err: #B53A35;
+  --err-soft: #F8E3E1;
+  --finder: #0E0F17;
+  --shadow: 0 1px 2px rgba(28, 29, 46, .06), 0 8px 24px rgba(28, 29, 46, .06);
+  --f-ui: "Golos Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --f-sign: "PT Sans Narrow", "Arial Narrow", "Roboto Condensed", "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #11121C; --sheet: #181A27; --sheet-2: #1E2030; --ink: #E7E8F2; --ink-2: #A3A6BD; --ink-3: #6F7289;
+    --rule: #2B2D42; --rule-2: #232539; --stamp: #9297F2; --stamp-ink: #11121C; --stamp-soft: #262849;
+    --ok: #4CC38A; --ok-soft: #15301F; --warn: #E7A443; --warn-soft: #33260F; --err: #F07467; --err-soft: #3A1A17;
+    --finder: #07080D; --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #11121C; --sheet: #181A27; --sheet-2: #1E2030; --ink: #E7E8F2; --ink-2: #A3A6BD; --ink-3: #6F7289;
+  --rule: #2B2D42; --rule-2: #232539; --stamp: #9297F2; --stamp-ink: #11121C; --stamp-soft: #262849;
+  --ok: #4CC38A; --ok-soft: #15301F; --warn: #E7A443; --warn-soft: #33260F; --err: #F07467; --err-soft: #3A1A17;
+  --finder: #07080D; --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 400 15px/1.45 var(--f-ui); -webkit-font-smoothing: antialiased;
+}
+button, input, select { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
+:focus-visible { outline: 2px solid var(--stamp); outline-offset: 2px; }
+kbd {
+  font: 500 12px/1 var(--f-ui); padding: 3px 6px; border-radius: 5px;
+  border: 1px solid currentColor; opacity: .75; white-space: nowrap;
+}
+.num { font-variant-numeric: tabular-nums; }
+svg.i { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---------- Каркас ---------- */
+.app {
+  display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 14px;
+  min-height: 100%; padding-inline: 20px; padding-block: 14px 16px; max-width: 1760px; margin: 0 auto;
+}
+@media (min-width: 860px) and (min-height: 600px) { .app { height: 100%; } }
+
+/* ---------- Шапка ---------- */
+.top { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+.brand h1 { margin: 0; font: 600 19px/1.2 var(--f-ui); letter-spacing: -.005em; }
+.brand p { margin: 2px 0 0; color: var(--ink-2); font-size: 13px; }
+.meter { flex: 1 1 320px; display: flex; align-items: center; gap: 14px; min-width: 240px; }
+.meter-num { white-space: nowrap; font-size: 15px; color: var(--ink-2); }
+.meter-num b { font: 700 22px/1 var(--f-sign); color: var(--ink); letter-spacing: .01em; }
+.meter-bar { flex: 1; height: 8px; border-radius: 4px; background: var(--rule-2); overflow: hidden; }
+.meter-bar i { display: block; height: 100%; width: 0; background: var(--ok); border-radius: 4px; transition: width .4s ease; }
+.meter-pct { font-size: 13px; color: var(--ink-2); min-width: 38px; text-align: right; }
+.top-actions { display: flex; gap: 8px; margin-left: auto; }
+
+/* ---------- Кнопки ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 38px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--rule);
+  background: var(--sheet); color: var(--ink); cursor: pointer; white-space: nowrap; font-weight: 500;
+}
+.btn:hover { border-color: var(--ink-3); }
+.btn.icon { width: 38px; padding: 0; }
+.btn.ghost { background: transparent; }
+.btn.small { height: 32px; font-size: 13px; padding: 0 10px; }
+.btn.primary { background: var(--stamp); border-color: var(--stamp); color: var(--stamp-ink); }
+.btn.primary:hover { filter: brightness(1.06); }
+.btn.big { height: 52px; font-size: 17px; font-weight: 600; padding: 0 22px; border-radius: 10px; }
+.btn.danger { color: var(--err); }
+.btn:disabled { opacity: .5; cursor: default; }
+
+/* ---------- Рабочая область ---------- */
+.desk {
+  display: grid; gap: 18px; min-height: 0;
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr) clamp(220px, 17vw, 290px);
+  grid-template-areas: "cam verdict ledger";
+}
+.cam { grid-area: cam; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.vcol { grid-area: verdict; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+.ledger { grid-area: ledger; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--rule); padding-left: 16px; }
+
+/* Видоискатель: кадр камеры целиком, 16:9 */
+.finder {
+  position: relative; flex: 0 1 auto; width: 100%; aspect-ratio: 16 / 9; min-height: 180px; border-radius: 12px; overflow: hidden;
+  background: var(--finder); isolation: isolate;
+}
+.finder video, .finder #overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+.finder video { object-fit: contain; }
+.corners { position: absolute; left: 4%; right: 4%; top: 7%; bottom: 7%; pointer-events: none; }
+.corners i { position: absolute; width: 34px; height: 34px; border: 3px solid rgba(255, 255, 255, .78); transition: border-color .2s; }
+.corners i:nth-child(1) { left: 0; top: 0; border-right: 0; border-bottom: 0; border-top-left-radius: 8px; }
+.corners i:nth-child(2) { right: 0; top: 0; border-left: 0; border-bottom: 0; border-top-right-radius: 8px; }
+.corners i:nth-child(3) { left: 0; bottom: 0; border-right: 0; border-top: 0; border-bottom-left-radius: 8px; }
+.corners i:nth-child(4) { right: 0; bottom: 0; border-left: 0; border-top: 0; border-bottom-right-radius: 8px; }
+.finder.scanning .corners i { border-color: #A9ADFF; }
+.finder.hit .corners i { border-color: #5BE39D; }
+.f-state {
+  position: absolute; left: 14px; top: 12px; display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 11px 6px 9px; border-radius: 999px; background: rgba(10, 11, 18, .66); color: #EDEEF6;
+  font-size: 13px; font-weight: 500; backdrop-filter: blur(6px);
+}
+.f-state::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #8A8DA3; }
+.f-state[data-s="ready"]::before { background: #5BE39D; }
+.f-state[data-s="scan"]::before { background: #A9ADFF; animation: pulse 1s ease-in-out infinite; }
+.f-state[data-s="load"]::before { background: #E7A443; animation: pulse 1s ease-in-out infinite; }
+.f-state[data-s="lock"]::before { background: #5BE39D; }
+@keyframes pulse { 50% { opacity: .3; } }
+.f-hint {
+  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); width: max-content; max-width: calc(100% - 32px);
+  padding: 7px 13px; border-radius: 8px; background: rgba(10, 11, 18, .72); color: #FFE2B0; font-size: 14px; text-align: center;
+}
+/* Что видит распознавание: обработанный фрагмент с адресом */
+.seen { flex: 1 1 0; min-height: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; overflow: hidden; }
+.seen figcaption { font-size: 13px; color: var(--ink-3); }
+.seen-box { flex: 1 1 0; min-height: 0; display: flex; align-items: flex-start; }
+.seen canvas { max-width: 100%; max-height: 100%; border-radius: 6px; background: #fff; box-shadow: 0 0 0 1px var(--rule); }
+.timer { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; }
+.timer i { display: block; height: 100%; width: 0; background: #A9ADFF; }
+.timer.run i { animation: drain linear forwards; }
+@keyframes drain { from { width: 100%; } to { width: 0; } }
+.f-off {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; padding: 24px; text-align: center; color: #C9CBDB;
+}
+.f-off p { margin: 0; max-width: 40ch; }
+.f-off .btn { background: #fff; color: #1C1D2E; border-color: #fff; }
+
+.cam-bar { display: flex; align-items: center; gap: 10px; }
+.cam-bar .btn.big { flex: 1 1 auto; min-width: 0; }
+.cam-bar .btn.big kbd { border-color: rgba(255, 255, 255, .6); }
+.btn.big.on { background: var(--sheet); color: var(--stamp); border-color: var(--stamp); }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 9px; padding: 3px; background: var(--sheet); }
+.seg button { border: 0; background: transparent; padding: 0 12px; height: 32px; border-radius: 6px; cursor: pointer; color: var(--ink-2); font-size: 14px; white-space: nowrap; }
+.seg button[aria-checked="true"] { background: var(--stamp-soft); color: var(--ink); font-weight: 500; }
+.ocr-line {
+  margin: 0; min-height: 20px; font-size: 13px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ocr-line b { color: var(--ink-2); font-weight: 500; }
+
+/* Вердикт */
+.verdict {
+  position: relative; background: var(--sheet); border-radius: 12px; padding: 18px 22px 18px;
+  box-shadow: var(--shadow); transition: background-color .25s;
+}
+.verdict[data-s="ok"] { background: var(--ok-soft); }
+.verdict[data-s="dup"] { background: var(--warn-soft); }
+.verdict[data-s="miss"] { background: var(--err-soft); }
+.v-state { margin: 0 0 6px; display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; color: var(--ink-2); min-height: 21px; }
+.verdict[data-s="ok"] .v-state { color: var(--ok); }
+.verdict[data-s="dup"] .v-state { color: var(--warn); }
+.verdict[data-s="miss"] .v-state { color: var(--err); }
+.verdict[data-s="scan"] .v-state { color: var(--stamp); }
+.v-district {
+  margin: 0; font: 700 clamp(44px, 5.4vw, 92px)/.98 var(--f-sign); letter-spacing: -.005em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: .98em;
+}
+.verdict[data-s="idle"] .v-district, .verdict[data-s="scan"] .v-district { color: var(--ink-3); }
+.v-district.stamp { animation: stamp .24s cubic-bezier(.2, .8, .25, 1); }
+@keyframes stamp { from { transform: scale(1.07); opacity: 0; } to { transform: none; opacity: 1; } }
+.v-name { margin: 10px 0 0; font-size: 20px; font-weight: 600; line-height: 1.3; min-height: 26px; }
+.v-addr { margin: 3px 0 0; color: var(--ink-2); font-size: 15px; min-height: 22px; }
+.v-ev { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--ink-3); min-height: 19px; }
+.v-ev li { display: inline-flex; align-items: center; gap: 5px; }
+.v-ev li::before { content: ""; width: 11px; height: 11px; border-radius: 3px; border: 1.5px solid currentColor; box-sizing: border-box; opacity: .7; }
+.v-ev li.y { color: var(--ok); }
+.v-ev li.y::before { background: currentColor; opacity: 1; box-shadow: inset 0 0 0 2px var(--sheet); }
+.v-ev:empty { display: none; }
+
+/* Поиск и варианты */
+.pick { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+.q-wrap { position: relative; }
+.q-wrap svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--ink-3); }
+#q {
+  width: 100%; height: 44px; padding: 0 12px 0 40px; border-radius: 10px; border: 1px solid var(--rule);
+  background: var(--sheet); font-size: 16px;
+}
+#q::placeholder { color: var(--ink-3); }
+.list-cap { margin: 12px 0 6px; font-size: 13px; color: var(--ink-2); display: flex; justify-content: space-between; gap: 8px; }
+.list { list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 0; flex: 1 1 auto; overscroll-behavior: contain; }
+.list li {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 9px 10px; border-radius: 8px; cursor: pointer;
+  border-top: 1px solid var(--rule-2);
+}
+.list li:first-child { border-top-color: transparent; }
+.list li:hover { background: var(--sheet-2); }
+.list li.sel { background: var(--stamp-soft); border-top-color: transparent; }
+.list li.sel + li { border-top-color: transparent; }
+.l-name { font-weight: 600; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.l-d { font: 700 17px/1.2 var(--f-sign); text-align: right; white-space: nowrap; }
+.l-addr { grid-column: 1 / -1; font-size: 13px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.l-mark { color: var(--ok); font-size: 13px; font-weight: 500; }
+.empty { color: var(--ink-3); font-size: 14px; padding: 6px 2px; max-width: 46ch; }
+.empty p { margin: 0 0 8px; }
+
+/* Журнал */
+.ledger-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.ledger-head h2 { margin: 0; font: 600 15px/1.3 var(--f-ui); color: var(--ink-2); }
+.ledger-head span { font-size: 13px; color: var(--ink-3); }
+.ledger ol { list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 0; flex: 1 1 auto; overscroll-behavior: contain; }
+.ledger li { position: relative; display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 0 8px; padding: 7px 0; border-top: 1px solid var(--rule-2); font-size: 13px; color: var(--ink-2); }
+.ledger li:first-child { border-top: 0; }
+.lg-t { color: var(--ink-3); padding-top: 2px; }
+.lg-d { font: 700 15px/1.25 var(--f-sign); color: var(--ink); }
+.lg-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lg-tag { margin-left: 6px; font: 500 12px var(--f-ui); color: var(--warn); }
+.ledger li.undone .lg-d, .ledger li.undone .lg-n { text-decoration: line-through; color: var(--ink-3); }
+.ledger li.undone .lg-tag { color: var(--ink-3); }
+.lg-undo {
+  position: absolute; right: 0; top: 6px; border: 0; background: var(--sheet); color: var(--stamp); font-size: 12px;
+  padding: 2px 6px; border-radius: 5px; cursor: pointer; opacity: 0;
+}
+.ledger li:hover .lg-undo, .lg-undo:focus-visible { opacity: 1; }
+.ledger-foot { padding-top: 10px; border-top: 1px solid var(--rule); margin-top: 6px; }
+.ledger-foot .btn { width: 100%; justify-content: space-between; }
+.ledger .empty { font-size: 13px; }
+
+/* Сортировочный шкаф: 19 ячеек-стопок */
+.cabinet {
+  display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 1px; background: var(--rule);
+  border: 1px solid var(--rule); border-radius: 10px; overflow: hidden;
+}
+.cell {
+  position: relative; background: var(--sheet); padding: 9px 11px 12px; cursor: pointer; text-align: left; border: 0;
+  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+}
+.cell:hover { background: var(--sheet-2); }
+.c-name { font: 700 15px/1.2 var(--f-sign); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c-cnt { font-size: 12px; color: var(--ink-2); }
+.c-bar { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--ok); width: 0; transition: width .4s ease; }
+.cell.full .c-name::after { content: " ✓"; color: var(--ok); }
+.cell.filler { background: var(--sheet-2); justify-content: center; }
+.cell.filler .c-name { font: 600 14px/1.2 var(--f-ui); color: var(--ink-2); }
+.cell.filler .c-cnt { color: var(--stamp); }
+.cell.hit { animation: hit 1.8s ease-out; }
+@keyframes hit { 0%, 25% { background: var(--ok-soft); box-shadow: inset 0 0 0 2px var(--ok); } 100% { background: var(--sheet); box-shadow: inset 0 0 0 0 transparent; } }
+.cell.hit.dup { animation-name: hitdup; }
+@keyframes hitdup { 0%, 25% { background: var(--warn-soft); box-shadow: inset 0 0 0 2px var(--warn); } 100% { background: var(--sheet); } }
+
+/* ---------- Боковая панель настроек ---------- */
+.scrim { position: fixed; inset: 0; background: rgba(12, 13, 22, .38); z-index: 30; }
+.sheet {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100%); background: var(--sheet); z-index: 31;
+  display: flex; flex-direction: column; box-shadow: -12px 0 40px rgba(12, 13, 22, .18);
+  padding-top: env(safe-area-inset-top, 0px);
+}
+.sheet-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--rule); }
+.sheet-head h2 { margin: 0; font: 600 18px/1.3 var(--f-ui); }
+.sheet-body { overflow-y: auto; padding: 6px 20px 28px; }
+.sheet section { padding: 16px 0; border-bottom: 1px solid var(--rule-2); }
+.sheet section:last-child { border-bottom: 0; }
+.sheet h3 { margin: 0 0 10px; font: 600 15px/1.3 var(--f-ui); }
+.field { display: flex; flex-direction: column; gap: 5px; margin: 10px 0; }
+.field > span { font-size: 13px; color: var(--ink-2); }
+.field select, .field input[type="file"] { width: 100%; }
+select { height: 38px; border-radius: 8px; border: 1px solid var(--rule); background: var(--sheet); padding: 0 10px; }
+input[type="range"] { width: 100%; accent-color: var(--stamp); }
+.check { display: flex; gap: 10px; align-items: flex-start; margin: 10px 0; font-size: 14px; cursor: pointer; }
+.check input { margin-top: 3px; accent-color: var(--stamp); }
+.note { font-size: 13px; color: var(--ink-2); margin: 6px 0 0; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+.keys { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; font-size: 14px; align-items: center; }
+.keys dt { justify-self: start; }
+.keys dd { margin: 0; color: var(--ink-2); }
+.map-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.confirm { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: var(--err-soft); font-size: 14px; }
+.confirm .row { margin-top: 8px; }
+
+/* ---------- Отчёт ---------- */
+.modal {
+  position: fixed; inset: 0; z-index: 31; display: flex; align-items: center; justify-content: center;
+  padding-inline: 16px; padding-block: max(16px, env(safe-area-inset-top, 0px)) 16px;
+}
+.modal-box {
+  width: min(1100px, 100%); height: min(780px, 100%); background: var(--sheet); border-radius: 14px; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.modal-head { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--rule); flex-wrap: wrap; }
+.modal-head h2 { margin: 0; font: 600 18px/1.3 var(--f-ui); }
+.modal-head .sum { color: var(--ink-2); font-size: 14px; }
+.modal-head .sp { flex: 1; }
+.rep { display: grid; grid-template-columns: minmax(200px, 270px) minmax(0, 1fr); min-height: 0; flex: 1; }
+.rep-d { overflow-y: auto; border-right: 1px solid var(--rule); padding: 6px 0; }
+.rep-d button {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; width: 100%; text-align: left; border: 0; background: transparent;
+  padding: 9px 16px; cursor: pointer; color: var(--ink);
+}
+.rep-d button:hover { background: var(--sheet-2); }
+.rep-d button[aria-current="true"] { background: var(--stamp-soft); }
+.rep-d .rd-n { font: 700 16px/1.2 var(--f-sign); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rep-d .rd-c { font-size: 13px; color: var(--ink-2); }
+.rep-d .rd-b { grid-column: 1 / -1; height: 3px; background: var(--rule-2); border-radius: 2px; overflow: hidden; }
+.rep-d .rd-b i { display: block; height: 100%; background: var(--ok); }
+.rep-l { overflow-y: auto; padding: 4px 18px 18px; }
+.rep-l h3 { margin: 14px 0 6px; font: 600 14px/1.3 var(--f-ui); color: var(--ink-2); }
+.rep-l ul { list-style: none; margin: 0; padding: 0; }
+.rep-l li { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 0 10px; padding: 7px 4px; border-top: 1px solid var(--rule-2); cursor: pointer; border-radius: 6px; }
+.rep-l li:hover { background: var(--sheet-2); }
+.rep-l li .ck { width: 16px; height: 16px; margin-top: 2px; border-radius: 4px; border: 1.5px solid var(--ink-3); }
+.rep-l li.done .ck { background: var(--ok); border-color: var(--ok); box-shadow: inset 0 0 0 2px var(--sheet); }
+.rep-l li.done .rn { color: var(--ink-2); }
+.rep-l .rn { font-weight: 500; }
+.rep-l .ra { grid-column: 2 / 3; font-size: 13px; color: var(--ink-2); }
+.rep-l .rt { font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+
+/* ---------- Экран входа ---------- */
+.lock {
+  position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; overflow-y: auto;
+  padding-inline: 20px; padding-block: max(24px, env(safe-area-inset-top, 0px)) 24px;
+  background:
+    radial-gradient(1200px 600px at 85% -10%, var(--stamp-soft), transparent 60%),
+    repeating-linear-gradient(-45deg, transparent 0 22px, var(--rule-2) 22px 23px),
+    var(--paper);
+}
+.lock-card {
+  width: min(420px, 100%); background: var(--sheet); border-radius: 18px; box-shadow: var(--shadow);
+  padding: 30px 30px 26px; display: flex; flex-direction: column; gap: 14px; position: relative; overflow: hidden;
+}
+.lock-card::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 6px;
+  background: repeating-linear-gradient(-45deg, var(--stamp) 0 14px, transparent 14px 22px, var(--err) 22px 36px, transparent 36px 44px);
+  opacity: .85;
+}
+.lock-mark { width: 92px; height: 92px; color: var(--stamp); align-self: flex-start; margin-bottom: 2px; }
+.lock-mark svg { width: 100%; height: 100%; transform: rotate(-8deg); }
+.lock h1 { margin: 0; font: 700 34px/1.02 var(--f-sign); letter-spacing: .005em; text-wrap: balance; }
+.lock .lead { margin: 0; color: var(--ink-2); font-size: 15px; }
+.lock form { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.lock label { font-size: 13px; color: var(--ink-2); }
+.pw {
+  width: 100%; height: 48px; padding: 0 14px; border-radius: 10px; border: 1.5px solid var(--rule);
+  background: var(--sheet-2); font-size: 17px; letter-spacing: .04em;
+}
+.pw:focus { outline: none; border-color: var(--stamp); box-shadow: 0 0 0 3px var(--stamp-soft); }
+.lock .btn.big { width: 100%; }
+.lock-err { margin: 0; min-height: 20px; color: var(--err); font-size: 14px; }
+.lock-foot { margin: 4px 0 0; padding-top: 12px; border-top: 1px solid var(--rule-2); color: var(--ink-3); font-size: 13px; display: flex; gap: 8px; align-items: flex-start; }
+.lock-foot svg { margin-top: 1px; color: var(--ok); }
+.lock.shake .lock-card { animation: shake .32s ease-out; }
+@keyframes shake { 25% { transform: translateX(-6px); } 60% { transform: translateX(5px); } }
+
+/* Фирменный знак в шапке */
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand-mark { width: 42px; height: 42px; flex: none; color: var(--stamp); }
+.brand-mark svg { width: 100%; height: 100%; transform: rotate(-8deg); }
+
+/* Штемпель «Отмечено» рядом с адресатом */
+.v-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; }
+.v-mark { width: 92px; height: 92px; color: var(--ok); opacity: .92; }
+.v-mark:empty { display: none; }
+.verdict[data-s="dup"] .v-mark { color: var(--warn); }
+.v-mark svg { width: 100%; height: 100%; transform: rotate(-9deg); }
+.v-mark.hit svg { animation: thud .34s cubic-bezier(.2, .8, .25, 1); }
+@keyframes thud { from { transform: scale(1.18) rotate(-16deg); opacity: 0; } to { transform: rotate(-9deg); opacity: 1; } }
+.pm-ring { font: 700 10.5px var(--f-ui); letter-spacing: .08em; fill: currentColor; }
+.pm-mid { font: 700 21px var(--f-sign); fill: currentColor; }
+.pm-sub { font: 600 10px var(--f-ui); fill: currentColor; letter-spacing: .04em; }
+
+/* Защита: подсказка в настройках */
+.secure-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--ok); background: var(--ok-soft); padding: 3px 8px; border-radius: 999px; }
+.pwform { display: grid; gap: 8px; margin-top: 10px; }
+.pwform .pw { height: 40px; font-size: 15px; }
+
+/* ---------- Уведомление ---------- */
+.toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 40; max-width: calc(100% - 32px);
+  background: var(--ink); color: var(--paper); padding: 10px 16px; border-radius: 10px; font-size: 14px; box-shadow: var(--shadow);
+}
+
+/* ---------- Адаптивность ---------- */
+@media (max-width: 1239px) {
+  .desk { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; grid-template-areas: "cam verdict" "ledger ledger"; }
+  .ledger { border-left: 0; padding-left: 0; border-top: 1px solid var(--rule); padding-top: 8px; max-height: 92px; }
+  .ledger-head { margin-bottom: 2px; }
+  .ledger ol { display: flex; gap: 0 18px; overflow-x: auto; overflow-y: hidden; }
+  .ledger li { flex: 0 0 200px; border-top: 0; padding: 4px 0; }
+  .ledger-foot { display: none; }
+  .cabinet { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .cell { padding: 7px 10px 10px; }
+  .cam-bar .btn.big kbd { display: none; }
+  .cam-bar .btn.big { padding: 0 14px; }
+}
+@media (max-width: 859px), (max-height: 599px) {
+  .app { height: auto; }
+  .desk { grid-template-columns: 1fr; grid-template-areas: "cam" "verdict" "ledger"; }
+  .finder { min-height: 0; flex: none; }
+  .cam-bar { flex-wrap: wrap; }
+  .seen { flex: none; max-height: 180px; }
+  .list { max-height: 360px; }
+  .cabinet { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+  .rep { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  .rep-d { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 200px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
+</style>
+</head>
+<body>
+<div class="lock" id="lock">
+  <div class="lock-card">
+    <div class="lock-mark"><svg viewBox="0 0 120 120" aria-hidden="true"><defs><path id="pmLockA" d="M60,60 m-43,0 a43,43 0 1,1 86,0 a43,43 0 1,1 -86,0"/></defs><circle cx="60" cy="60" r="56" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="60" cy="60" r="33" fill="none" stroke="currentColor" stroke-width="1.5"/><text class="pm-ring"><textPath href="#pmLockA" textLength="268" lengthAdjust="spacingAndGlyphs">СОРТИРОВКА КОНВЕРТОВ ★ САНКТ-ПЕТЕРБУРГ ★</textPath></text><path d="M44 50h32v22H44z M44 51l16 12 16-12" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg></div>
+    <h1>Сортировка конвертов</h1>
+    <p class="lead" id="lockLead">База адресатов зашифрована. Введите пароль, чтобы начать работу.</p>
+    <form id="lockForm" autocomplete="off">
+      <label for="lockPw">Пароль</label>
+      <input class="pw" id="lockPw" type="password" autocomplete="current-password" spellcheck="false" required>
+      <p class="lock-err" id="lockErr" role="alert"></p>
+      <button class="btn primary big" id="lockGo" type="submit">Открыть</button>
+    </form>
+    <p class="lock-foot"><svg class="i"><use href="#i-shield"/></svg><span>Работает без интернета. Данные не покидают этот компьютер. После <span id="lockMin">15</span> минут бездействия приложение блокируется.</span></p>
+  </div>
+</div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18h3"/></symbol>
+  <symbol id="i-photo" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-8 8"/></symbol>
+  <symbol id="i-cam" viewBox="0 0 24 24"><path d="M15 10l5-3v10l-5-3z"/><rect x="3" y="6" width="12" height="12" rx="2"/></symbol>
+  <symbol id="i-camoff" viewBox="0 0 24 24"><path d="M15 10l5-3v10l-5-3z"/><rect x="3" y="6" width="12" height="12" rx="2"/><path d="M2 3l20 18"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4v12M7 11l5 5 5-5M5 20h14"/></symbol>
+</svg>
+
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <div class="brand-mark"><svg viewBox="0 0 120 120" aria-hidden="true"><defs><path id="pmLockB" d="M60,60 m-43,0 a43,43 0 1,1 86,0 a43,43 0 1,1 -86,0"/></defs><circle cx="60" cy="60" r="56" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="60" cy="60" r="33" fill="none" stroke="currentColor" stroke-width="1.5"/><text class="pm-ring"><textPath href="#pmLockB" textLength="268" lengthAdjust="spacingAndGlyphs">СОРТИРОВКА КОНВЕРТОВ ★ САНКТ-ПЕТЕРБУРГ ★</textPath></text><path d="M44 50h32v22H44z M44 51l16 12 16-12" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg></div>
+      <div><h1>Сортировка конвертов</h1>
+      <p id="baseInfo">Загружаю базу…</p></div>
+    </div>
+    <div class="meter" aria-label="Обработано конвертов">
+      <span class="meter-num num"><b id="pDone">0</b> из <span id="pTotal">0</span></span>
+      <span class="meter-bar"><i id="pBar"></i></span>
+      <span class="meter-pct num" id="pPct">0 %</span>
+    </div>
+    <div class="top-actions">
+      <button class="btn" id="btnReport"><svg class="i"><use href="#i-list"/></svg>Отчёт по районам</button>
+      <button class="btn icon" id="btnSettings" aria-label="Настройки" title="Настройки"><svg class="i"><use href="#i-gear"/></svg></button>
+      <button class="btn icon" id="btnLock" aria-label="Заблокировать" title="Заблокировать (Ctrl+L)"><svg class="i"><use href="#i-lock"/></svg></button>
+    </div>
+  </header>
+
+  <main class="desk">
+    <section class="cam" aria-label="Камера">
+      <div class="finder" id="finder">
+        <video id="video" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+        <div class="corners" id="corners" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+        <div class="f-state" id="fState" data-s="off">Камера выключена</div>
+        <div class="f-hint" id="fHint" hidden></div>
+        <div class="timer" id="timer"><i></i></div>
+        <div class="f-off" id="fOff">
+          <p id="fOffText">Поднесите конверт адресом к камере. Сначала включите её.</p>
+          <button class="btn" id="btnCamOn"><svg class="i"><use href="#i-cam"/></svg>Включить камеру</button>
+        </div>
+      </div>
+      <div class="cam-bar">
+        <button class="btn primary big" id="btnScan"><span id="scanLabel">Сканировать</span><kbd>Пробел</kbd></button>
+        <div class="seg" role="radiogroup" aria-label="Когда распознавать">
+          <button role="radio" data-mode="space" aria-checked="true">По пробелу</button>
+          <button role="radio" data-mode="auto" aria-checked="false">Непрерывно</button>
+        </div>
+        <button class="btn icon" id="btnPhoto" title="Распознать фотографию конверта" aria-label="Распознать фотографию конверта"><svg class="i"><use href="#i-photo"/></svg></button>
+        <button class="btn icon" id="btnCam" title="Выключить камеру" aria-label="Выключить камеру"><svg class="i"><use href="#i-camoff"/></svg></button>
+        <input type="file" id="photoInput" accept="image/*" hidden>
+      </div>
+      <figure class="seen" id="seen" hidden>
+        <figcaption>Что видит распознавание</figcaption>
+        <div class="seen-box"><canvas id="pip"></canvas></div>
+      </figure>
+      <p class="ocr-line" id="ocrLine"></p>
+    </section>
+
+    <section class="vcol" aria-label="Результат">
+      <div class="verdict" id="verdict" data-s="idle" aria-live="polite">
+        <p class="v-state" id="vState">Готов к работе</p>
+        <h2 class="v-district" id="vDistrict">—</h2>
+        <div class="v-row">
+          <div><p class="v-name" id="vName"></p>
+          <p class="v-addr" id="vAddr"></p>
+          <ul class="v-ev" id="vEv"></ul></div>
+          <div class="v-mark" id="vMark" aria-hidden="true"></div>
+        </div>
+      </div>
+      <div class="pick">
+        <div class="q-wrap">
+          <svg class="i"><use href="#i-search"/></svg>
+          <input id="q" type="search" placeholder="Найти вручную: фамилия, имя или улица" autocomplete="off" spellcheck="false" aria-label="Найти адресата вручную">
+        </div>
+        <p class="list-cap" id="listCap"></p>
+        <ul class="list" id="list" role="listbox" aria-label="Адресаты"></ul>
+      </div>
+    </section>
+
+    <aside class="ledger" aria-label="Журнал сканирования">
+      <div class="ledger-head"><h2>Журнал</h2><span id="ledgerCount"></span></div>
+      <ol id="ledger"></ol>
+      <div class="ledger-foot">
+        <button class="btn ghost small" id="btnUndo"><span>Отменить последнее</span><kbd>Ctrl Z</kbd></button>
+      </div>
+    </aside>
+  </main>
+
+  <nav class="cabinet" id="cabinet" aria-label="Стопки по районам"></nav>
+</div>
+
+<div class="scrim" id="scrim" hidden></div>
+
+<aside class="sheet" id="settings" hidden aria-label="Настройки">
+  <div class="sheet-head"><h2>Настройки</h2><button class="btn icon ghost" data-close aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div>
+  <div class="sheet-body">
+    <section>
+      <h3>Защита данных <span class="secure-badge"><svg class="i" style="width:14px;height:14px"><use href="#i-shield"/></svg>без интернета</span></h3>
+      <label class="check"><input type="checkbox" id="optFull"> <span>Показывать полные ФИО и адреса с квартирой. По умолчанию на экране — фамилия с инициалами и адрес без квартиры.</span></label>
+      <label class="field"><span>Блокировать после бездействия</span>
+        <select id="lockSel"><option value="5">5 минут</option><option value="10">10 минут</option><option value="15">15 минут</option><option value="30">30 минут</option></select>
+      </label>
+      <p class="note">Сменить пароль или сохранить загруженную из Excel базу можно только в новый защищённый файл. Старый файл после этого удалите.</p>
+      <div class="row" style="margin-top:8px"><button class="btn" id="pwOpen"><svg class="i"><use href="#i-lock"/></svg>Создать защищённый файл…</button></div>
+      <form class="pwform" id="pwForm" hidden autocomplete="off">
+        <input class="pw" id="pw1" type="password" placeholder="Новый пароль, не короче 10 символов" autocomplete="new-password">
+        <input class="pw" id="pw2" type="password" placeholder="Повторите пароль" autocomplete="new-password">
+        <p class="note" id="pwNote">В файл войдёт текущая база: <b id="pwBase"></b>.</p>
+        <div class="row"><button class="btn primary" type="submit" id="pwGo">Сохранить файл</button><button class="btn" type="button" id="pwCancel">Отмена</button></div>
+      </form>
+      <div class="row" style="margin-top:12px"><button class="btn ghost danger" id="wipeOpen">Стереть данные с этого компьютера…</button></div>
+      <div class="confirm" id="wipeConfirm" hidden>
+        Удалить из браузера все отметки, журнал и настройки? Перед этим сохраните прогресс в файл, если он ещё нужен. Сам файл приложения и выгрузки в «Загрузках» удалите вручную.
+        <div class="row"><button class="btn danger" id="wipeYes">Стереть и заблокировать</button><button class="btn" id="wipeNo">Отмена</button></div>
+      </div>
+    </section>
+    <section>
+      <h3>Сканирование</h3>
+      <label class="check"><input type="radio" name="mode" value="space"> <span>По пробелу. Нажмите пробел — распознавание остановится, как только конверт найден.</span></label>
+      <label class="check"><input type="radio" name="mode" value="auto"> <span>Непрерывно. Распознаёт всё время; после отметки ждёт, пока уберут конверт.</span></label>
+    </section>
+    <section>
+      <h3>Камера</h3>
+      <label class="field"><span>Камера</span><select id="camSel"><option value="">По умолчанию</option></select></label>
+      <label class="field" id="expField" hidden><span>Экспозиция: меньше — слабее блики</span><input type="range" id="exp"></label>
+      <label class="check"><input type="checkbox" id="optProc"> <span>Показывать, что видит распознавание</span></label>
+      <label class="check"><input type="checkbox" id="optText"> <span>Показывать распознанный текст под камерой</span></label>
+    </section>
+    <section>
+      <h3>Обработка изображения</h3>
+      <label class="field"><span>Способ</span>
+        <select id="procSel">
+          <option value="auto">Авто: чередовать порог и контраст</option>
+          <option value="mean">Порог — лучше при бликах</option>
+          <option value="gray">Контраст и резкость</option>
+          <option value="plain">Без обработки</option>
+        </select>
+      </label>
+      <label class="field"><span>Порог: <b id="kVal">14</b> (выше — меньше шума, ниже — тоньше буквы)</span><input type="range" id="kRange" min="6" max="26" step="1"></label>
+    </section>
+    <section>
+      <h3>Голос</h3>
+      <label class="field"><span>Голос</span><select id="voiceSel"></select></label>
+      <p class="note" id="voiceNote"></p>
+      <label class="field"><span>Высота</span><input type="range" id="vPitch" min="0.3" max="1.4" step="0.05"></label>
+      <label class="field"><span>Скорость</span><input type="range" id="vRate" min="0.6" max="1.5" step="0.05"></label>
+      <label class="field"><span>Громкость</span><input type="range" id="vVol" min="0" max="1" step="0.05"></label>
+      <label class="check"><input type="checkbox" id="vWord"> <span>Добавлять слово «район»</span></label>
+      <button class="btn" id="vTest">Проверить голос</button>
+    </section>
+    <section>
+      <h3>Прогресс</h3>
+      <p class="note">Отметки хранятся в этом браузере. Сохраните копию в файл, чтобы перенести на другой компьютер или подстраховаться.</p>
+      <div class="row" style="margin-top:10px">
+        <button class="btn" id="progSave"><svg class="i"><use href="#i-down"/></svg>Сохранить в файл</button>
+        <button class="btn" id="progLoadBtn">Загрузить из файла</button>
+        <input type="file" id="progLoad" accept=".json,application/json" hidden>
+      </div>
+      <div class="row" style="margin-top:8px"><button class="btn ghost danger" id="progReset">Сбросить все отметки…</button></div>
+      <div class="confirm" id="resetConfirm" hidden>
+        Снять все отметки по текущей базе? Это нельзя отменить, если нет сохранённой копии.
+        <div class="row"><button class="btn danger" id="resetYes">Снять все отметки</button><button class="btn" id="resetNo">Отмена</button></div>
+      </div>
+    </section>
+    <section>
+      <h3>База адресатов</h3>
+      <p class="note" id="baseNote"></p>
+      <label class="field"><span>Заменить базой из Excel</span><input type="file" id="xlInput" accept=".xlsx,.xls,.csv"></label>
+      <div id="mapBox" hidden>
+        <p class="note">Проверьте, какие колонки за что отвечают:</p>
+        <div class="map-grid" id="mapGrid"></div>
+        <div class="row" style="margin-top:10px"><button class="btn primary" id="mapApply">Загрузить базу</button><button class="btn" id="mapCancel">Отмена</button></div>
+      </div>
+      <p class="note">Загруженная база хранится только до закрытия страницы. Чтобы работать с ней дальше, создайте защищённый файл (раздел «Защита данных»), а исходный Excel удалите.</p>
+      <div class="row" style="margin-top:8px"><button class="btn ghost" id="baseReset" hidden>Вернуть встроенную базу</button></div>
+    </section>
+    <section>
+      <h3>Клавиши</h3>
+      <dl class="keys">
+        <dt><kbd>Пробел</kbd></dt><dd>сканировать конверт</dd>
+        <dt><kbd>А–Я</kbd></dt><dd>начать поиск по фамилии</dd>
+        <dt><kbd>↑</kbd> <kbd>↓</kbd> <kbd>Enter</kbd></dt><dd>выбрать адресата в списке и отметить</dd>
+        <dt><kbd>Esc</kbd></dt><dd>очистить поиск, остановить сканирование</dd>
+        <dt><kbd>Ctrl Z</kbd></dt><dd>отменить последнюю отметку</dd>
+        <dt><kbd>Ctrl L</kbd></dt><dd>заблокировать приложение</dd>
+      </dl>
+    </section>
+  </div>
+</aside>
+
+<div class="modal" id="report" hidden role="dialog" aria-modal="true" aria-labelledby="repTitle">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2 id="repTitle">Отчёт по районам</h2>
+      <span class="sum num" id="repSum"></span>
+      <span class="sp"></span>
+      <div class="seg" role="radiogroup" aria-label="Показать">
+        <button role="radio" data-f="left" aria-checked="true">Не отмечены</button>
+        <button role="radio" data-f="all" aria-checked="false">Все</button>
+        <button role="radio" data-f="done" aria-checked="false">Отмечены</button>
+      </div>
+      <button class="btn" id="repXls" title="Только количество по районам, без ФИО и адресов"><svg class="i"><use href="#i-down"/></svg>Сводка в Excel</button>
+      <button class="btn ghost" id="repXlsFull" title="Полный список с ФИО и адресами">Полный список…</button>
+      <button class="btn icon ghost" data-close aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="confirm" id="fullConfirm" hidden style="margin:10px 18px 0">
+      В файл попадут ФИО и адреса всех адресатов. Храните его только на рабочем компьютере и удалите, когда он станет не нужен.
+      <div class="row"><button class="btn danger" id="fullYes">Выгрузить полный список</button><button class="btn" id="fullNo">Отмена</button></div>
+    </div>
+    <div class="rep">
+      <div class="rep-d" id="repD"></div>
+      <div class="rep-l" id="repL"></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<!--LIBS-->
+<!--VAULT-->
+<script>
+/* Движок сопоставления: распознанный текст конверта -> запись базы.
+   Работает в браузере и в Node (для тестов). */
+(function (root) {
+  'use strict';
+
+  const LAT = { A: 'А', B: 'В', C: 'С', E: 'Е', H: 'Н', K: 'К', M: 'М', O: 'О', P: 'Р', T: 'Т', X: 'Х', Y: 'У',
+    a: 'а', c: 'с', e: 'е', o: 'о', p: 'р', x: 'х', y: 'у', k: 'к', m: 'м' };
+
+  // Канонизация: латинские двойники -> кириллица, нижний регистр, ё->е, й->и, ъ->ь
+  function canon(s) {
+    return String(s == null ? '' : s)
+      .replace(/[A-Za-z]/g, ch => LAT[ch] || ch)
+      .toLowerCase()
+      .replace(/ё/g, 'е').replace(/й/g, 'и').replace(/ъ/g, 'ь');
+  }
+  const splitWords = s => canon(s).split(/[^а-я0-9]+/).filter(Boolean);
+
+  // Слова-метки, которые не несут информации об адресате
+  const STOP = new Set(('кому куда от кого откуда адрес индекс получатель отправитель россия российская федерация рф ' +
+    'санкт петербург спб гор город улица ул проспект пр просп пркт переулок пер шоссе наб набережная бул бульвар бр ' +
+    'площадь пл проезд прд аллея ал дорога дор дом корп корпус кв квартира лит литера стр строение пос поселок тер ' +
+    'территория уважаемая уважаемыи уважаемои уважаемому уважаемыи ветеран ветерану вов').split(' '));
+  const STREET_TYPES = new Set(('улица проспект переулок шоссе набережная бульвар площадь проезд аллея дорога линия ' +
+    'остров тупик').split(' '));
+
+  // Окончания для сравнения по основе (падежи ФИО: Иванова/Ивановой, Вера/Вере, Петр/Петру)
+  const ENDINGS = ['ому', 'ему', 'ого', 'его', 'ыми', 'ими', 'ои', 'еи', 'ою', 'ею', 'ую', 'юю', 'ая', 'яя', 'ые',
+    'ие', 'ыи', 'ии', 'ым', 'им', 'ых', 'их', 'ия', 'ию', 'ья', 'ье', 'ью', 'ьи', 'а', 'я', 'у', 'ю', 'е', 'и',
+    'ы', 'о', 'ь'];
+  function stem(w) {
+    for (const e of ENDINGS) {
+      if (w.length - e.length >= 3 && w.endsWith(e)) return w.slice(0, -e.length);
+    }
+    return w;
+  }
+  // Сколько ошибок распознавания допускаем для слова длины len
+  const allowedErr = len => (len <= 3 ? 0 : len <= 6 ? 1 : len <= 10 ? 2 : 3);
+
+  // Расстояние Левенштейна с ранним выходом, если превышен порог k
+  let rowA = new Int32Array(64), rowB = new Int32Array(64);
+  function lev(a, b, k) {
+    const la = a.length, lb = b.length;
+    if (Math.abs(la - lb) > k) return k + 1;
+    if (lb + 1 > rowA.length) { rowA = new Int32Array(lb + 32); rowB = new Int32Array(lb + 32); }
+    let prev = rowA, cur = rowB;
+    for (let j = 0; j <= lb; j++) prev[j] = j;
+    for (let i = 1; i <= la; i++) {
+      cur[0] = i; let rowMin = i;
+      const ai = a.charCodeAt(i - 1);
+      for (let j = 1; j <= lb; j++) {
+        let v = prev[j - 1] + (ai === b.charCodeAt(j - 1) ? 0 : 1);
+        const d = prev[j] + 1; if (d < v) v = d;
+        const n = cur[j - 1] + 1; if (n < v) v = n;
+        cur[j] = v; if (v < rowMin) rowMin = v;
+      }
+      if (rowMin > k) return k + 1;
+      const t = prev; prev = cur; cur = t;
+    }
+    return prev[lb];
+  }
+
+  const titleCase = s => String(s || '').toLowerCase().replace(/(^|[\s\-.(])([а-яёa-z])/g, (m, p, c) => p + c.toUpperCase());
+  const STREET_ABBR = { 'УЛИЦА': 'ул.', 'ПРОСПЕКТ': 'пр.', 'ПЕРЕУЛОК': 'пер.', 'ШОССЕ': 'ш.', 'НАБЕРЕЖНАЯ': 'наб.',
+    'БУЛЬВАР': 'б-р', 'ПЛОЩАДЬ': 'пл.', 'ПРОЕЗД': 'пр-д', 'АЛЛЕЯ': 'аллея', 'ДОРОГА': 'дор.', 'ЛИНИЯ': 'линия' };
+
+  function fmtStreet(st) {
+    if (!st) return '';
+    const p = st.split(/\s+/); const t = p[0].toUpperCase();
+    if (STREET_ABBR[t]) {
+      const rest = titleCase(p.slice(1).join(' ')).replace(/В\.о\.$/i, 'В.О.').replace(/(\d)-([ЯЙ])(?=[\s,]|$)/g, (m, d, x) => d + '-' + x.toLowerCase());
+      return t === 'ЛИНИЯ' ? rest.replace(/^(\d+-я)\s*/, '$1 линия ').replace(/^([^\d].*?)\s+(В\.О\.)$/, '$1 линия $2').trim() : STREET_ABBR[t] + ' ' + rest;
+    }
+    return titleCase(st);
+  }
+  function fmtPlace(s) {
+    if (!s) return '';
+    return s.split(',').map(part => {
+      const m = part.trim().match(/^(.*)\s+Г$/i); if (m) return 'г. ' + titleCase(m[1]);
+      const p = part.trim().match(/^П\s+(.*)$/i); if (p) return 'п. ' + titleCase(p[1]);
+      const t = part.trim().match(/^ТЕР\.\s*(.*)$/i); if (t) return 'тер. ' + titleCase(t[1]);
+      return titleCase(part.trim());
+    }).join(', ');
+  }
+  function fmtKorp(k) {
+    if (!k) return '';
+    const m = k.match(/^(\d+)?\s*(?:ЛИТЕРА\s*([А-ЯA-Z]))?$/i);
+    if (!m) return 'корп. ' + k.toLowerCase();
+    const out = [];
+    if (m[1]) out.push('корп. ' + m[1]);
+    if (m[2]) out.push('лит. ' + m[2].toUpperCase());
+    return out.join(', ');
+  }
+
+  // ---------- База ----------
+  function Base(rows, districts) {
+    this.districts = districts;
+    this.recs = [];
+    this.vocab = new Map();    // слово -> массив id
+    this.vtype = new Map();    // слово -> битовая маска полей: 1 фамилия, 2 имя, 4 отчество, 8 улица, 16 нас. пункт
+    this.byLen = new Map();    // длина -> слова (для нечёткого поиска)
+    this.stems = new Map();    // основа -> слова
+    this.byIdx = new Map();    // индекс -> id
+    const addWord = (w, id, t) => {
+      if (!w || w.length < 2) return;
+      let e = this.vocab.get(w); if (!e) { e = []; this.vocab.set(w, e); }
+      if (e[e.length - 1] !== id) e.push(id);
+      this.vtype.set(w, (this.vtype.get(w) || 0) | t);
+    };
+    rows.forEach((row, id) => {
+      const [di, fam, im, ot, idx, town, np, street, house, korp, apt] = row;
+      const famParts = splitWords(fam).filter(w => w.length >= 2);
+      const famForms = famParts.length > 1 ? famParts.concat([famParts.join('')]) : famParts;
+      const famKey = famForms.filter(w => w.length >= 4).length ? famForms.filter(w => w.length >= 4) : famForms;
+      const stWords = splitWords(street);
+      let stAlpha = stWords.filter(w => !/\d/.test(w) && w.length >= 2 && !STREET_TYPES.has(w));
+      if (!stAlpha.length) stAlpha = stWords.filter(w => !/\d/.test(w) && w.length >= 3);
+      const stNums = stWords.filter(w => /^\d+$/.test(w));
+      const placeWords = splitWords(town + ' ' + np).filter(w => !/\d/.test(w) && w.length >= 3 && !STOP.has(w) && w !== 'г' && w !== 'п');
+      const houseNums = (String(house).match(/\d+/g) || []);
+      const korpNum = (String(korp).match(/^\d+/) || [''])[0];
+      const aptNum = (String(apt).match(/\d+/) || [''])[0];
+      const rec = {
+        id, r: districts[di], di,
+        famRaw: fam, imRaw: im, otRaw: ot,
+        fam: famKey, im: canon(im).replace(/[^а-я]/g, ''), ot: canon(ot).replace(/[^а-я]/g, ''),
+        idx: /^\d{6}$/.test(idx) ? idx : '', street: stAlpha, stNums, place: placeWords,
+        house: houseNums[0] || '', korp: korpNum, apt: aptNum,
+        fioRaw: [fam, im, ot].filter(Boolean).join(' '),
+        fio: [fam, im, ot].filter(Boolean).map(titleCase).join(' '),
+        fioShort: titleCase(fam) + (im ? ' ' + im[0].toUpperCase() + '.' : '') + (ot ? ' ' + ot[0].toUpperCase() + '.' : ''),
+        addr: [fmtPlace(town), fmtPlace(np), fmtStreet(street), house ? 'д. ' + house.toLowerCase() : '', fmtKorp(korp), apt ? 'кв. ' + apt.toLowerCase() : '']
+          .filter(Boolean).join(', '),
+        idxRaw: idx,
+      };
+      rec.addrShort = [fmtPlace(town), fmtPlace(np), fmtStreet(street), house ? 'д. ' + house.toLowerCase() : '', fmtKorp(korp)].filter(Boolean).join(', ');
+      rec.search = [...famParts, ...famForms, rec.im, rec.ot, ...stWords, ...placeWords, idx, house && canon(house), apt && canon(apt)].filter(Boolean);
+      this.recs.push(rec);
+      famForms.forEach(w => addWord(w, id, 1));
+      addWord(rec.im, id, 2); addWord(rec.ot, id, 4);
+      stAlpha.forEach(w => addWord(w, id, 8));
+      placeWords.forEach(w => addWord(w, id, 16));
+      if (rec.idx) { let l = this.byIdx.get(rec.idx); if (!l) this.byIdx.set(rec.idx, l = []); l.push(id); }
+    });
+    for (const w of this.vocab.keys()) {
+      let b = this.byLen.get(w.length); if (!b) this.byLen.set(w.length, b = []); b.push(w);
+      const s = stem(w); if (s.length >= 3) { let l = this.stems.get(s); if (!l) this.stems.set(s, l = []); l.push(w); }
+    }
+    this.stemByLen = new Map(); // основы по длине — для нечёткого сравнения основ (падеж + ошибка распознавания)
+    for (const s of this.stems.keys()) { if (s.length < 5) continue; let b = this.stemByLen.get(s.length); if (!b) this.stemByLen.set(s.length, b = []); b.push(s); }
+    this.idxList = [...this.byIdx.keys()];
+    // Полные тёзки: одинаковые ФИО у разных записей
+    const fioCount = new Map();
+    this.recs.forEach(r => fioCount.set(r.fioRaw, (fioCount.get(r.fioRaw) || 0) + 1));
+    this.recs.forEach(r => { r.namesakes = fioCount.get(r.fioRaw) - 1; });
+  }
+
+  // ---------- Текст кадра -> признаки ----------
+  // Признак адресной строки: улица/дом/квартира/город/индекс. Слова после такого признака не считаются частью ФИО.
+  const ADDR_RE = /(^|[^а-я])(ул|улица|пр|проспект|пркт|просп|пер|переулок|наб|набережная|шоссе|бульвар|бр|пл|площадь|линия|аллея|проезд|прд|кв|квартира|корп|корпус|дом|лит|литера|тер|территория|пос|поселок|санкт|петербург|спб)(?=[^а-я]|$)|(^|[^а-я0-9])д\s*\.?\s*\d|\d{6}/;
+
+  function tokenize(text) {
+    const words = [], joins = [], nums = new Set(), idx6 = [];
+    const addNum = n => { nums.add(n); const t = n.replace(/^0+(?=\d)/, ''); nums.add(t); if (n.length === 6) idx6.push(n); };
+    let pos = 0;
+    for (const line of String(text == null ? '' : text).split(/\n+/)) {
+      const cl = canon(line);
+      // позиция первого признака адреса в строке
+      const m = ADDR_RE.exec(cl);
+      const cut = m ? m.index : Infinity;
+      let prev = null, prev2 = null, off = 0;
+      const re = /[а-я0-9]+/g; let mm;
+      while ((mm = re.exec(cl))) {
+        const p = mm[0]; const ad = mm.index >= cut ? 1 : 0;
+        const nd = (p.match(/[0-9]/g) || []).length;
+        if (nd && nd * 2 >= p.length) {
+          // похожие на цифры буквы внутри числа: О->0, З->3, Б->6, Ч->4
+          const q = p.replace(/о/g, '0').replace(/з/g, '3').replace(/б/g, '6').replace(/ч/g, '4');
+          (q.match(/[0-9]+/g) || []).forEach(addNum);
+          prev = prev2 = null; pos++; continue;
+        }
+        if (nd) (p.match(/[0-9]+/g) || []).forEach(addNum);
+        // цифры внутри слова часто оказываются буквами: 0->о, 3->з, 6->б, 4->ч, 8->в
+        const alt = nd ? p.replace(/0/g, 'о').replace(/3/g, 'з').replace(/6/g, 'б').replace(/4/g, 'ч').replace(/8/g, 'в') : p;
+        const pieces = /[0-9]/.test(alt) ? p.split(/[0-9]+/) : [alt];
+        for (const a of pieces) {
+          if (a.length < 2) continue;
+          if (STOP.has(a)) { prev = prev2 = null; pos++; continue; }
+          words.push({ w: a, a: pos, b: pos, ad });
+          if (prev && prev.w.length + a.length <= 24) joins.push({ w: prev.w + a, a: pos - 1, b: pos, ad: ad | prev.ad });
+          if (prev2 && prev && prev2.w.length + prev.w.length + a.length <= 24) joins.push({ w: prev2.w + prev.w + a, a: pos - 2, b: pos, ad: ad | prev.ad | prev2.ad });
+          prev2 = prev; prev = { w: a, ad }; pos++;
+        }
+      }
+      pos += 3; // строки не склеиваем
+    }
+    return { words, joins, nums, idx6: [...new Set(idx6)] };
+  }
+
+  const T = 0.7; // порог совпадения слова
+
+  // Для каждого слова базы — лучшее качество совпадения с каким-либо словом кадра (0..1)
+  function evidence(base, tok) {
+    const vq = new Map();
+    let cur = null, disc = 1;
+    const put = (w, q) => {
+      if (w !== cur.w) q *= disc;
+      let o = vq.get(w);
+      if (o === undefined) { o = { q: 0, a: -1, b: -1, nq: 0, na: -1, nb: -1 }; vq.set(w, o); }
+      if (q > o.q) { o.q = q; o.a = cur.a; o.b = cur.b; }
+      if (!cur.ad && q > o.nq) { o.nq = q; o.na = cur.a; o.nb = cur.b; }
+    };
+    const consider = (tk, isJoin) => {
+      const t = tk.w; cur = tk;
+      // если слово кадра точно совпало с каким-то словом базы, его похожесть на другие слова учитываем слабее
+      disc = base.vocab.has(t) ? 0.8 : 1;
+      if (base.vocab.has(t)) put(t, 1);
+      const st = stem(t);
+      if (st.length >= 3) { const ws = base.stems.get(st); if (ws) for (const w of ws) put(w, w === t ? 1 : 0.9); }
+      // нечёткое сравнение основ: «Драгуму» (дательный + ошибка) ~ «Драгун»
+      if (st.length >= 5) {
+        const SL = st.length;
+        for (let len = Math.max(5, SL - 1); len <= SL + 1; len++) {
+          const bucket = base.stemByLen.get(len); if (!bucket) continue;
+          const k = len >= 9 ? 2 : 1;
+          for (let i = 0; i < bucket.length; i++) {
+            const s2 = bucket[i]; if (s2 === st) continue;
+            const d = lev(st, s2, k);
+            if (d <= k) { const q = 0.85 * (1 - d / (len + 1)); for (const w of base.stems.get(s2)) put(w, q); }
+          }
+        }
+      }
+      const L = t.length; if (L < 4) return;
+      for (let len = Math.max(4, L - 3); len <= L + 3; len++) {
+        const k = allowedErr(len); if (Math.abs(len - L) > k) continue;
+        const bucket = base.byLen.get(len); if (!bucket) continue;
+        for (let i = 0; i < bucket.length; i++) {
+          const w = bucket[i];
+          const d = lev(t, w, k);
+          if (d <= k && d > 0) put(w, (isJoin ? 0.95 : 1) * (1 - d / len));
+        }
+      }
+    };
+    for (const t of tok.words) consider(t, false);
+    for (const t of tok.joins) consider(t, true);
+    return { vq, nums: new Set(tok.nums), idx6: tok.idx6.slice(), base };
+  }
+
+  function mergeEvidence(acc, ev) {
+    const shift = acc ? acc.frames * 100000 : 0;
+    if (!acc) acc = { vq: new Map(), nums: new Set(), idx6: [], frames: 0, base: ev.base };
+    for (const [w, e] of ev.vq) {
+      let o = acc.vq.get(w);
+      if (o === undefined) { o = { q: 0, a: -1, b: -1, nq: 0, na: -1, nb: -1 }; acc.vq.set(w, o); }
+      if (e.q > o.q) { o.q = e.q; o.a = e.a + shift; o.b = e.b + shift; }
+      if (e.nq > o.nq) { o.nq = e.nq; o.na = e.na + shift; o.nb = e.nb + shift; }
+    }
+    ev.nums.forEach(n => acc.nums.add(n));
+    ev.idx6.forEach(n => { if (!acc.idx6.includes(n)) acc.idx6.push(n); });
+    acc.frames++;
+    return acc;
+  }
+
+  const ham1 = (a, b) => { if (a.length !== b.length) return false; let d = 0; for (let i = 0; i < a.length; i++) if (a[i] !== b[i] && ++d > 1) return false; return d === 1; };
+
+  function fieldScores(rec, ev) {
+    const ent = w => { const x = ev.vq.get(w); return x && x.q > 0 ? x : null; };
+    // для ФИО — только слова вне адресных строк
+    const nent = w => { const x = ev.vq.get(w); return x && x.nq > 0 ? { q: x.nq, a: x.na, b: x.nb } : null; };
+    const best = ws => { let e = null; for (const w of ws) { const x = nent(w); if (x && (!e || x.q > e.q)) e = x; } return e; };
+    const eFam = best(rec.fam), eIm = rec.im ? nent(rec.im) : null, eOt = rec.ot ? nent(rec.ot) : null;
+    let eSt = null, qSt = 0;
+    if (rec.street.length) {
+      const es = rec.street.map(ent);
+      const mean = es.reduce((acc, e) => acc + (e ? e.q : 0), 0) / es.length;
+      let li = 0; rec.street.forEach((w, i) => { if (w.length > rec.street[li].length) li = i; });
+      const longQ = rec.street[li].length >= 6 && es[li] ? es[li].q * 0.85 : 0;
+      qSt = Math.max(mean, longQ); eSt = es[li] || es.find(Boolean) || null;
+    }
+    // одно слово кадра не может подтверждать два поля: оставляем поле с лучшим совпадением
+    const f = [['fam', eFam], ['im', eIm], ['ot', eOt], ['st', eSt]].filter(x => x[1]);
+    const drop = new Set();
+    for (let i = 0; i < f.length; i++) for (let j = i + 1; j < f.length; j++) {
+      const A = f[i][1], B = f[j][1];
+      if (A.a <= B.b && B.a <= A.b) drop.add(A.q >= B.q ? f[j][0] : f[i][0]);
+    }
+    const q = {};
+    q.fam = eFam && !drop.has('fam') ? eFam.q : 0;
+    q.im = eIm && !drop.has('im') ? eIm.q : 0;
+    q.ot = eOt && !drop.has('ot') ? eOt.q : 0;
+    q.st = drop.has('st') ? 0 : qSt;
+    q.place = 0; for (const w of rec.place) { const e = ent(w); if (e && e.q > q.place) q.place = e.q; }
+    q.idx = rec.idx ? (ev.nums.has(rec.idx) ? 1 : (ev.idx6.some(n => ham1(n, rec.idx)) ? 0.5 : 0)) : 0;
+    q.house = rec.house && ev.nums.has(rec.house) ? 1 : 0;
+    q.apt = rec.apt && ev.nums.has(rec.apt) ? 1 : 0;
+    q.korp = rec.korp && ev.nums.has(rec.korp) ? 1 : 0;
+    q.stn = rec.stNums.length && rec.stNums.every(n => ev.nums.has(n)) ? 1 : 0;
+    const on = x => (x >= T ? x : 0);
+    const s = 3 * on(q.fam) + 1.5 * on(q.im) + 1.5 * on(q.ot) + 2 * on(q.st) + 1 * on(q.place) + 2 * q.idx +
+      (rec.house.length >= 2 ? 1 : 0.5) * q.house + (rec.apt.length >= 3 ? 1.2 : rec.apt.length === 2 ? 0.8 : 0.4) * q.apt +
+      0.3 * q.korp + 0.5 * q.stn;
+    const nName = (q.im >= T) + (q.ot >= T);
+    return { s, q, nName };
+  }
+
+  // Оценить все записи-кандидаты, отсортировать по убыванию
+  function rank(base, ev, limit) {
+    const cand = new Set();
+    for (const [w, qv] of ev.vq) {
+      if (qv < T) continue;
+      const ids = base.vocab.get(w);
+      if (ids && ids.length <= 800) for (const id of ids) cand.add(id);
+    }
+    for (const n of ev.idx6) {
+      const l = base.byIdx.get(n); if (l) l.forEach(id => cand.add(id));
+      for (const x of base.idxList) if (ham1(n, x)) base.byIdx.get(x).forEach(id => cand.add(id));
+    }
+    const out = [];
+    for (const id of cand) {
+      const rec = base.recs[id];
+      const f = fieldScores(rec, ev);
+      if (f.s > 0) out.push({ rec, s: f.s, q: f.q, nName: f.nName });
+    }
+    out.sort((a, b) => b.s - a.s);
+    return limit ? out.slice(0, limit) : out;
+  }
+
+  // Решение: уверенно ли определён адресат.
+  // ranked — кандидаты по убыванию, ev — признаки кадра (нужны для проверки противоречий)
+  function decide(ranked, ev, opt) {
+    const margin = (opt && opt.margin) || 2;
+    const top = ranked[0]; if (!top) return null;
+    const q = top.q, rec = top.rec;
+    if (q.fam < T) return null;                                       // фамилия обязательна
+    const st = q.st >= T, idx = q.idx >= 1;
+    const house = q.house && rec.house.length >= 2, apt = q.apt && rec.apt.length >= 2;
+    const ruleA = top.nName === 2;                                     // полное ФИО
+    const ruleB = top.nName >= 1 && (st || idx || (house && apt));      // фамилия + имя/отчество + адрес
+    const ruleC = st && (idx || house || apt || q.place >= T);          // фамилия + улица + номер/индекс
+    if (!(ruleA || ruleB || ruleC)) return null;
+    const second = ranked[1];
+    const gap = second ? top.s - second.s : 99;
+    if (gap < margin) {
+      // полное ФИО прочитано уверенно и тёзок в базе нет — достаточно и без адреса
+      const fullFio = q.fam >= 0.85 && q.im >= 0.85 && q.ot >= 0.85 && rec.namesakes === 0;
+      if (!(fullFio && gap >= 1.2)) return null;
+    }
+    // Противоречия: в кадре уверенно читается чужое — значит, кандидат под сомнением
+    if (!st) {                                   // чужая улица с номером дома/индексом
+      const key = rec.street.join(' ');
+      for (let i = 1; i < ranked.length; i++) {
+        const o = ranked[i];
+        if (o.q.st >= 0.85 && (o.q.house || o.q.idx >= 1) && o.rec.street.join(' ') !== key) return null;
+      }
+    }
+    if (ev && ev.base && (q.im < T || q.ot < T)) {   // чужое имя или отчество, прочитанное точно
+      for (const [w, e] of ev.vq) {
+        if (e.nq < 1) continue;
+        const t = ev.base.vtype.get(w) || 0;
+        if (q.im < T && t === 2 && w !== rec.im) return null;
+        if (q.ot < T && t === 4 && w !== rec.ot) return null;
+      }
+    }
+    return top;
+  }
+
+  function search(base, query, isDone, limit) {
+    const parts = splitWords(query); if (!parts.length) return [];
+    const res = [];
+    for (const r of base.recs) {
+      if (parts.every(p => r.search.some(w => w.startsWith(p)))) res.push(r);
+      if (res.length > 400) break;
+    }
+    res.sort((a, b) => (isDone(a.id) - isDone(b.id)) || a.fioRaw.localeCompare(b.fioRaw, 'ru'));
+    return res.slice(0, limit || 50);
+  }
+
+  const api = { canon, splitWords, stem, lev, Base, tokenize, evidence, mergeEvidence, rank, decide, search, fieldScores, titleCase, T };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Engine = api;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* Обработка кадра: поиск текста в рамке, оценка размера букв и бликов, подготовка изображения для распознавания.
+   Работает с типизированными массивами — одинаково в браузере и в Node (для тестов). */
+(function (root) {
+  'use strict';
+
+  const buf = {};
+  function need(name, Type, n) {
+    if (!buf[name] || buf[name].length < n) buf[name] = new Type(n);
+    return buf[name];
+  }
+
+  // Яркость (с небольшим уклоном к минимальному каналу — цветные чернила становятся темнее)
+  function toGray(rgba, n, out) {
+    for (let i = 0, j = 0; i < n; i++, j += 4) {
+      const r = rgba[j], g = rgba[j + 1], b = rgba[j + 2];
+      let m = r; if (g < m) m = g; if (b < m) m = b;
+      out[i] = (0.6 * (0.299 * r + 0.587 * g + 0.114 * b) + 0.4 * m) | 0;
+    }
+    return out;
+  }
+
+  function integrals(g, w, h) {
+    const W = w + 1, n = W * (h + 1);
+    const S = need('S', Float64Array, n), S2 = need('S2', Float64Array, n);
+    for (let x = 0; x <= w; x++) { S[x] = 0; S2[x] = 0; }
+    for (let y = 0; y < h; y++) {
+      let rs = 0, rs2 = 0; const row = y * w, o = (y + 1) * W, op = y * W;
+      S[o] = 0; S2[o] = 0;
+      for (let x = 0; x < w; x++) {
+        const v = g[row + x]; rs += v; rs2 += v * v;
+        S[o + x + 1] = S[op + x + 1] + rs; S2[o + x + 1] = S2[op + x + 1] + rs2;
+      }
+    }
+    return { S, S2, W };
+  }
+
+  // Бинаризация Сауволы: устойчива к неравномерному свету и бликам. out[i] = 1 — «чернила».
+  function sauvola(g, w, h, r, k, out, minC) {
+    const { S, S2, W } = integrals(g, w, h);
+    const R = 128, C = minC || 0;
+    for (let y = 0; y < h; y++) {
+      const y0 = y - r < 0 ? 0 : y - r, y1 = y + r + 1 > h ? h : y + r + 1;
+      const a = y1 * W, b = y0 * W;
+      for (let x = 0; x < w; x++) {
+        const x0 = x - r < 0 ? 0 : x - r, x1 = x + r + 1 > w ? w : x + r + 1;
+        const n = (y1 - y0) * (x1 - x0);
+        const sum = S[a + x1] - S[b + x1] - S[a + x0] + S[b + x0];
+        const sum2 = S2[a + x1] - S2[b + x1] - S2[a + x0] + S2[b + x0];
+        const m = sum / n; let v = sum2 / n - m * m; if (v < 0) v = 0;
+        const t = m * (1 + k * (Math.sqrt(v) / R - 1));
+        const p = g[y * w + x];
+        out[y * w + x] = p < t && m - p > C + 0.05 * m ? 1 : 0;
+      }
+    }
+    return out;
+  }
+
+  // Связные области «чернил» (8-связность) -> габариты
+  function components(bin, w, h) {
+    const n = w * h;
+    const lab = need('lab', Int32Array, n);
+    const par = need('par', Int32Array, (n >> 1) + 2);
+    let next = 1;
+    const find = x => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        if (!bin[i]) { lab[i] = 0; continue; }
+        const a0 = x > 0 ? lab[i - 1] : 0;
+        const a1 = y > 0 && x > 0 ? lab[i - w - 1] : 0;
+        const a2 = y > 0 ? lab[i - w] : 0;
+        const a3 = y > 0 && x < w - 1 ? lab[i - w + 1] : 0;
+        if (!a0 && !a1 && !a2 && !a3) {
+          if (next >= par.length - 1) { lab[i] = 0; continue; }
+          par[next] = next; lab[i] = next++; continue;
+        }
+        let m = 0x7fffffff;
+        const r0 = a0 ? find(a0) : 0, r1 = a1 ? find(a1) : 0, r2 = a2 ? find(a2) : 0, r3 = a3 ? find(a3) : 0;
+        if (r0 && r0 < m) m = r0; if (r1 && r1 < m) m = r1; if (r2 && r2 < m) m = r2; if (r3 && r3 < m) m = r3;
+        if (r0 && r0 !== m) par[r0] = m; if (r1 && r1 !== m) par[r1] = m;
+        if (r2 && r2 !== m) par[r2] = m; if (r3 && r3 !== m) par[r3] = m;
+        lab[i] = m;
+      }
+    }
+    const minx = need('minx', Int32Array, next), maxx = need('maxx', Int32Array, next);
+    const miny = need('miny', Int32Array, next), maxy = need('maxy', Int32Array, next), area = need('area', Int32Array, next);
+    for (let l = 0; l < next; l++) { minx[l] = 1e9; maxx[l] = -1; miny[l] = 1e9; maxy[l] = -1; area[l] = 0; }
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x; if (!lab[i]) continue;
+        const r = find(lab[i]);
+        if (x < minx[r]) minx[r] = x; if (x > maxx[r]) maxx[r] = x;
+        if (y < miny[r]) miny[r] = y; if (y > maxy[r]) maxy[r] = y;
+        area[r]++;
+      }
+    }
+    const out = [];
+    for (let l = 1; l < next; l++) {
+      if (!area[l]) continue;
+      out.push({ x0: minx[l], x1: maxx[l], y0: miny[l], y1: maxy[l], w: maxx[l] - minx[l] + 1, h: maxy[l] - miny[l] + 1, a: area[l] });
+    }
+    return out;
+  }
+
+  const median = a => { if (!a.length) return 0; const s = a.slice().sort((x, y) => x - y); return s[s.length >> 1]; };
+
+  /* Анализ кадра (уменьшенная копия области рамки):
+     есть ли текст, где он, какого размера буквы, много ли бликов. */
+  function analyze(gray, w, h, opt) {
+    opt = opt || {};
+    const bin = need('abin', Uint8Array, w * h);
+    // минимальный контраст отсекает зерно фона (тёмный стол, ткань)
+    sauvola(gray, w, h, Math.max(8, Math.round(Math.min(w, h) / 16)), opt.k || 0.2, bin, 10);
+    const comps = components(bin, w, h);
+    let cand = comps.filter(c => {
+      if (c.h < 4 || c.h > h * 0.25 || c.w > c.h * 15 || c.a < 5) return false; // буквы и слипшиеся слова
+      const fill = c.a / (c.w * c.h);
+      if (fill < 0.08) return false;
+      if (fill > 0.9 && c.w > 3 && c.h > 3) return false;  // сплошные пятна
+      return true;
+    });
+    if (cand.length < 5) return { ok: false, n: cand.length, reason: 'empty' };
+    // «буква» — область, у которой рядом в строке есть соседка похожей высоты
+    const CS = 24, hash = new Map();
+    cand.forEach((c, i) => { const k = ((c.y0 + c.y1) >> 1) / CS | 0; const kx = ((c.x0 + c.x1) >> 1) / CS | 0; const key = k * 4096 + kx; let l = hash.get(key); if (!l) hash.set(key, l = []); l.push(i); });
+    const texty = [];
+    cand.forEach((c, i) => {
+      const cy = (c.y0 + c.y1) / 2, ky = cy / CS | 0, kx = ((c.x0 + c.x1) >> 1) / CS | 0;
+      const reach = Math.max(1, Math.ceil(c.h * 2 / CS));
+      let ok = false;
+      for (let dy = -1; dy <= 1 && !ok; dy++) for (let dx = -reach; dx <= reach && !ok; dx++) {
+        const l = hash.get((ky + dy) * 4096 + kx + dx); if (!l) continue;
+        for (const j of l) {
+          if (j === i) continue; const o = cand[j];
+          const r = o.h / c.h; if (r < 0.6 || r > 1.65) continue;
+          if (Math.abs((o.y0 + o.y1) / 2 - cy) > c.h * 0.6) continue;
+          const gap = o.x0 > c.x1 ? o.x0 - c.x1 : c.x0 > o.x1 ? c.x0 - o.x1 : 0;
+          if (gap > c.h * 1.6) continue;
+          ok = true; break;
+        }
+      }
+      if (ok) texty.push(c);
+    });
+    let chars = texty;
+    if (texty.length < 6) return { ok: false, n: texty.length, reason: 'sparse' };
+    const mh = median(chars.map(c => c.h));
+    chars = chars.filter(c => c.h >= mh * 0.45 && c.h <= mh * 2.2);
+    // Группировка по сетке: буквы, стоящие рядом в строку, образуют «блок текста»
+    const cell = Math.max(3, Math.round(mh * 1.3));
+    const gw = Math.ceil(w / cell), gh = Math.ceil(h / cell), gn = gw * gh;
+    const cnt = need('gcnt', Int32Array, gn), mark = need('gmark', Int32Array, gn);
+    cnt.fill(0, 0, gn); mark.fill(0, 0, gn);
+    const cellOf = c => Math.min(gh - 1, ((c.y0 + c.y1) >> 1) / cell | 0) * gw + Math.min(gw - 1, ((c.x0 + c.x1) >> 1) / cell | 0);
+    for (const c of chars) cnt[cellOf(c)]++;
+    for (let cy = 0; cy < gh; cy++) for (let cx = 0; cx < gw; cx++) {
+      if (!cnt[cy * gw + cx]) continue;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -3; dx <= 3; dx++) {
+        const yy = cy + dy, xx = cx + dx; if (yy < 0 || xx < 0 || yy >= gh || xx >= gw) continue;
+        mark[yy * gw + xx] = -1;
+      }
+    }
+    // Разметка связных групп клеток
+    const sums = [0]; let lid = 0; const stack = [];
+    for (let i = 0; i < gn; i++) {
+      if (mark[i] !== -1) continue;
+      lid++; let s = 0; stack.push(i); mark[i] = lid;
+      while (stack.length) {
+        const j = stack.pop(); s += cnt[j];
+        const x = j % gw, y = (j / gw) | 0;
+        const nb = [x > 0 ? j - 1 : -1, x < gw - 1 ? j + 1 : -1, y > 0 ? j - gw : -1, y < gh - 1 ? j + gw : -1];
+        for (const q of nb) if (q >= 0 && mark[q] === -1) { mark[q] = lid; stack.push(q); }
+      }
+      sums.push(s);
+    }
+    let best = 0; for (let i = 1; i < sums.length; i++) if (sums[i] > best) best = sums[i];
+    const keep = new Set(); for (let i = 1; i < sums.length; i++) if (sums[i] >= Math.max(5, best * 0.15)) keep.add(i);
+    let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1, n = 0;
+    for (const c of chars) {
+      if (!keep.has(mark[cellOf(c)])) continue;
+      n++; if (c.x0 < x0) x0 = c.x0; if (c.y0 < y0) y0 = c.y0; if (c.x1 > x1) x1 = c.x1; if (c.y1 > y1) y1 = c.y1;
+    }
+    if (n < 6) return { ok: false, n, reason: 'sparse', mh };
+    // Доля засвеченных пикселей внутри текста — признак блика
+    let sat = 0, tot = 0;
+    for (let y = y0; y <= y1; y += 2) for (let x = x0; x <= x1; x += 2) { tot++; if (gray[y * w + x] >= 248) sat++; }
+    return { ok: true, n, mh, bbox: { x0, y0, x1, y1 }, glare: tot ? sat / tot : 0 };
+  }
+
+  // Подготовка изображения для распознавания (gray -> out, 0..255)
+  function prepare(gray, w, h, variant, opt) {
+    opt = opt || {};
+    const out = new Uint8ClampedArray(w * h);
+    if (variant === 'bin') {
+      const bin = need('pbin', Uint8Array, w * h);
+      sauvola(gray, w, h, Math.max(10, Math.round((opt.charH || 30) * 0.9)), opt.k || 0.2, bin);
+      for (let i = 0; i < w * h; i++) out[i] = bin[i] ? 0 : 255;
+      return out;
+    }
+    if (variant === 'mean') {
+      // адаптивный порог по локальному среднему (как в прежней версии)
+      const { S, W } = integrals(gray, w, h);
+      const r = Math.max(8, Math.round((opt.charH || 30) * 2)), K = opt.K || 12;
+      for (let y = 0; y < h; y++) {
+        const y0 = y - r < 0 ? 0 : y - r, y1 = y + r + 1 > h ? h : y + r + 1;
+        for (let x = 0; x < w; x++) {
+          const x0 = x - r < 0 ? 0 : x - r, x1 = x + r + 1 > w ? w : x + r + 1;
+          const m = (S[y1 * W + x1] - S[y0 * W + x1] - S[y1 * W + x0] + S[y0 * W + x0]) / ((y1 - y0) * (x1 - x0));
+          out[y * w + x] = gray[y * w + x] < m - K ? 0 : 255;
+        }
+      }
+      return out;
+    }
+    if (variant === 'gray') {
+      // растяжение контраста по процентилям + нерезкое маскирование
+      const hist = new Int32Array(256); const n = w * h;
+      for (let i = 0; i < n; i++) hist[gray[i]]++;
+      let lo = 0, hi = 255, acc = 0;
+      for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= n * 0.01) { lo = v; break; } }
+      acc = 0; for (let v = 255; v >= 0; v--) { acc += hist[v]; if (acc >= n * 0.02) { hi = v; break; } }
+      if (hi - lo < 20) hi = lo + 20;
+      const { S, W } = integrals(gray, w, h);
+      const r = 2;
+      for (let y = 0; y < h; y++) {
+        const y0 = y - r < 0 ? 0 : y - r, y1 = y + r + 1 > h ? h : y + r + 1;
+        for (let x = 0; x < w; x++) {
+          const x0 = x - r < 0 ? 0 : x - r, x1 = x + r + 1 > w ? w : x + r + 1;
+          const m = (S[y1 * W + x1] - S[y0 * W + x1] - S[y1 * W + x0] + S[y0 * W + x0]) / ((y1 - y0) * (x1 - x0));
+          const v = gray[y * w + x]; const sh = v + 1.2 * (v - m);
+          out[y * w + x] = ((sh - lo) * 255) / (hi - lo);
+        }
+      }
+      return out;
+    }
+    for (let i = 0; i < w * h; i++) out[i] = gray[i];
+    return out;
+  }
+
+  const api = { toGray, sauvola, components, analyze, prepare };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.ImgProc = api;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+(function () {
+  'use strict';
+  // Снимок собственного HTML: из него собирается новый защищённый файл (смена пароля, новая база)
+  const SELF_HTML = '<!doctype html>\n' + document.documentElement.outerHTML;
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } },
+    raw(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    del(k) { try { localStorage.removeItem(k); } catch (e) { /* нет доступа */ } },
+  };
+  const nf = n => Number(n).toLocaleString('ru-RU');
+  const hhmm = t => new Date(t).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  const plural = (n, a, b, c) => { const m = n % 10, h = n % 100; return m === 1 && h !== 11 ? a : m >= 2 && m <= 4 && (h < 10 || h >= 20) ? b : c; };
+  const WL = 'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя0123456789 .,-/№';
+  const SCAN_MS = 10000;
+  const CHAR_H = 18; // высота букв (px), к которой приводим текст перед распознаванием
+
+  // ---------- Настройки ----------
+  const SET = Object.assign({ mode: 'space', proc: 'auto', K: 14, showProc: true, showText: true, voice: '', pitch: 0.8, rate: 1, vol: 1, word: true, camId: '', camWasOn: false, full: false, lockMin: 15 },
+    store.get('konv_settings_v2', {}));
+  if (!SET.voice) SET.voice = store.raw('konv_voice') || '';
+  const saveSet = () => store.set('konv_settings_v2', SET);
+
+  // ---------- Шифрование базы (AES-256-GCM, ключ из пароля через PBKDF2-SHA256) ----------
+  const b64d = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  const b64e = u => { let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); };
+  async function deriveKey(pw, salt, iter) {
+    const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: iter }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  }
+  const pipeBytes = (bytes, stream) => new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer().then(b => new Uint8Array(b));
+  async function openVault(pw) {
+    const v = JSON.parse($('vault').textContent);
+    const key = await deriveKey(pw, b64d(v.salt), v.iter);
+    const plain = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64d(v.iv) }, key, b64d(v.ct))); // неверный пароль -> исключение
+    return JSON.parse(new TextDecoder().decode(await pipeBytes(plain, new DecompressionStream('gzip'))));
+  }
+  async function sealVault(data, pw) {
+    const iter = 600000, salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+    const gz = await pipeBytes(new TextEncoder().encode(JSON.stringify(data)), new CompressionStream('gzip'));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await deriveKey(pw, salt, iter), gz));
+    return { v: 1, kdf: 'PBKDF2-SHA256', iter, salt: b64e(salt), iv: b64e(iv), ct: b64e(ct) };
+  }
+  const hash = s => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(36); };
+
+  // ---------- Встроенные библиотеки (хранятся в файле в base64, запускаются без сети) ----------
+  const libText = id => new TextDecoder().decode(b64d($(id).textContent.trim()));
+  const libUrl = (id, prefix) => URL.createObjectURL(new Blob([prefix || '', libText(id)], { type: 'text/javascript' }));
+  const libLoaded = {};
+  function loadLib(id) {
+    return libLoaded[id] || (libLoaded[id] = new Promise((res, rej) => {
+      const sc = document.createElement('script'); sc.src = libUrl(id); sc.onload = res; sc.onerror = () => rej(new Error('не загрузился модуль ' + id));
+      document.head.appendChild(sc);
+    }));
+  }
+  let WORKER_URL = '';
+  function ocrWorkerUrl() {
+    if (WORKER_URL) return WORKER_URL;
+    // В рабочем потоке распознавания: словарь отдаётся из файла, ядро встроено, сеть не используется
+    const prelude = 'const __L=' + JSON.stringify($('lib-rus').textContent.trim()) + ';' +
+      'self.fetch=(function(f){return function(u){if(String(u).indexOf("rus.traineddata")>=0){var b=atob(__L),a=new Uint8Array(b.length);for(var i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return Promise.resolve(new Response(a));}return Promise.reject(new Error("сеть отключена"));};})(self.fetch);\n';
+    WORKER_URL = URL.createObjectURL(new Blob([prelude, libText('lib-core'), '\n', libText('lib-worker')], { type: 'text/javascript' }));
+    return WORKER_URL;
+  }
+  const simdOk = () => { try { return WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11])); } catch (e) { return false; } };
+
+  // ---------- База и прогресс ----------
+  let BASE_DATA = null;
+  let BASE = null, KEY = '', DISTRICTS = [], TOTAL = {}, BASE_CUSTOM = null;
+  let DONE = new Set(), HIST = [];
+  const recOf = id => BASE.recs[id];
+  const nameOf = r => SET.full ? r.fio : r.fioShort;
+  const addrOf = r => SET.full ? [r.addr, r.idxRaw].filter(Boolean).join(', ') : r.addrShort;
+
+  function useBase(data, custom) {
+    BASE = new Engine.Base(data.rows, data.districts);
+    // ключ прогресса — обезличенный отпечаток базы; отметки прежней версии (ключ с ФИО) переносятся
+    KEY = 'konv_done_h' + hash(JSON.stringify(data.rows));
+    const oldKey = 'konv_done_' + BASE.recs.length + '_' + (BASE.recs[0] ? BASE.recs[0].fioRaw : '');
+    if (store.raw(oldKey) != null) {
+      if (store.raw(KEY) == null) { store.set(KEY, store.get(oldKey, [])); store.set(KEY + '_hist', store.get(oldKey + '_hist', [])); }
+      store.del(oldKey); store.del(oldKey + '_hist');
+    }
+    BASE_CUSTOM = custom || null;
+    TOTAL = {}; BASE.recs.forEach(r => { TOTAL[r.r] = (TOTAL[r.r] || 0) + 1; });
+    DISTRICTS = Object.keys(TOTAL).sort((a, b) => a.localeCompare(b, 'ru'));
+    restoreProgress();
+    $('baseInfo').textContent = `${nf(BASE.recs.length)} ${plural(BASE.recs.length, 'адресат', 'адресата', 'адресатов')} в базе, ${DISTRICTS.length} ${plural(DISTRICTS.length, 'стопка', 'стопки', 'стопок')}`;
+    $('baseNote').textContent = custom ? `Загружена база из файла «${custom.name}»: ${nf(BASE.recs.length)} записей. Хранится только до закрытия страницы.` : `Встроенная база: ${data.source || 'конверты'}, ${nf(BASE.recs.length)} записей.`;
+    $('baseReset').hidden = !custom;
+    buildCabinet(); renderProgress(); renderLedger(); renderList(); resetScanState();
+  }
+  function restoreProgress() {
+    DONE = new Set(); HIST = [];
+    const a = store.get(KEY, []); if (Array.isArray(a)) a.forEach(i => { if (BASE.recs[i]) DONE.add(i); });
+    const h = store.get(KEY + '_hist', []); if (Array.isArray(h)) HIST = h.filter(e => e && BASE.recs[e.id]);
+  }
+  function saveProgress() {
+    const ok = store.set(KEY, [...DONE]);
+    store.set(KEY + '_hist', HIST.slice(0, 800));
+    if (!ok) toast('Не удалось сохранить отметку в браузере. Сохраните прогресс в файл в настройках.');
+  }
+  const doneIn = d => { let n = 0; DONE.forEach(id => { if (BASE.recs[id].r === d) n++; }); return n; };
+
+  // ---------- Сортировочный шкаф (стопки) ----------
+  function buildCabinet() {
+    const cab = $('cabinet'); cab.innerHTML = '';
+    DISTRICTS.forEach(d => {
+      const b = document.createElement('button');
+      b.className = 'cell'; b.dataset.d = d; b.title = d + ' — открыть список';
+      b.innerHTML = `<span class="c-name">${esc(d)}</span><span class="c-cnt num"></span><i class="c-bar"></i>`;
+      b.onclick = () => openReport(d);
+      cab.appendChild(b);
+    });
+    const fill = document.createElement('button');
+    fill.className = 'cell filler'; fill.id = 'cabFill';
+    fill.innerHTML = '<span class="c-name">Все районы</span><span class="c-cnt">открыть отчёт</span>';
+    fill.onclick = () => openReport();
+    cab.appendChild(fill);
+    DISTRICTS.forEach(updateCell); layoutCabinet();
+  }
+  // заполнитель занимает пустые места в последнем ряду, чтобы шкаф был ровным
+  function layoutCabinet() {
+    const f = $('cabFill'); if (!f) return;
+    const cols = getComputedStyle($('cabinet')).gridTemplateColumns.split(' ').filter(Boolean).length || 1;
+    const rest = DISTRICTS.length % cols;
+    f.hidden = rest === 0; f.style.gridColumn = rest ? `span ${cols - rest}` : '';
+  }
+  window.addEventListener('resize', layoutCabinet);
+  function updateCell(d) {
+    const c = [...$('cabinet').children].find(x => x.dataset.d === d); if (!c) return;
+    const n = doneIn(d), t = TOTAL[d];
+    c.title = `${d}: отмечено ${nf(n)} из ${nf(t)} — открыть список`;
+    c.querySelector('.c-cnt').textContent = `${nf(n)} из ${nf(t)}`;
+    c.querySelector('.c-bar').style.width = (t ? 100 * n / t : 0) + '%';
+    c.classList.toggle('full', n === t && t > 0);
+  }
+  function flashCell(d, dup) {
+    const c = [...$('cabinet').children].find(x => x.dataset.d === d); if (!c) return;
+    c.classList.remove('hit', 'dup'); void c.offsetWidth; c.classList.add('hit'); if (dup) c.classList.add('dup');
+  }
+  function renderProgress() {
+    const n = DONE.size, t = BASE.recs.length;
+    $('pDone').textContent = nf(n); $('pTotal').textContent = nf(t);
+    $('pPct').textContent = (t ? Math.floor(100 * n / t) : 0) + ' %';
+    $('pBar').style.width = (t ? 100 * n / t : 0) + '%';
+  }
+
+  // ---------- Журнал ----------
+  const SRC = { camera: '', manual: 'вручную', photo: 'по фото', report: 'из отчёта' };
+  function renderLedger() {
+    const ol = $('ledger');
+    const today = new Date().toDateString();
+    const todayN = HIST.filter(e => !e.undone && !e.dup && new Date(e.t).toDateString() === today).length;
+    $('ledgerCount').textContent = todayN ? `сегодня ${nf(todayN)}` : '';
+    if (!HIST.length) {
+      ol.innerHTML = `<li class="empty" style="display:block;border:0">Здесь появятся последние отсканированные конверты.${DONE.size ? ` Ранее отмечено: ${nf(DONE.size)}.` : ''}</li>`;
+      return;
+    }
+    ol.innerHTML = HIST.slice(0, 120).map((e, i) => {
+      const r = recOf(e.id);
+      const tag = e.undone ? 'отменено' : e.dup ? 'повтор' : SRC[e.src] || '';
+      return `<li class="${e.undone ? 'undone' : ''}" data-i="${i}">
+        <span class="lg-t num">${hhmm(e.t)}</span>
+        <span><span class="lg-d">${esc(r.r)}</span>${tag ? `<span class="lg-tag">${tag}</span>` : ''}
+        <span class="lg-n" style="display:block" title="${esc(nameOf(r) + ', ' + addrOf(r))}">${esc(r.fioShort)}</span></span>
+        ${!e.undone && !e.dup ? `<button class="lg-undo" data-undo="${i}" title="Снять отметку">Отменить</button>` : ''}
+      </li>`;
+    }).join('');
+  }
+  $('ledger').addEventListener('click', e => {
+    const b = e.target.closest('[data-undo]'); if (b) { undo(HIST[+b.dataset.undo]); return; }
+    const li = e.target.closest('li[data-i]'); if (li) { const h = HIST[+li.dataset.i]; showVerdict(recOf(h.id), 'view', { t: h.t, entry: h }); }
+  });
+
+  function undo(entry) {
+    if (!entry || entry.undone) return;
+    entry.undone = 1;
+    if (!entry.dup && !HIST.some(e => e !== entry && e.id === entry.id && !e.undone && !e.dup)) DONE.delete(entry.id);
+    saveProgress();
+    const r = recOf(entry.id);
+    renderProgress(); updateCell(r.r); renderLedger(); renderList();
+    if ($('verdict').dataset.id === String(r.id)) setVerdictState('idle', 'Отметка снята');
+    toast(`Отметка снята: ${r.fioShort}, ${r.r}`);
+  }
+  $('btnUndo').onclick = () => undo(HIST.find(e => !e.undone && !e.dup));
+
+  // ---------- Голос ----------
+  let VOICES = [];
+  const MALE = /dmitr|дмитр|pavel|павел|maxim|максим|yuri|юри|artem|артём|artyom|filipp|ermil|nikolai|никола|svetlogor|male|муж/i;
+  function loadVoices() {
+    if (!('speechSynthesis' in window)) { $('voiceNote').textContent = 'Этот браузер не умеет озвучивать текст.'; return; }
+    const all = speechSynthesis.getVoices().filter(v => /^ru/i.test(v.lang));
+    if (!all.length) { $('voiceSel').innerHTML = '<option value="">Русские голоса не найдены</option>'; return; }
+    VOICES = all.sort((a, b) => (b.localService - a.localService) || (MALE.test(b.name) - MALE.test(a.name)));
+    $('voiceSel').innerHTML = VOICES.map((v, i) => `<option value="${i}">${esc(v.name)}${MALE.test(v.name) ? ' — мужской' : ''}</option>`).join('');
+    let i = VOICES.findIndex(v => v.name === SET.voice); if (i < 0) i = 0;
+    $('voiceSel').value = String(i);
+    $('voiceNote').textContent = VOICES.some(v => MALE.test(v.name)) ? '' :
+      'Мужской русский голос на этом компьютере не найден. Низкий тембр даёт уменьшенная высота. Онлайн-голоса не используются: приложение работает без интернета.';
+  }
+  if ('speechSynthesis' in window) { loadVoices(); speechSynthesis.addEventListener('voiceschanged', loadVoices); }
+  function say(text) {
+    if (!('speechSynthesis' in window) || !SET.vol) return;
+    try {
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text); u.lang = 'ru-RU';
+      const v = VOICES[+$('voiceSel').value]; if (v) u.voice = v;
+      u.pitch = SET.pitch; u.rate = SET.rate; u.volume = SET.vol;
+      speechSynthesis.speak(u);
+    } catch (e) { /* озвучка недоступна */ }
+  }
+  const phrase = d => (/комитет/i.test(d) || !SET.word || /район/i.test(d)) ? d : d + ' район';
+
+  // ---------- Вердикт ----------
+  const EV_FIELDS = [['fam', 'Фамилия', 0.7], ['im', 'Имя', 0.7], ['ot', 'Отчество', 0.7], ['st', 'Улица', 0.7], ['house', 'Дом', 1], ['apt', 'Кв.', 1], ['idx', 'Индекс', 1]];
+  function evidenceHtml(m) {
+    if (!m) return '';
+    return EV_FIELDS.filter(([k]) => !(k === 'apt' && !m.rec.apt) && !(k === 'house' && !m.rec.house) && !(k === 'idx' && !m.rec.idx) && !(k === 'st' && !m.rec.street.length) && !(k === 'ot' && !m.rec.ot))
+      .map(([k, label, th]) => `<li class="${m.q[k] >= th ? 'y' : ''}">${label}</li>`).join('');
+  }
+  function setVerdictState(s, text) {
+    const v = $('verdict'); v.dataset.s = s; $('vState').textContent = text;
+    if (s !== 'ok' && s !== 'dup') $('vMark').innerHTML = '';
+    if (s === 'idle') { v.dataset.id = ''; $('vDistrict').textContent = '—'; $('vName').textContent = ''; $('vAddr').textContent = ''; $('vEv').innerHTML = ''; }
+  }
+  // Календарный штемпель: кольцевая надпись, в центре время, ниже дата
+  let pmN = 0;
+  function postmark(ring, mid, sub) {
+    const id = 'pm' + (++pmN);
+    return `<svg viewBox="0 0 120 120"><defs><path id="${id}" d="M60,60 m-43,0 a43,43 0 1,1 86,0 a43,43 0 1,1 -86,0"/></defs>
+      <circle cx="60" cy="60" r="56" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="60" cy="60" r="33" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text class="pm-ring"><textPath href="#${id}" textLength="268" lengthAdjust="spacingAndGlyphs">${esc(ring)}</textPath></text>
+      <text class="pm-mid" x="60" y="63" text-anchor="middle">${esc(mid)}</text><text class="pm-sub" x="60" y="78" text-anchor="middle">${esc(sub)}</text></svg>`;
+  }
+  function showVerdict(rec, kind, extra) {
+    extra = extra || {};
+    const v = $('verdict');
+    const state = { ok: 'ok', dup: 'dup', view: DONE.has(rec.id) ? 'ok' : 'idle', manual: 'ok' }[kind] || kind;
+    v.dataset.s = state; v.dataset.id = String(rec.id);
+    let label;
+    if (kind === 'ok') label = `Отмечен в ${hhmm(Date.now())}`;
+    else if (kind === 'manual') label = `Отмечен вручную в ${hhmm(Date.now())}`;
+    else if (kind === 'dup') { const prev = HIST.find(e => e.id === rec.id && !e.dup && !e.undone && e !== extra.entry); label = prev ? `Уже отмечен ранее, в ${hhmm(prev.t)}` : 'Уже отмечен ранее'; }
+    else label = DONE.has(rec.id) ? 'Отмечен' : 'Не отмечен';
+    $('vState').textContent = label;
+    const dEl = $('vDistrict'); dEl.textContent = rec.r; dEl.title = rec.r;
+    if (kind !== 'view') { dEl.classList.remove('stamp'); void dEl.offsetWidth; dEl.classList.add('stamp'); }
+    fitDistrict();
+    $('vName').textContent = nameOf(rec);
+    $('vAddr').textContent = addrOf(rec);
+    const m = $('vMark');
+    if (kind === 'ok' || kind === 'manual' || kind === 'dup') {
+      m.innerHTML = postmark(kind === 'dup' ? 'ПОВТОР ★ УЖЕ ОТМЕЧЕН ★ ПОВТОР ★' : kind === 'manual' ? 'ОТМЕЧЕНО ВРУЧНУЮ ★ СОРТИРОВКА ★' : 'ОТМЕЧЕНО ★ СОРТИРОВКА КОНВЕРТОВ ★', hhmm(Date.now()), new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }));
+      m.classList.remove('hit'); void m.offsetWidth; m.classList.add('hit');
+    } else m.innerHTML = '';
+    $('vEv').innerHTML = extra.match ? evidenceHtml(extra.match) : '';
+  }
+  function fitDistrict() {
+    const el = $('vDistrict'); el.style.fontSize = '';
+    let size = parseFloat(getComputedStyle(el).fontSize), guard = 0;
+    while (el.scrollWidth > el.clientWidth + 1 && size > 28 && guard++ < 30) { size -= 3; el.style.fontSize = size + 'px'; }
+  }
+  window.addEventListener('resize', () => { if ($('vDistrict').textContent !== '—') fitDistrict(); });
+  if (document.fonts) document.fonts.addEventListener('loadingdone', () => { if ($('vDistrict').textContent !== '—') fitDistrict(); });
+
+  // ---------- Отметка ----------
+  function commit(rec, src, match) {
+    const dup = DONE.has(rec.id);
+    if (!dup) DONE.add(rec.id);
+    const entry = { id: rec.id, t: Date.now(), src, dup: dup ? 1 : 0 };
+    HIST.unshift(entry);
+    saveProgress();
+    showVerdict(rec, dup ? 'dup' : (src === 'camera' || src === 'photo' ? 'ok' : 'manual'), { match, entry });
+    say(dup ? phrase(rec.r) + '. Уже отмечен' : phrase(rec.r));
+    flashCell(rec.r, dup); updateCell(rec.r); renderProgress(); renderLedger();
+    const f = $('finder'); f.classList.add('hit'); setTimeout(() => f.classList.remove('hit'), 900);
+    endScan(rec);
+    if (src !== 'report') { $('q').value = ''; LIST = { mode: 'none', items: [], sel: 0 }; renderList(); }
+  }
+
+  // ---------- Список: варианты распознавания и ручной поиск ----------
+  let LIST = { mode: 'none', items: [], sel: 0 };
+  function renderList() {
+    const ul = $('list'), cap = $('listCap');
+    if (LIST.mode === 'none' || !LIST.items.length) {
+      ul.innerHTML = '';
+      if (LIST.mode === 'search') { cap.textContent = 'Никого не нашлось. Проверьте написание или введите улицу.'; return; }
+      cap.textContent = '';
+      ul.innerHTML = `<li class="empty" style="display:block;border:0;cursor:default"><p>Если конверт прочитан не полностью, здесь появятся похожие адресаты — выберите нужного.</p><p>Найти вручную: просто начните печатать фамилию.</p></li>`;
+      return;
+    }
+    cap.innerHTML = LIST.mode === 'search' ? `<span>Найдено: ${nf(LIST.total)}</span><span>Enter — отметить выбранного</span>` : `<span>${esc(LIST.title || 'Похожие адресаты')}</span><span>нажмите, чтобы отметить</span>`;
+    ul.innerHTML = LIST.items.map((r, i) => `<li role="option" data-i="${i}" class="${i === LIST.sel ? 'sel' : ''}" aria-selected="${i === LIST.sel}">
+      <span class="l-name">${esc(nameOf(r))}</span><span class="l-d">${esc(r.r)}</span>
+      <span class="l-addr">${DONE.has(r.id) ? '<span class="l-mark">✓ отмечен</span> · ' : ''}${esc(addrOf(r))}</span></li>`).join('');
+    const sel = ul.children[LIST.sel]; if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: 'nearest' });
+  }
+  $('list').addEventListener('click', e => {
+    const li = e.target.closest('li[data-i]'); if (!li) return;
+    const rec = LIST.items[+li.dataset.i]; if (rec) commit(rec, LIST.mode === 'search' ? 'manual' : 'manual');
+  });
+  function showCandidates(ranked, title) {
+    if ($('q').value.trim()) return; // пользователь ищет вручную — не мешаем
+    const seen = new Set(), items = [];
+    for (const m of ranked) { if (seen.has(m.rec.id)) continue; seen.add(m.rec.id); items.push(m.rec); if (items.length >= 8) break; }
+    LIST = { mode: items.length ? 'cand' : 'none', items, sel: 0, title };
+    renderList();
+  }
+  function runSearch() {
+    const q = $('q').value.trim();
+    if (!q) { LIST = { mode: 'none', items: [], sel: 0 }; renderList(); return; }
+    const res = Engine.search(BASE, q, id => DONE.has(id), 200);
+    LIST = { mode: 'search', items: res.slice(0, 60), total: res.length, sel: 0 };
+    renderList();
+  }
+  $('q').addEventListener('input', runSearch);
+  $('q').addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (!LIST.items.length) return;
+      e.preventDefault();
+      LIST.sel = (LIST.sel + (e.key === 'ArrowDown' ? 1 : -1) + LIST.items.length) % LIST.items.length; renderList();
+    } else if (e.key === 'Enter') {
+      e.preventDefault(); const r = LIST.items[LIST.sel]; if (r) { commit(r, 'manual'); $('q').blur(); }
+    } else if (e.key === 'Escape') {
+      e.preventDefault(); $('q').value = ''; runSearch(); $('q').blur();
+    }
+  });
+
+  // ---------- Камера ----------
+  const video = $('video'), finder = $('finder');
+  let STREAM = null, TRACK = null;
+  function camUi(on, text) {
+    $('fOff').hidden = on; $('fState').hidden = !on;
+    if (!on) { $('fOffText').textContent = text || 'Поднесите конверт адресом к камере. Сначала включите её.'; setFState('off', 'Камера выключена'); }
+    $('btnCam').title = on ? 'Выключить камеру' : 'Включить камеру';
+    $('btnCam').setAttribute('aria-label', $('btnCam').title);
+    $('btnCam').querySelector('use').setAttribute('href', on ? '#i-camoff' : '#i-cam');
+  }
+  async function startCamera() {
+    if (STREAM) return true;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { camUi(false, 'Этот браузер не даёт доступ к камере. Откройте файл в Chrome или Edge на компьютере.'); return false; }
+    const want = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+    try {
+      try { STREAM = await navigator.mediaDevices.getUserMedia({ audio: false, video: SET.camId ? { ...want, deviceId: { exact: SET.camId } } : want }); }
+      catch (e) { if (!SET.camId) throw e; SET.camId = ''; saveSet(); STREAM = await navigator.mediaDevices.getUserMedia({ audio: false, video: want }); }
+    } catch (e) {
+      STREAM = null;
+      const msg = e && e.name === 'NotAllowedError' ? 'Нет доступа к камере. Разрешите его: значок камеры в адресной строке браузера, затем «Включить камеру».'
+        : e && e.name === 'NotFoundError' ? 'Камера не найдена. Подключите веб-камеру или телефон в режиме веб-камеры.'
+        : e && e.name === 'NotReadableError' ? 'Камера занята другой программой (например, видеозвонком). Закройте её и попробуйте снова.'
+        : 'Не удалось включить камеру: ' + (e && e.message || e);
+      camUi(false, msg); return false;
+    }
+    video.srcObject = STREAM;
+    try { await video.play(); } catch (e) { /* автозапуск видео */ }
+    TRACK = STREAM.getVideoTracks()[0];
+    SET.camWasOn = true; saveSet();
+    camUi(true); applyCameraCaps(); listCameras();
+    setFState(OCR.ready ? 'ready' : 'load', OCR.ready ? readyText() : 'Загружаю распознавание…');
+    if (!LOOP) { LOOP = true; tick(); }
+    return true;
+  }
+  function stopCamera() {
+    disarm();
+    if (STREAM) STREAM.getTracks().forEach(t => t.stop());
+    STREAM = null; TRACK = null; video.srcObject = null; LOOP = false;
+    SET.camWasOn = false; saveSet();
+    clearOverlay(); $('fHint').hidden = true; $('seen').hidden = true;
+    camUi(false);
+  }
+  async function listCameras() {
+    try {
+      const devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+      const cur = TRACK && TRACK.getSettings ? TRACK.getSettings().deviceId : '';
+      $('camSel').innerHTML = devs.map((d, i) => `<option value="${esc(d.deviceId)}">${esc(d.label || 'Камера ' + (i + 1))}</option>`).join('') || '<option value="">По умолчанию</option>';
+      if (cur) $('camSel').value = cur;
+    } catch (e) { /* список камер недоступен */ }
+  }
+  function applyCameraCaps() {
+    let c = {}; try { c = TRACK.getCapabilities ? TRACK.getCapabilities() : {}; } catch (e) { /* нет данных */ }
+    const adv = {};
+    if (c.focusMode && c.focusMode.includes('continuous')) adv.focusMode = 'continuous';
+    if (Object.keys(adv).length) TRACK.applyConstraints({ advanced: [adv] }).catch(() => {});
+    const ex = $('exp');
+    if (c.exposureCompensation) {
+      ex.min = c.exposureCompensation.min; ex.max = c.exposureCompensation.max; ex.step = c.exposureCompensation.step || 0.1;
+      try { ex.value = TRACK.getSettings().exposureCompensation || 0; } catch (e) { ex.value = 0; }
+      $('expField').hidden = false;
+      ex.oninput = () => TRACK && TRACK.applyConstraints({ advanced: [{ exposureCompensation: +ex.value }] }).catch(() => {});
+    } else $('expField').hidden = true;
+  }
+  $('btnCamOn').onclick = () => startCamera();
+  $('btnCam').onclick = () => (STREAM ? stopCamera() : startCamera());
+  $('camSel').onchange = async () => { SET.camId = $('camSel').value; saveSet(); if (STREAM) { stopCamera(); await startCamera(); } };
+
+  function setFState(s, text) { const el = $('fState'); el.dataset.s = s; el.textContent = text; }
+  const readyText = () => SET.mode === 'space' ? 'Готов — нажмите пробел' : 'Ищу конверт в рамке';
+
+  // ---------- Распознавание текста (Tesseract) ----------
+  const OCR = { workers: [], busy: [], canv: [], ready: false, failed: false };
+  async function initOCR() {
+    if (!simdOk()) { OCR.failed = true; ocrFailed('Этот браузер слишком старый для распознавания. Откройте файл в свежем Chrome, Edge или Яндекс Браузере — поиск по фамилии работает и так.'); return; }
+    try { await loadLib('lib-tess'); } catch (e) { /* ниже сообщим */ }
+    if (typeof Tesseract === 'undefined') { OCR.failed = true; ocrFailed('Не запустился модуль распознавания. Обновите страницу — поиск по фамилии работает и без него.'); return; }
+    const n = Math.max(1, Math.min(3, Math.floor((navigator.hardwareConcurrency || 4) / 2)));
+    const params = { tessedit_pageseg_mode: '6', tessedit_char_whitelist: WL, tessedit_do_invert: '0', user_defined_dpi: '300', preserve_interword_spaces: '0' };
+    const make = async (first) => {
+      const local = { workerPath: ocrWorkerUrl(), workerBlobURL: false, corePath: 'embedded.js', langPath: 'embedded', gzip: true, cacheMethod: 'none' };
+      const w = await Tesseract.createWorker('rus', 1, first ? Object.assign(local, {
+        logger: m => { if (m.status && /load|init/i.test(m.status) && STREAM) setFState('load', 'Загружаю распознавание… ' + Math.round((m.progress || 0) * 100) + ' %'); },
+      }) : local);
+      await w.setParameters(params);
+      OCR.workers.push(w); OCR.busy.push(false); OCR.canv.push(document.createElement('canvas'));
+    };
+    try {
+      await make(true);
+      OCR.ready = true;
+      if (STREAM) setFState(SCAN.armed ? 'scan' : 'ready', SCAN.armed ? 'Сканирую…' : readyText());
+      for (let i = 1; i < n; i++) make(false).catch(() => {});
+    } catch (e) {
+      OCR.failed = true; ocrFailed('Не удалось запустить распознавание: ' + (e && e.message || e) + '. Поиск по фамилии работает.');
+    }
+  }
+  function ocrFailed(text) { setFState('off', 'Распознавание недоступно'); toast(text, 9000); }
+
+  // ---------- Сканирование ----------
+  const SCAN = { armed: false, session: 0, acc: null, accT: 0, frames: 0, until: 0, timer: 0, locked: false, lockedId: -1, lockOcrT: 0, goneT: 0, lastText: '', noText: 0, variant: 0 };
+  function resetScanState() { SCAN.session++; SCAN.acc = null; SCAN.frames = 0; SCAN.noText = 0; }
+  function arm() {
+    if (!STREAM) { startCamera().then(ok => { if (ok) arm(); }); return; }
+    if (OCR.failed) { toast('Распознавание недоступно. Найдите адресата по фамилии.'); return; }
+    if (!OCR.ready) { toast('Распознавание ещё загружается — подождите несколько секунд.'); return; }
+    resetScanState();
+    SCAN.armed = true; SCAN.until = performance.now() + SCAN_MS;
+    clearTimeout(SCAN.timer); SCAN.timer = setTimeout(scanTimeout, SCAN_MS);
+    finder.classList.add('scanning');
+    const t = $('timer'); t.classList.remove('run'); void t.offsetWidth; t.querySelector('i').style.animationDuration = SCAN_MS + 'ms'; t.classList.add('run');
+    $('btnScan').classList.add('on'); $('scanLabel').textContent = 'Остановить';
+    setFState(OCR.ready ? 'scan' : 'load', OCR.ready ? 'Сканирую…' : 'Загружаю распознавание…');
+    setVerdictState('scan', 'Читаю адрес…');
+    $('vDistrict').textContent = '—';
+  }
+  function disarm() {
+    if (SCAN.armed) resetScanState(); // запоздавшие результаты распознавания больше не учитываем
+    SCAN.armed = false; clearTimeout(SCAN.timer);
+    finder.classList.remove('scanning'); $('timer').classList.remove('run');
+    $('btnScan').classList.remove('on'); $('scanLabel').textContent = 'Сканировать';
+    if (STREAM && OCR.ready) setFState('ready', readyText());
+  }
+  function endScan(rec) {
+    resetScanState();
+    if (SET.mode === 'space') disarm();
+    else { SCAN.locked = true; SCAN.lockedId = rec ? rec.id : -1; SCAN.lockOcrT = performance.now(); SCAN.goneT = 0; setFState('lock', 'Отмечен — уберите конверт'); }
+  }
+  function unlock() { SCAN.locked = false; SCAN.lockedId = -1; resetScanState(); if (STREAM && OCR.ready) setFState('ready', readyText()); }
+  function scanTimeout() {
+    if (!SCAN.armed) return;
+    const ranked = (SCAN.acc ? Engine.rank(BASE, SCAN.acc) : []).filter(m => m.q.fam >= 0.85 || m.q.st >= Engine.T);
+    disarm();
+    setVerdictState('miss', ranked.length ? 'Не удалось определить уверенно — выберите адресата в списке' : 'Адрес не распознан — поправьте конверт и нажмите пробел ещё раз');
+    $('vDistrict').textContent = ranked.length ? '?' : '—';
+    $('vName').textContent = ''; $('vAddr').textContent = ''; $('vEv').innerHTML = '';
+    if (ranked.length) showCandidates(ranked, 'Похожие адресаты');
+    say('Не распознано');
+  }
+  $('btnScan').onclick = () => (SCAN.armed ? (disarm(), setVerdictState('idle', 'Сканирование остановлено')) : arm());
+
+  function setMode(m) {
+    SET.mode = m; saveSet();
+    document.querySelectorAll('.cam-bar .seg button').forEach(b => b.setAttribute('aria-checked', String(b.dataset.mode === m)));
+    document.querySelectorAll('input[name="mode"]').forEach(r => { r.checked = r.value === m; });
+    $('btnScan').hidden = m !== 'space';
+    disarm(); SCAN.locked = false; SCAN.lockedId = -1; resetScanState();
+    if (STREAM && OCR.ready) setFState('ready', readyText());
+  }
+  document.querySelectorAll('.cam-bar .seg button').forEach(b => { b.onclick = () => setMode(b.dataset.mode); });
+  document.querySelectorAll('input[name="mode"]').forEach(r => { r.onchange = () => setMode(r.value); });
+
+  // Геометрия: видео показано целиком (contain); рамка — в координатах видео
+  let lastCorners = '';
+  function guide() {
+    const vw = video.videoWidth, vh = video.videoHeight, bw = finder.clientWidth, bh = finder.clientHeight;
+    const sc = Math.min(bw / vw, bh / vh), ox = (bw - vw * sc) / 2, oy = (bh - vh * sc) / 2;
+    const g = { x: vw * 0.04, y: vh * 0.07, w: vw * 0.92, h: vh * 0.86, sc, ox, oy };
+    const key = [ox + g.x * sc, oy + g.y * sc, g.w * sc, g.h * sc].map(Math.round).join(',');
+    if (key !== lastCorners) {
+      lastCorners = key; const [l, t, w, h] = key.split(',');
+      Object.assign($('corners').style, { left: l + 'px', top: t + 'px', width: w + 'px', height: h + 'px', right: 'auto', bottom: 'auto' });
+    }
+    return g;
+  }
+  const anaC = document.createElement('canvas'), anaX = anaC.getContext('2d', { willReadFrequently: true });
+  let grayBuf = new Uint8Array(1), LAST_AN = null, LOOP = false, lastAnaT = 0;
+  function analyzeFrame() {
+    const g = guide();
+    const AW = Math.max(64, Math.min(1024, Math.round(g.w))), AH = Math.max(32, Math.round(AW * g.h / g.w));
+    if (anaC.width !== AW || anaC.height !== AH) { anaC.width = AW; anaC.height = AH; }
+    anaX.drawImage(video, g.x, g.y, g.w, g.h, 0, 0, AW, AH);
+    const id = anaX.getImageData(0, 0, AW, AH);
+    if (grayBuf.length < AW * AH) grayBuf = new Uint8Array(AW * AH);
+    ImgProc.toGray(id.data, AW * AH, grayBuf);
+    const an = ImgProc.analyze(grayBuf, AW, AH, { k: 0.2 });
+    an.g = g; an.a = AW / g.w;
+    return an;
+  }
+
+  function tick() {
+    if (!LOOP) return;
+    setTimeout(tick, 45);
+    if (!STREAM || video.readyState < 2 || !video.videoWidth) return;
+    const now = performance.now();
+    const wantOcr = OCR.ready && (SET.mode === 'space' ? SCAN.armed : true);
+    const free = wantOcr ? OCR.busy.findIndex(b => !b) : -1;
+    if (free < 0 && now - lastAnaT < 220) return; // без распознавания анализируем ~4 раза в секунду (подсказки и рамка)
+    lastAnaT = now;
+    let an; try { an = analyzeFrame(); } catch (e) { return; }
+    LAST_AN = an; drawOverlay(an); updateHint(an);
+    if (SET.mode === 'auto') autoWatch(an, now);
+    if (free < 0) return;
+    if (an.ok) SCAN.noText = 0;
+    if (SET.mode === 'auto') {
+      if (SCAN.locked) {            // конверт уже отмечен: изредка проверяем, не подложили ли следующий
+        if (!an.ok || now - SCAN.lockOcrT < 900) return;
+        SCAN.lockOcrT = now;
+      } else if (!an.ok && SCAN.noText++ % 6 !== 0) return; // без текста — изредка, на случай сильного блика
+    } else if (!an.ok && SCAN.noText++ % 2 !== 0) return;
+    submit(an, free);
+  }
+  // Непрерывный режим: конверт убрали — снимаем «замок» и забываем накопленное
+  function autoWatch(an, now) {
+    if (an.ok) { SCAN.goneT = 0; return; }
+    if (!SCAN.goneT) SCAN.goneT = now;
+    if (now - SCAN.goneT > 600) {
+      if (SCAN.locked) unlock(); else if (SCAN.frames) resetScanState();
+      if (LIST.mode === 'cand') { LIST = { mode: 'none', items: [], sel: 0 }; renderList(); } // конверт убрали — старые варианты не нужны
+    }
+  }
+
+  function pickVariant() {
+    if (SET.proc !== 'auto') return SET.proc;
+    SCAN.variant++; return SCAN.variant % 2 ? 'mean' : 'gray';
+  }
+  function submit(an, wi) {
+    const g = an.g, vw = video.videoWidth, vh = video.videoHeight;
+    let x0, y0, x1, y1, s;
+    if (an.ok) {
+      const mh = an.mh / an.a; // высота букв в пикселях видео
+      x0 = Math.max(0, g.x + an.bbox.x0 / an.a - mh * 3); y0 = Math.max(0, g.y + an.bbox.y0 / an.a - mh * 1.5);
+      x1 = Math.min(vw, g.x + an.bbox.x1 / an.a + mh * 3); y1 = Math.min(vh, g.y + an.bbox.y1 / an.a + mh * 1.5);
+      s = Math.min(CHAR_H / mh, 3, 1800 / (x1 - x0));
+    } else { x0 = g.x; y0 = g.y; x1 = g.x + g.w; y1 = g.y + g.h; s = Math.min(1, 1400 / g.w); }
+    const ow = Math.max(32, Math.round((x1 - x0) * s)), oh = Math.max(16, Math.round((y1 - y0) * s));
+    const c = OCR.canv[wi], cx = c.getContext('2d', { willReadFrequently: true });
+    c.width = ow; c.height = oh; cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = 'high';
+    cx.drawImage(video, x0, y0, x1 - x0, y1 - y0, 0, 0, ow, oh);
+    const seen = an.ok;
+    recognize(c, cx, ow, oh, wi, pickVariant(), SCAN.session, seen).then(text => { if (text != null) onText(text, 'camera', seen); });
+  }
+  function recognize(c, cx, ow, oh, wi, variant, session, preview) {
+    const id = cx.getImageData(0, 0, ow, oh);
+    const gray = ImgProc.toGray(id.data, ow * oh, new Uint8Array(ow * oh));
+    const out = ImgProc.prepare(gray, ow, oh, variant, { charH: CHAR_H, K: SET.K });
+    for (let i = 0, j = 0; i < ow * oh; i++, j += 4) { id.data[j] = id.data[j + 1] = id.data[j + 2] = out[i]; id.data[j + 3] = 255; }
+    cx.putImageData(id, 0, 0);
+    if (SET.showProc && preview !== false) drawPip(c); // кадр без найденного текста не показываем
+    OCR.busy[wi] = true;
+    return OCR.workers[wi].recognize(c, {}, { text: true, blocks: false, hocr: false, tsv: false })
+      .then(({ data }) => (session === SCAN.session ? (data && data.text) || '' : null))
+      .catch(() => null)
+      .finally(() => { OCR.busy[wi] = false; });
+  }
+  function showOcrText(text) {
+    if (!SET.showText) return;
+    const t = String(text || '').replace(/\s+/g, ' ').trim();
+    $('ocrLine').innerHTML = t ? `<b>Распознано:</b> ${esc(t.slice(0, 220))}` : '';
+  }
+  function onText(text, src, textFound) {
+    SCAN.lastText = text;
+    if (!(SET.mode === 'auto' && SCAN.locked) && (textFound !== false)) showOcrText(text);
+    const now = performance.now();
+    if (SCAN.acc && now - SCAN.accT > 4000) { SCAN.acc = null; SCAN.frames = 0; } // старые кадры не смешиваем с новыми
+    if (!SCAN.acc) SCAN.accT = now;
+    const ev = Engine.evidence(BASE, Engine.tokenize(text));
+    SCAN.acc = Engine.mergeEvidence(SCAN.acc, ev); SCAN.frames++;
+    const rf = Engine.rank(BASE, ev);
+    let d = Engine.decide(rf, ev), ra = rf;
+    if (!d && SCAN.frames > 1) { ra = Engine.rank(BASE, SCAN.acc); d = Engine.decide(ra, SCAN.acc, { margin: 2.5 }); }
+    if (d) {
+      if (SET.mode === 'auto' && SCAN.locked && d.rec.id === SCAN.lockedId) { resetScanState(); return false; } // всё тот же конверт
+      showOcrText(text); commit(d.rec, src, d); return true;
+    }
+    if (SET.mode === 'auto' && SCAN.locked) return false;
+    if (SET.mode === 'space' && !SCAN.armed && src === 'camera') return false;
+    // промежуточный результат: кто сейчас ближе всего (район не показываем, пока нет уверенности)
+    const top = ra[0];
+    const meaningful = m => m && m.q.fam >= 0.85 && (m.nName >= 1 || m.q.st >= Engine.T || m.q.idx >= 1);
+    if (!meaningful(top)) return false;
+    if ($('verdict').dataset.s === 'scan') {
+      $('vState').textContent = 'Читаю адрес…';
+      $('vName').textContent = 'Похоже на: ' + nameOf(top.rec);
+      $('vAddr').textContent = top.rec.r + ', ' + addrOf(top.rec);
+      $('vEv').innerHTML = evidenceHtml(top);
+    }
+    if (ra.length && (SCAN.armed || SET.mode === 'auto')) showCandidates(ra, 'Похожие адресаты');
+    return false;
+  }
+
+  // ---------- Наложение на видео ----------
+  const ov = $('overlay'), ovx = ov.getContext('2d');
+  function clearOverlay() { ovx.clearRect(0, 0, ov.width, ov.height); }
+  function drawOverlay(an) {
+    const dpr = window.devicePixelRatio || 1, bw = finder.clientWidth, bh = finder.clientHeight;
+    if (ov.width !== Math.round(bw * dpr) || ov.height !== Math.round(bh * dpr)) { ov.width = Math.round(bw * dpr); ov.height = Math.round(bh * dpr); }
+    ovx.setTransform(dpr, 0, 0, dpr, 0, 0); ovx.clearRect(0, 0, bw, bh);
+    if (!an.ok) return;
+    const g = an.g, toX = vx => g.ox + vx * g.sc, toY = vy => g.oy + vy * g.sc;
+    const x0 = toX(g.x + an.bbox.x0 / an.a) - 6, y0 = toY(g.y + an.bbox.y0 / an.a) - 6;
+    const x1 = toX(g.x + an.bbox.x1 / an.a) + 6, y1 = toY(g.y + an.bbox.y1 / an.a) + 6;
+    ovx.strokeStyle = SCAN.armed ? 'rgba(169,173,255,.95)' : 'rgba(255,255,255,.55)';
+    ovx.lineWidth = 2; ovx.setLineDash([8, 6]);
+    ovx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+  }
+  function drawPip(c) {
+    const p = $('pip'); $('seen').hidden = false;
+    const w = Math.min(900, c.width), h = Math.max(20, Math.round(w * c.height / c.width));
+    if (p.width !== w || p.height !== h) { p.width = w; p.height = h; }
+    p.getContext('2d').drawImage(c, 0, 0, w, h);
+  }
+  let hintShown = '';
+  function updateHint(an) {
+    let h = '';
+    const active = SCAN.armed || (SET.mode === 'auto' && !SCAN.locked);
+    if (active) {
+      if (!an.ok) h = SCAN.armed ? 'Поднесите конверт адресом к камере' : '';
+      else if (an.mh / an.a < 9) h = 'Текст мелкий — поднесите конверт ближе';
+      else if (an.glare > 0.06) h = 'Блик на плёнке — чуть наклоните конверт';
+    }
+    if (h !== hintShown) { hintShown = h; $('fHint').textContent = h; $('fHint').hidden = !h; }
+  }
+
+  // ---------- Распознавание фотографии ----------
+  $('btnPhoto').onclick = () => $('photoInput').click();
+  $('photoInput').onchange = async e => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    if (!OCR.ready) { toast(OCR.failed ? 'Распознавание недоступно.' : 'Распознавание ещё загружается, попробуйте через пару секунд.'); return; }
+    let bmp; try { bmp = await createImageBitmap(f); } catch (err) { toast('Не удалось открыть изображение.'); return; }
+    disarm(); resetScanState();
+    setVerdictState('scan', 'Распознаю фотографию…'); $('vDistrict').textContent = '—';
+    const k = Math.min(1, 1024 / bmp.width), AW = Math.round(bmp.width * k), AH = Math.round(bmp.height * k);
+    anaC.width = AW; anaC.height = AH; anaX.drawImage(bmp, 0, 0, AW, AH);
+    const gray = ImgProc.toGray(anaX.getImageData(0, 0, AW, AH).data, AW * AH, new Uint8Array(AW * AH));
+    const an = ImgProc.analyze(gray, AW, AH, { k: 0.2 });
+    let x0 = 0, y0 = 0, x1 = bmp.width, y1 = bmp.height, s = Math.min(1, 1600 / bmp.width);
+    if (an.ok) {
+      const mh = an.mh / k;
+      x0 = Math.max(0, an.bbox.x0 / k - mh * 3); y0 = Math.max(0, an.bbox.y0 / k - mh * 1.5);
+      x1 = Math.min(bmp.width, an.bbox.x1 / k + mh * 3); y1 = Math.min(bmp.height, an.bbox.y1 / k + mh * 1.5);
+      s = Math.min(CHAR_H / mh, 3, 1800 / (x1 - x0));
+    }
+    const ow = Math.round((x1 - x0) * s), oh = Math.round((y1 - y0) * s), session = SCAN.session;
+    let done = false;
+    for (const variant of ['mean', 'gray']) {
+      const wi = Math.max(0, OCR.busy.findIndex(b => !b));
+      const c = OCR.canv[wi], cx = c.getContext('2d', { willReadFrequently: true });
+      c.width = ow; c.height = oh; cx.imageSmoothingQuality = 'high'; cx.drawImage(bmp, x0, y0, x1 - x0, y1 - y0, 0, 0, ow, oh);
+      const text = await recognize(c, cx, ow, oh, wi, variant, session);
+      if (text == null) return;
+      if (onText(text, 'photo')) { done = true; break; }
+    }
+    if (!done) {
+      const ranked = SCAN.acc ? Engine.rank(BASE, SCAN.acc) : [];
+      setVerdictState('miss', ranked.length ? 'По фото уверенно не определить — выберите адресата в списке' : 'На фото не найден адрес');
+      $('vDistrict').textContent = ranked.length ? '?' : '—';
+      if (ranked.length) showCandidates(ranked, 'Похожие адресаты');
+    }
+  };
+
+  // ---------- Клавиатура ----------
+  const inField = el => el && (el.tagName === 'INPUT' && !['checkbox', 'radio', 'range', 'button', 'file'].includes(el.type) || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+  document.addEventListener('keydown', e => {
+    if (!$('lock').hidden) return; // заблокировано: работает только поле пароля
+    if ((e.ctrlKey || e.metaKey) && (e.code === 'KeyL')) { e.preventDefault(); lockNow(); return; }
+    // пустое поле поиска не перехватывает пробел: он по-прежнему запускает сканирование
+    if (e.target === $('q') && (e.code === 'Space' || e.key === ' ') && !$('q').value.trim() && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      e.preventDefault(); $('q').blur(); if (e.repeat) return;
+      if (SET.mode !== 'space') { unlock(); setFState('ready', 'Распознаю заново…'); return; }
+      SCAN.armed ? (disarm(), setVerdictState('idle', 'Сканирование остановлено')) : arm();
+      return;
+    }
+    const modalOpen = !$('report').hidden || !$('settings').hidden;
+    if (e.key === 'Escape') {
+      if (modalOpen) { closeAll(); return; }
+      if (SCAN.armed) { disarm(); setVerdictState('idle', 'Сканирование остановлено'); }
+      return;
+    }
+    if (modalOpen || inField(e.target)) return;
+    if ((e.ctrlKey || e.metaKey) && (e.code === 'KeyZ' || e.key === 'z' || e.key === 'я')) { e.preventDefault(); $('btnUndo').click(); return; }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.code === 'Space' || e.key === ' ') {
+      e.preventDefault();
+      if (e.repeat) return;
+      if (SET.mode !== 'space') { unlock(); setFState('ready', 'Распознаю заново…'); return; }
+      SCAN.armed ? (disarm(), setVerdictState('idle', 'Сканирование остановлено')) : arm();
+      return;
+    }
+    if (e.key.length === 1 && /[а-яёa-z0-9]/i.test(e.key)) {
+      e.preventDefault(); const q = $('q'); q.focus(); q.value += e.key; runSearch();
+    }
+  });
+  // пробел на кнопке не должен «нажимать» её второй раз
+  document.addEventListener('keyup', e => { if ((e.code === 'Space' || e.key === ' ') && e.target && e.target.tagName === 'BUTTON' && !inField(e.target)) e.preventDefault(); });
+  document.addEventListener('click', e => { const b = e.target.closest('button'); if (b && !b.closest('.sheet') && !b.closest('.modal')) setTimeout(() => b.blur(), 0); });
+
+  // ---------- Отчёт ----------
+  let REP = { d: null, f: 'left' };
+  function openReport(d) {
+    REP.d = d || REP.d || DISTRICTS[0];
+    $('report').hidden = false; $('scrim').hidden = false;
+    renderReport();
+  }
+  function renderReport() {
+    const n = DONE.size, t = BASE.recs.length;
+    $('repSum').textContent = `отмечено ${nf(n)} из ${nf(t)}, осталось ${nf(t - n)}`;
+    document.querySelectorAll('#report .seg button').forEach(b => b.setAttribute('aria-checked', String(b.dataset.f === REP.f)));
+    // районы: сначала те, где ещё есть неотмеченные
+    const ds = DISTRICTS.slice().sort((a, b) => ((doneIn(a) === TOTAL[a]) - (doneIn(b) === TOTAL[b])) || a.localeCompare(b, 'ru'));
+    $('repD').innerHTML = ds.map(d => {
+      const k = doneIn(d), tt = TOTAL[d];
+      return `<button data-d="${esc(d)}" aria-current="${d === REP.d}"><span class="rd-n">${esc(d)}${k === tt ? ' ✓' : ''}</span><span class="rd-c num">${nf(k)} из ${nf(tt)}</span><span class="rd-b"><i style="width:${tt ? 100 * k / tt : 0}%"></i></span></button>`;
+    }).join('');
+    const recs = BASE.recs.filter(r => r.r === REP.d);
+    const lastT = new Map(); HIST.forEach(e => { if (!e.undone && !e.dup && !lastT.has(e.id)) lastT.set(e.id, e.t); });
+    const left = recs.filter(r => !DONE.has(r.id)).sort((a, b) => a.fioRaw.localeCompare(b.fioRaw, 'ru'));
+    const dn = recs.filter(r => DONE.has(r.id)).sort((a, b) => a.fioRaw.localeCompare(b.fioRaw, 'ru'));
+    const row = r => `<li data-id="${r.id}" class="${DONE.has(r.id) ? 'done' : ''}" title="Нажмите, чтобы ${DONE.has(r.id) ? 'снять отметку' : 'отметить вручную'}">
+      <span class="ck"></span><span class="rn">${esc(nameOf(r))}</span><span class="rt num">${lastT.has(r.id) ? hhmm(lastT.get(r.id)) : ''}</span>
+      <span class="ra">${esc(addrOf(r))}</span></li>`;
+    let html = '';
+    if (REP.f !== 'done') html += `<h3>Не отмечены — ${nf(left.length)}</h3>` + (left.length ? `<ul>${left.map(row).join('')}</ul>` : '<p class="empty">Все конверты района отмечены.</p>');
+    if (REP.f !== 'left') html += `<h3>Отмечены — ${nf(dn.length)}</h3>` + (dn.length ? `<ul>${dn.map(row).join('')}</ul>` : '<p class="empty">Пока ни одного.</p>');
+    $('repL').innerHTML = html;
+  }
+  $('repD').addEventListener('click', e => { const b = e.target.closest('button[data-d]'); if (b) { REP.d = b.dataset.d; renderReport(); $('repL').scrollTop = 0; } });
+  $('repL').addEventListener('click', e => {
+    const li = e.target.closest('li[data-id]'); if (!li) return;
+    const id = +li.dataset.id, r = recOf(id);
+    if (DONE.has(id)) {
+      DONE.delete(id); HIST.forEach(h => { if (h.id === id && !h.undone) h.undone = 1; });
+      toast(`Отметка снята: ${r.fioShort}`);
+    } else {
+      DONE.add(id); HIST.unshift({ id, t: Date.now(), src: 'report', dup: 0 });
+      toast(`Отмечен вручную: ${r.fioShort}`);
+    }
+    saveProgress(); renderReport(); renderProgress(); updateCell(r.r); renderLedger();
+  });
+  document.querySelectorAll('#report .seg button').forEach(b => { b.onclick = () => { REP.f = b.dataset.f; renderReport(); }; });
+  $('btnReport').onclick = () => openReport();
+  async function needXlsx() {
+    try { await loadLib('lib-xlsx'); } catch (e) { /* ниже */ }
+    if (typeof XLSX === 'undefined') { toast('Не запустился модуль Excel. Обновите страницу.'); return false; }
+    return true;
+  }
+  const summaryRows = () => {
+    const sum = [['Район', 'Всего', 'Отмечено', 'Осталось']].concat(DISTRICTS.map(d => [d, TOTAL[d], doneIn(d), TOTAL[d] - doneIn(d)]));
+    sum.push(['Итого', BASE.recs.length, DONE.size, BASE.recs.length - DONE.size]); return sum;
+  };
+  $('repXls').onclick = async () => {
+    if (!await needXlsx()) return;
+    const wb = XLSX.utils.book_new(), s1 = XLSX.utils.aoa_to_sheet(summaryRows()); s1['!cols'] = [{ wch: 22 }, { wch: 8 }, { wch: 10 }, { wch: 10 }];
+    XLSX.utils.book_append_sheet(wb, s1, 'Сводка');
+    XLSX.writeFile(wb, `Конверты — сводка ${new Date().toLocaleDateString('ru-RU')}.xlsx`);
+    toast('Сводка без ФИО и адресов сохранена в «Загрузки».');
+  };
+  $('repXlsFull').onclick = () => { $('fullConfirm').hidden = false; };
+  $('fullNo').onclick = () => { $('fullConfirm').hidden = true; };
+  $('fullYes').onclick = async () => {
+    $('fullConfirm').hidden = true;
+    if (!await needXlsx()) return;
+    const lastT = new Map(); HIST.forEach(e => { if (!e.undone && !e.dup && !lastT.has(e.id)) lastT.set(e.id, e.t); });
+    const sum = summaryRows();
+    const list = [['Район', 'Фамилия', 'Имя', 'Отчество', 'Адрес', 'Индекс', 'Отмечен', 'Время отметки']].concat(
+      BASE.recs.slice().sort((a, b) => a.r.localeCompare(b.r, 'ru') || a.fioRaw.localeCompare(b.fioRaw, 'ru'))
+        .map(r => [r.r, Engine.titleCase(r.famRaw), Engine.titleCase(r.imRaw), Engine.titleCase(r.otRaw), r.addr, r.idxRaw, DONE.has(r.id) ? 'да' : 'нет', lastT.has(r.id) ? new Date(lastT.get(r.id)).toLocaleString('ru-RU') : '']));
+    const wb = XLSX.utils.book_new();
+    const s1 = XLSX.utils.aoa_to_sheet(sum); s1['!cols'] = [{ wch: 22 }, { wch: 8 }, { wch: 10 }, { wch: 10 }];
+    const s2 = XLSX.utils.aoa_to_sheet(list); s2['!cols'] = [{ wch: 20 }, { wch: 18 }, { wch: 14 }, { wch: 18 }, { wch: 52 }, { wch: 8 }, { wch: 9 }, { wch: 18 }];
+    XLSX.utils.book_append_sheet(wb, s1, 'Сводка'); XLSX.utils.book_append_sheet(wb, s2, 'Адресаты');
+    XLSX.writeFile(wb, `Конверты — полный список ${new Date().toLocaleDateString('ru-RU')}.xlsx`);
+    toast('Полный список сохранён в «Загрузки». Удалите файл, когда он станет не нужен.', 6000);
+  };
+
+  // ---------- Настройки ----------
+  function openSettings() { $('settings').hidden = false; $('scrim').hidden = false; listCameras(); }
+  function closeAll() { $('settings').hidden = true; $('report').hidden = true; $('scrim').hidden = true; $('resetConfirm').hidden = true; }
+  $('btnSettings').onclick = openSettings;
+  $('scrim').onclick = closeAll;
+  document.querySelectorAll('[data-close]').forEach(b => { b.onclick = closeAll; });
+  $('report').addEventListener('click', e => { if (e.target === $('report')) closeAll(); });
+
+  function initSettingsUi() {
+    $('optFull').checked = SET.full; $('lockSel').value = String(SET.lockMin);
+    $('optFull').onchange = () => { SET.full = $('optFull').checked; saveSet(); renderList(); renderLedger(); if (!$('report').hidden) renderReport(); const id = $('verdict').dataset.id; if (id) { $('vName').textContent = nameOf(recOf(+id)); $('vAddr').textContent = addrOf(recOf(+id)); } };
+    $('lockSel').onchange = () => { SET.lockMin = +$('lockSel').value; saveSet(); };
+    // новый защищённый файл
+    $('pwOpen').onclick = () => { $('pwForm').hidden = false; $('pwBase').textContent = BASE_CUSTOM ? `«${BASE_CUSTOM.name}», ${nf(BASE.recs.length)} записей` : `встроенная, ${nf(BASE.recs.length)} записей`; $('pw1').focus(); };
+    $('pwCancel').onclick = () => { $('pwForm').hidden = true; $('pw1').value = $('pw2').value = ''; };
+    $('pwForm').onsubmit = async e => {
+      e.preventDefault();
+      const a = $('pw1').value, b = $('pw2').value;
+      if (a.length < 10) { toast('Пароль должен быть не короче 10 символов.'); return; }
+      if (a !== b) { toast('Пароли не совпадают.'); return; }
+      $('pwGo').disabled = true; $('pwGo').textContent = 'Шифрую…';
+      try {
+        const vault = await sealVault(CUR_DATA, a);
+        const html = SELF_HTML.replace(/(<script id="vault" type="application\/json">)[\s\S]*?(<\/script>)/, (m, p1, p2) => p1 + JSON.stringify(vault) + p2);
+        const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+        const link = document.createElement('a'); link.href = url; link.download = 'Сортировка конвертов (защищено).html';
+        document.body.appendChild(link); link.click(); setTimeout(() => { URL.revokeObjectURL(url); link.remove(); }, 1000);
+        $('pwForm').hidden = true; $('pw1').value = $('pw2').value = '';
+        toast('Новый защищённый файл сохранён в «Загрузки». Откройте его, проверьте пароль и удалите старый файл.', 9000);
+      } catch (err) { toast('Не удалось создать файл: ' + err.message); }
+      finally { $('pwGo').disabled = false; $('pwGo').textContent = 'Сохранить файл'; }
+    };
+    // стирание данных
+    $('wipeOpen').onclick = () => { $('wipeConfirm').hidden = false; };
+    $('wipeNo').onclick = () => { $('wipeConfirm').hidden = true; };
+    $('wipeYes').onclick = () => {
+      try { Object.keys(localStorage).filter(k => k.startsWith('konv_')).forEach(k => localStorage.removeItem(k)); } catch (e) { /* нет доступа */ }
+      try { indexedDB.deleteDatabase('keyval-store'); } catch (e) { /* нет базы */ }
+      if (STREAM) STREAM.getTracks().forEach(t => t.stop());
+      location.reload();
+    };
+    $('optProc').checked = SET.showProc; $('optText').checked = SET.showText;
+    $('procSel').value = SET.proc; $('kRange').value = SET.K; $('kVal').textContent = SET.K;
+    $('vPitch').value = SET.pitch; $('vRate').value = SET.rate; $('vVol').value = SET.vol; $('vWord').checked = SET.word;
+    $('optProc').onchange = () => { SET.showProc = $('optProc').checked; saveSet(); if (!SET.showProc) $('seen').hidden = true; };
+    $('optText').onchange = () => { SET.showText = $('optText').checked; saveSet(); if (!SET.showText) $('ocrLine').textContent = ''; };
+    $('procSel').onchange = () => { SET.proc = $('procSel').value; saveSet(); };
+    $('kRange').oninput = () => { SET.K = +$('kRange').value; $('kVal').textContent = SET.K; saveSet(); };
+    $('voiceSel').onchange = () => { const v = VOICES[+$('voiceSel').value]; SET.voice = v ? v.name : ''; saveSet(); try { localStorage.setItem('konv_voice', SET.voice); } catch (e) { /* нет доступа */ } };
+    $('vPitch').oninput = () => { SET.pitch = +$('vPitch').value; saveSet(); };
+    $('vRate').oninput = () => { SET.rate = +$('vRate').value; saveSet(); };
+    $('vVol').oninput = () => { SET.vol = +$('vVol').value; saveSet(); };
+    $('vWord').onchange = () => { SET.word = $('vWord').checked; saveSet(); };
+    $('vTest').onclick = () => say(phrase('Выборгский'));
+    // прогресс
+    $('progSave').onclick = () => {
+      const blob = new Blob([JSON.stringify({ app: 'konverty', key: KEY, done: [...DONE], hist: HIST, savedAt: new Date().toISOString() })], { type: 'application/json' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      a.download = `Прогресс конвертов ${new Date().toLocaleDateString('ru-RU')}.json`; document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+      toast('Файл с прогрессом сохранён в «Загрузки».');
+    };
+    $('progLoadBtn').onclick = () => $('progLoad').click();
+    $('progLoad').onchange = async e => {
+      const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+      try {
+        const j = JSON.parse(await f.text());
+        if (!j || !Array.isArray(j.done)) throw new Error('не тот файл');
+        if (j.key && j.key !== KEY) { toast('Этот файл сохранён для другой базы адресатов — отметки не загружены.', 6000); return; }
+        j.done.forEach(i => { if (BASE.recs[i]) DONE.add(i); });
+        if (Array.isArray(j.hist)) { const have = new Set(HIST.map(h => h.id + ':' + h.t)); j.hist.forEach(h => { if (BASE.recs[h.id] && !have.has(h.id + ':' + h.t)) HIST.push(h); }); HIST.sort((a, b) => b.t - a.t); }
+        saveProgress(); DISTRICTS.forEach(updateCell); renderProgress(); renderLedger();
+        toast(`Загружено. Отмечено всего: ${nf(DONE.size)}.`);
+      } catch (err) { toast('Не удалось прочитать файл прогресса: ' + err.message); }
+    };
+    $('progReset').onclick = () => { $('resetConfirm').hidden = false; };
+    $('resetNo').onclick = () => { $('resetConfirm').hidden = true; };
+    $('resetYes').onclick = () => {
+      DONE = new Set(); HIST = []; saveProgress(); $('resetConfirm').hidden = true;
+      DISTRICTS.forEach(updateCell); renderProgress(); renderLedger(); setVerdictState('idle', 'Все отметки сняты');
+      toast('Все отметки сняты.');
+    };
+  }
+
+  // ---------- Замена базы из Excel ----------
+  const ROLES = [
+    ['r', 'Район (стопка)', /наименование района|^район$|район$/i, true], ['fam', 'Фамилия', /фамил/i, true], ['im', 'Имя', /^имя$/i], ['ot', 'Отчество', /отчеств/i],
+    ['fio', 'ФИО одной колонкой', /^фио|ф\.и\.о/i], ['idx', 'Индекс', /индекс/i], ['town', 'Город / район', /район\/город|^город/i], ['np', 'Населённый пункт', /населенн|населённ/i],
+    ['st', 'Улица', /улиц/i], ['house', 'Дом', /^дом$|^дом\b/i], ['korp', 'Корпус', /корп/i], ['apt', 'Квартира', /кварт/i]];
+  let XL = null;
+  $('xlInput').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    if (!await needXlsx()) return;
+    try {
+      const wb = XLSX.read(await f.arrayBuffer());
+      let all = [];
+      wb.SheetNames.forEach(n => { all = all.concat(XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, defval: '' })); });
+      let h = all.findIndex(r => r.some(c => /фамил|фио/i.test(String(c)))); if (h < 0) h = 0;
+      const hdr = all[h].map(x => String(x).trim());
+      XL = { name: f.name, hdr, rows: all.slice(h + 1).filter(r => r.some(c => String(c).trim() !== '' && !/фамил/i.test(String(c)))) };
+      const opts = '<option value="-1">— нет —</option>' + hdr.map((t, i) => `<option value="${i}">${esc(t || 'Колонка ' + (i + 1))}</option>`).join('');
+      $('mapGrid').innerHTML = ROLES.map(([k, label]) => `<label class="field"><span>${label}</span><select data-role="${k}">${opts}</select></label>`).join('');
+      ROLES.forEach(([k, , re]) => {
+        let i = hdr.findIndex(t => re.test(t));
+        if (k === 'r' && i < 0) i = hdr.findIndex(t => /район/i.test(t) && !/город/i.test(t));
+        $('mapGrid').querySelector(`[data-role="${k}"]`).value = String(i);
+      });
+      $('mapBox').hidden = false;
+    } catch (err) { toast('Не удалось прочитать Excel: ' + err.message); }
+  };
+  $('mapCancel').onclick = () => { $('mapBox').hidden = true; $('xlInput').value = ''; XL = null; };
+  $('mapApply').onclick = () => {
+    if (!XL) return;
+    const col = k => +$('mapGrid').querySelector(`[data-role="${k}"]`).value;
+    const v = (r, k) => { const i = col(k); return i >= 0 ? String(r[i] == null ? '' : r[i]).trim() : ''; };
+    if (col('r') < 0 || (col('fam') < 0 && col('fio') < 0)) { toast('Укажите колонку района и колонку фамилии (или ФИО).'); return; }
+    const districts = [], rows = [];
+    XL.rows.forEach(r => {
+      let fam = v(r, 'fam'), im = v(r, 'im'), ot = v(r, 'ot');
+      if (!fam && col('fio') >= 0) { const p = v(r, 'fio').split(/\s+/); fam = p[0] || ''; im = p[1] || ''; ot = p.slice(2).join(' '); }
+      if (!fam) return;
+      const d = v(r, 'r') || 'Район не указан';
+      let di = districts.indexOf(d); if (di < 0) { districts.push(d); di = districts.length - 1; }
+      rows.push([di, fam, im, ot, v(r, 'idx'), v(r, 'town'), v(r, 'np'), v(r, 'st'), v(r, 'house'), v(r, 'korp'), v(r, 'apt')]);
+    });
+    if (!rows.length) { toast('В файле не нашлось строк с фамилией.'); return; }
+    const data = { districts, rows, source: XL.name };
+    CUR_DATA = data; useBase(data, { name: XL.name });
+    $('mapBox').hidden = true; $('xlInput').value = ''; XL = null;
+    toast(`Загружена база: ${nf(rows.length)} записей, ${districts.length} ${plural(districts.length, 'район', 'района', 'районов')}. Она хранится только до закрытия страницы — создайте защищённый файл.`, 8000);
+  };
+  $('baseReset').onclick = () => { CUR_DATA = BASE_DATA; useBase(BASE_DATA, null); toast('Возвращена встроенная база.'); };
+
+  // ---------- Уведомления ----------
+  let toastT = 0;
+  function toast(text, ms) {
+    const t = $('toast'); t.textContent = text; t.hidden = false;
+    clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, ms || 3500);
+  }
+
+  // ---------- Блокировка ----------
+  let CUR_DATA = null, lastAct = Date.now();
+  ['keydown', 'pointerdown', 'pointermove', 'wheel'].forEach(t => document.addEventListener(t, () => { lastAct = Date.now(); }, { passive: true, capture: true }));
+  function lockNow() {
+    saveProgress();
+    if (STREAM) STREAM.getTracks().forEach(t => t.stop());
+    location.reload(); // перезагрузка стирает расшифрованную базу из памяти
+  }
+  $('btnLock').onclick = lockNow;
+  setInterval(() => { if (BASE && !SCAN.armed && Date.now() - lastAct > SET.lockMin * 60000) lockNow(); }, 20000);
+
+  function boot(data) {
+    BASE_DATA = CUR_DATA = data;
+    store.del('konv_custom_base_v2'); // базы прежней версии в открытом виде больше не храним
+    useBase(BASE_DATA, null);
+    initSettingsUi(); setMode(SET.mode);
+    setVerdictState('idle', HIST[0] ? 'Готов к работе' : 'Включите камеру и поднесите конверт');
+    if (SET.camWasOn) startCamera(); else camUi(false);
+    lastAct = Date.now();
+  }
+  $('lockMin').textContent = SET.lockMin;
+  $('lockForm').onsubmit = async e => {
+    e.preventDefault();
+    const pw = $('lockPw').value; if (!pw) return;
+    $('lockGo').disabled = true; $('lockGo').textContent = 'Проверяю…'; $('lockErr').textContent = '';
+    try {
+      const data = await openVault(pw);
+      $('lockPw').value = '';
+      $('lock').hidden = true;
+      boot(data);
+    } catch (err) {
+      $('lockErr').textContent = err && err.name === 'OperationError' ? 'Неверный пароль. Проверьте раскладку и Caps Lock.' : 'Не удалось открыть базу: ' + (err && err.message || err);
+      const l = $('lock'); l.classList.remove('shake'); void l.offsetWidth; l.classList.add('shake');
+      $('lockPw').select();
+    } finally { $('lockGo').disabled = false; $('lockGo').textContent = 'Открыть'; }
+  };
+  camUi(false);
+  initOCR(); // модуль распознавания готовится, пока вводят пароль
+  setTimeout(() => $('lockPw').focus(), 50);
+})();
+
+</script>
+</body>
+</html>
