@@ -1265,23 +1265,28 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
   }
 
   // Штрихкод над адресом (оконные конверты). В режиме «один блок текста» распознавание принимает его
-  // за строку и теряет адрес, поэтому перед распознаванием его закрашиваем. Признак штрихкода — участок,
-  // где резкие перепады яркости идут по горизонтали, а по вертикали их почти нет (складки плёнки
-  // разбивают полоски на куски, поэтому смотрим на участок целиком, а не на отдельные полоски).
-  // gray — кадр анализа, mh — высота букв, box — где текст. Возвращает прямоугольники в координатах кадра.
-  function bars(gray, w, h, mh, box) {
+  // за строку и теряет адрес, поэтому перед распознаванием его закрашиваем — целиком, с крайними и бледными
+  // полосками и обрывками над бликом. Признак штрихкода — участок, где резкие перепады яркости идут
+  // по горизонтали, а по вертикали их почти нет. Штрихкод может быть чуть повёрнут относительно текста
+  // (перспектива): наклон полосы находим по тому, при каком наклоне её верхний и нижний края самые резкие,
+  // и дальше считаем в повёрнутых координатах (u — вдоль полосы, t — поперёк).
+  // gray — выровненная вырезка, mh — высота букв, box — где текст (или null), ink — та же вырезка после
+  // обработки (её увидит распознавание; необязательно). Возвращает узкие прямоугольники — вместе они
+  // закрывают повёрнутую полосу штрихкода.
+  function bars(gray, w, h, mh, box, ink) {
     const B = Math.max(4, Math.round(mh));
     const X0 = Math.max(0, (box ? box.x0 : 0) - B), Y0 = Math.max(0, (box ? box.y0 : 0) - B);
     const X1 = Math.min(w - 2, (box ? box.x1 : w) + B), Y1 = Math.min(h - 2, (box ? box.y1 : h) + B);
     const gw = Math.ceil((X1 - X0 + 1) / B), gh = Math.ceil((Y1 - Y0 + 1) / B);
     if (gw < 5 || gh < 2) return [];
+    // 1) блоки, где перепады яркости почти только горизонтальные (вертикальные полоски)
     const flag = new Uint8Array(gw * gh);
     for (let by = 0; by < gh; by++) for (let bx = 0; bx < gw; bx++) {
       const ys = Y0 + by * B, xs = X0 + bx * B, ye = Math.min(Y1, ys + B), xe = Math.min(X1, xs + B);
       let gx = 0, gy = 0;
       for (let y = ys; y < ye; y++) { const r = y * w; for (let x = xs; x < xe; x++) { const v = gray[r + x]; gx += Math.abs(gray[r + x + 1] - v); gy += Math.abs(gray[r + w + x] - v); } }
       const n = (ye - ys) * (xe - xs);
-      if (n && gx / n > 9 && gx > gy * 2.5) flag[by * gw + bx] = 1;   // у засвеченных полосок перепад слабее, но соотношение держится
+      if (n && gx / n > 6 && gx > gy * 2.5) flag[by * gw + bx] = 1;
     }
     const out = [], seen = new Uint8Array(gw * gh), st = [];
     for (let i = 0; i < gw * gh; i++) {
@@ -1293,22 +1298,115 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
         const nb = [bx > 0 ? j - 1 : -1, bx < gw - 1 ? j + 1 : -1, by > 0 ? j - gw : -1, by < gh - 1 ? j + gw : -1];
         for (const k of nb) if (k >= 0 && flag[k] && !seen[k]) { seen[k] = 1; st.push(k); }
       }
-      if (bx1 - bx0 + 1 < 5 || cnt < 8) continue;                     // штрихкод — широкий
-      // уточняем: строки, где много резких перепадов по горизонтали, — это полоски
-      const rx0 = X0 + bx0 * B, rx1 = Math.min(X1, X0 + (bx1 + 1) * B);
-      const ry0 = Math.max(0, Y0 + by0 * B - B), ry1 = Math.min(h - 2, Y0 + (by1 + 1) * B + B);
-      const rs = new Float32Array(ry1 - ry0 + 1); let rmax = 0, ymax = ry0;
-      for (let y = ry0; y <= ry1; y++) { const r = y * w; let c = 0; for (let x = rx0; x < rx1; x++) if (Math.abs(gray[r + x + 1] - gray[r + x]) >= 40) c++; const f = c / Math.max(1, rx1 - rx0); rs[y - ry0] = f; if (f > rmax) { rmax = f; ymax = y; } }
-      if (rmax < 0.08) continue;
-      let ya = ymax, yb = ymax; while (ya > ry0 && rs[ya - 1 - ry0] >= rmax * 0.45) ya--; while (yb < ry1 && rs[yb + 1 - ry0] >= rmax * 0.45) yb++;
-      if (yb - ya + 1 < mh * 1.3) continue;                              // полоски выше букв
-      // столбцы: тёмные почти на всю высоту полосок
-      let sum = 0, nn = 0; for (let y = ya; y <= yb; y += 2) for (let x = rx0; x < rx1; x += 2) { sum += gray[y * w + x]; nn++; }
-      const thr = sum / Math.max(1, nn);
-      const cx0 = Math.max(0, rx0 - B), cx1 = Math.min(w - 1, rx1 + B); let xa = -1, xb = -1;
-      for (let x = cx0; x <= cx1; x++) { let d = 0; for (let y = ya; y <= yb; y++) if (gray[y * w + x] < thr) d++; if (d >= (yb - ya + 1) * 0.6) { if (xa < 0) xa = x; xb = x; } }
-      if (xa < 0 || xb - xa < B * 3) continue;
-      out.push({ x0: xa, y0: ya, x1: xb, y1: yb });
+      if (bx1 - bx0 + 1 < 5 || cnt < 8) continue;                       // штрихкод — широкий
+      // 2) область: вся ширина (размытая часть штрихкода может не попасть в группу блоков), ± 2 буквы по вертикали;
+      //    «тёмное» — темнее среднего по своей строке на отрезке ±B (блик меняет яркость по высоте)
+      const gx0 = X0 + bx0 * B, gx1 = Math.min(w - 1, X0 + (bx1 + 1) * B);
+      const ax0 = 0, ax1 = w - 1;
+      const ay0 = Math.max(0, Y0 + by0 * B - 2 * B), ay1 = Math.min(h - 1, Y0 + (by1 + 1) * B + 2 * B);
+      const aw = ax1 - ax0 + 1, ah = ay1 - ay0 + 1;
+      const dark = new Uint8Array(aw * ah), pre = new Float64Array(aw + 1);
+      for (let y = 0; y < ah; y++) {
+        const r = (ay0 + y) * w + ax0;
+        for (let x = 0; x < aw; x++) pre[x + 1] = pre[x] + gray[r + x];
+        for (let x = 0; x < aw; x++) {
+          const l = Math.max(0, x - B), rr = Math.min(aw, x + B + 1);
+          if (gray[r + x] < (pre[rr] - pre[l]) / (rr - l) - 6) dark[y * aw + x] = 1;
+        }
+      }
+      const cu0 = Math.max(0, gx0 - ax0), cu1 = Math.min(aw - 1, gx1 - ax0);   // середина штрихкода — блоки группы
+      const tc = ah / 2, uc = (cu0 + cu1) / 2;
+      // повёрнутые координаты: (u, t) при наклоне k — это точка (u − k·(t − tc), t + k·(u − uc)) области
+      const D = (u, t, k) => { const x = Math.round(u - k * (t - tc)), y = Math.round(t + k * (u - uc)); return x >= 0 && x < aw && y >= 0 && y < ah && dark[y * aw + x] === 1; };
+      const DO = (u, t, k) => D(u, t, k) || D(u - 1, t, k) || D(u + 1, t, k);
+      // 3) доля тёмных точек в каждой «строке» t вдоль наклона (по середине штрихкода)
+      // (по каждому второму столбцу и только в нужных строках — этого хватает, а считается вдвое-втрое быстрее)
+      const prof = (k, t0, t1) => {
+        const f = new Float32Array(ah), a0 = Math.max(0, t0 === undefined ? 0 : t0), a1 = Math.min(ah - 1, t1 === undefined ? ah - 1 : t1);
+        const n = ((cu1 - cu0) >> 1) + 1;
+        for (let t = a0; t <= a1; t++) { let c = 0; for (let u = cu0; u <= cu1; u += 2) if (D(u, t, k)) c++; f[t] = c / n; }
+        return f;
+      };
+      // наклон: при каком k верхний и нижний края полосы самые резкие (при равенстве — меньший наклон).
+      // Смотрим только строки, где нашлись блоки с полосками: строка с ФИО ниже бывает темнее самого штрихкода
+      const tr0 = Math.max(2, Y0 + by0 * B - ay0 - (B >> 1)), tr1 = Math.min(ah - 3, Y0 + (by1 + 1) * B - ay0 + (B >> 1));
+      // самый высокий сплошной участок строк, где тёмного больше половины пика (пик — в строках с блоками)
+      const band = q => {
+        let m = 0; for (let t = tr0; t <= tr1; t++) m = Math.max(m, q[t]);
+        let a0 = -1, b0 = -2;
+        for (let t = 0; t < ah;) {
+          if (q[t] < m * 0.5) { t++; continue; }
+          let e = t; while (e + 1 < ah && q[e + 1] >= m * 0.5) e++;
+          if (e >= tr0 && t <= tr1 && e - t > b0 - a0) { a0 = t; b0 = e; }
+          t = e + 1;
+        }
+        return { m, a: a0, b: b0 };
+      };
+      // грубо — без наклона; затем наклон: при каком k верхний и нижний края этой полосы самые резкие
+      // (только рядом с полосой: тонкая линия выше — край повёрнутого кадра — в счёт не идёт; при равенстве — меньший наклон)
+      const r0 = band(prof(0));
+      const wa0 = r0.b >= r0.a ? Math.max(2, r0.a - 10) : tr0, wa1 = r0.b >= r0.a ? (r0.a + r0.b) >> 1 : tr1;
+      const wb0 = r0.b >= r0.a ? (r0.a + r0.b) >> 1 : tr0, wb1 = r0.b >= r0.a ? Math.min(ah - 3, r0.b + 10) : tr1;
+      const sharp = q => { let up = 0, dn = 0; for (let t = wa0; t <= wa1; t++) up = Math.max(up, q[t] - q[t - 2]); for (let t = wb0; t <= wb1; t++) dn = Math.max(dn, q[t] - q[t + 2]); return up + dn; };
+      let bk = 0, bs = -1;
+      for (let k = -0.25; k <= 0.2501; k += 0.02) { const q = prof(k, wa0 - 2, wb1 + 2), sc = sharp(q) - Math.abs(k) * 0.3; if (sc > bs) { bs = sc; bk = k; } }
+      for (let k = bk - 0.015; k <= bk + 0.0151; k += 0.0025) { const q = prof(k, wa0 - 2, wb1 + 2), sc = sharp(q) - Math.abs(k) * 0.3; if (sc > bs) { bs = sc; bk = k; } }
+      const f = prof(bk);
+      // 4) полоса штрихкода при найденном наклоне
+      const r1 = band(f), fm = r1.m;
+      if (fm < 0.2) continue;
+      let ta = r1.a, tb = r1.b;
+      if (tb - ta + 1 < mh * 1.3) continue;                              // полоски выше букв
+      // обрывки полосок над бликом: выше, в пределах 0,6 высоты, снова много тёмного
+      const ta0 = ta;
+      for (let t = ta - 1, lim = Math.max(0, ta - Math.round((tb - ta + 1) * 0.6)); t >= lim; t--) if (f[t] >= fm * 0.35) ta = t;
+      // верхний и нижний края — каждый со своим наклоном (на снимке под углом из-за перспективы они чуть расходятся)
+      let kt = bk, kb = bk, tt = ta0, tbb = tb;
+      { let bu = -1, bd = -1;
+        for (let k = bk - 0.03; k <= bk + 0.0301; k += 0.0025) {
+          const q = prof(k, Math.min(ta0 - 6, tb - 8), Math.max(ta0 + 6, tb + 6));
+          for (let t = Math.max(2, ta0 - 4); t <= Math.min(ah - 3, ta0 + 6); t++) { const v = q[t] - q[t - 2]; if (v > bu) { bu = v; kt = k; tt = t - 1; } }
+          for (let t = Math.max(2, tb - 6); t <= Math.min(ah - 3, tb + 4); t++) { const v = q[t] - q[t + 2]; if (v > bd) { bd = v; kb = k; tbb = t + 1; } }
+        }
+      }
+      const yTop = x => tt - (ta0 - ta) + kt * (x - uc), yBot = x => tbb + kb * (x - uc);
+      // 5) это полоски, а не строки текста: в полосе много столбцов, тёмных почти по всей её высоте
+      const H = tb - ta + 1, isB = new Uint8Array(aw), isD = new Uint8Array(aw), isS = new Uint8Array(aw);
+      for (let u = 0; u < aw; u++) { let c = 0; for (let t = ta; t <= tb; t++) if (DO(u, t, bk)) c++; if (c >= H * 0.5) isB[u] = 1; }
+      let nb = 0; for (let u = cu0; u <= cu1; u++) nb += isB[u];
+      if (nb < 12 || nb < (cu1 - cu0 + 1) * 0.15) continue;
+      // размытая часть штрихкода (полоски слились): полоса там заметно темнее бумаги над штрихкодом
+      const G = (u, t) => { const x = Math.round(u - bk * (t - tc)), y = Math.round(t + bk * (u - uc)); return x >= 0 && x < aw && y >= 0 && y < ah ? gray[(ay0 + y) * w + ax0 + x] : -1; };
+      const paper = []; for (let t = Math.max(0, ta - B); t <= ta - 3; t++) for (let u = 0; u < aw; u += 2) { const v = G(u, t); if (v >= 0) paper.push(v); }
+      if (paper.length > 20) {
+        paper.sort((x, y) => x - y); const bg = paper[paper.length >> 1];
+        for (let u = 0; u < aw; u++) { let sm = 0, n = 0; for (let t = ta; t <= tb; t++) { const v = G(u, t); if (v >= 0) { sm += v; n++; } } if (n > H * 0.8) { if (sm / n < bg - 30) isD[u] = 1; if (sm / n < bg - 15) isS[u] = 1; } }
+      }
+      // бледная крайняя полоска после обработки может стать чёрной: смотрим и на обработанную картинку
+      if (ink) for (let u = 0; u < aw; u++) {
+        let c = 0, n = 0;
+        for (let t = ta; t <= tb; t++) { const x = Math.round(u - bk * (t - tc)), y = Math.round(t + bk * (u - uc)); if (x < 0 || x >= aw || y < 0 || y >= ah) continue; n++; if (ink[(ay0 + y) * w + ax0 + x] < 128) c++; }
+        if (n > H * 0.8 && c >= n * 0.5) isS[u] = 1;
+      }
+      // 6) края: от середины в обе стороны, пока разрыв между полосками меньше 0,8 буквы
+      let ua = -1, ub = -1; for (let u = cu0; u <= cu1; u++) if (isB[u]) { if (ua < 0) ua = u; ub = u; }
+      const gmax = Math.round(B * 0.8);
+      for (let u = ua - 1, last = ua; u >= 0 && last - u <= gmax; u--) if (isB[u] || isD[u]) { ua = u; last = u; }
+      for (let u = ub + 1, last = ub; u < aw && u - last <= gmax; u++) if (isB[u] || isD[u]) { ub = u; last = u; }
+      if (ub - ua < B * 3) continue;
+      // крайние бледные полоски: чуть темнее бумаги, не дальше 1,5 буквы от края
+      for (let u = ua - 1, last = ua, lim = ua - Math.round(B * 1.5); u >= Math.max(0, lim) && last - u <= gmax; u--) if (isS[u]) { ua = u; last = u; }
+      for (let u = ub + 1, last = ub, lim = ub + Math.round(B * 1.5); u <= Math.min(aw - 1, lim) && u - last <= gmax; u++) if (isS[u]) { ub = u; last = u; }
+      // 7) маска: между верхней и нижней линией, по ширине [ua − p, ub + p] — узкими прямоугольниками по 3 столбца;
+      //    полоски скошены (поворот), поэтому каждый прямоугольник шире на величину скоса по высоте полосы
+      const p = Math.max(2, Math.round(B * 0.3));
+      for (let u = ua - p; u <= ub + p; u += 3) {
+        const u1 = Math.min(ub + p, u + 2), xm0 = u - bk * (ta - tc), xm1 = u1 - bk * (tb - tc);
+        const x0 = Math.max(0, Math.floor(Math.min(xm0, xm1, u - bk * (tb - tc), u1 - bk * (ta - tc)) - 0.5));
+        const x1 = Math.min(aw - 1, Math.ceil(Math.max(xm0, xm1, u - bk * (tb - tc), u1 - bk * (ta - tc)) + 0.5));
+        const y0 = Math.floor(Math.min(yTop(x0), yTop(x1))) - 2, y1 = Math.ceil(Math.max(yBot(x0), yBot(x1))) + 2;
+        if (x1 >= x0 && y1 >= y0) out.push({ x0: ax0 + x0, x1: ax0 + x1, y0: Math.max(0, ay0 + y0), y1: Math.min(h - 1, ay0 + y1) });
+      }
     }
     return out;
   }
@@ -2111,7 +2209,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     const gray = ImgProc.toGray(id.data, ow * oh, new Uint8Array(ow * oh));
     const out = ImgProc.prepare(gray, ow, oh, variant, { charH: CHAR_H, K: SET.K });
     // штрихкод (оконные конверты) закрашиваем — уже на выровненной вырезке, где буквы высотой около CHAR_H
-    for (const r of ImgProc.bars(gray, ow, oh, CHAR_H, null))
+    for (const r of ImgProc.bars(gray, ow, oh, CHAR_H, null, out))
       for (let y = Math.max(0, r.y0 - 2), ye = Math.min(oh - 1, r.y1 + 2); y <= ye; y++) out.fill(255, y * ow + Math.max(0, r.x0 - 2), y * ow + Math.min(ow, r.x1 + 3));
     for (let i = 0, j = 0; i < ow * oh; i++, j += 4) { id.data[j] = id.data[j + 1] = id.data[j + 2] = out[i]; id.data[j + 3] = 255; }
     cx.putImageData(id, 0, 0);
