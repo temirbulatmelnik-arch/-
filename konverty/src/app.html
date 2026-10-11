@@ -1230,6 +1230,25 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
   }
 
   const median = a => { if (!a.length) return 0; const s = a.slice().sort((x, y) => x - y); return s[s.length >> 1]; };
+  // Наклон строк в градусах (плюс — строки уходят вниз вправо): при каком угле центры букв
+  // плотнее всего собираются в строки. pts — плоский массив [x, y, x, y, …], mh — высота букв.
+  function skewOf(pts, mh) {
+    const n = pts.length >> 1; if (n < 12) return 0;
+    const bin = Math.max(1, mh * 0.5), cnt = new Map();
+    let cx = 0; for (let i = 0; i < pts.length; i += 2) cx += pts[i]; cx /= n;
+    const score = deg => {
+      const t = Math.tan(deg * Math.PI / 180); cnt.clear();
+      for (let i = 0; i < pts.length; i += 2) {
+        const v = (pts[i + 1] - (pts[i] - cx) * t) / bin, k = Math.floor(v), f = v - k;
+        cnt.set(k, (cnt.get(k) || 0) + 1 - f); cnt.set(k + 1, (cnt.get(k + 1) || 0) + f);
+      }
+      let s = 0; for (const c of cnt.values()) s += c * c; return s;
+    };
+    let best = 0, bs = score(0);
+    for (let d = -12; d <= 12.01; d += 0.5) { const s = score(d); if (s > bs * 1.02) { bs = s; best = d; } }
+    for (let d = best - 0.4; d <= best + 0.41; d += 0.1) { const s = score(d); if (s > bs) { bs = s; best = d; } }
+    return Math.round(best * 10) / 10;
+  }
 
   /* Анализ кадра (уменьшенная копия области рамки):
      есть ли текст, где он, какого размера буквы, много ли бликов. */
@@ -1301,16 +1320,17 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     }
     let best = 0; for (let i = 1; i < sums.length; i++) if (sums[i] > best) best = sums[i];
     const keep = new Set(); for (let i = 1; i < sums.length; i++) if (sums[i] >= Math.max(5, best * 0.15)) keep.add(i);
-    let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1, n = 0;
+    let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1, n = 0; const pts = [];
     for (const c of chars) {
       if (!keep.has(mark[cellOf(c)])) continue;
       n++; if (c.x0 < x0) x0 = c.x0; if (c.y0 < y0) y0 = c.y0; if (c.x1 > x1) x1 = c.x1; if (c.y1 > y1) y1 = c.y1;
+      pts.push((c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2);
     }
     if (n < 6) return { ok: false, n, reason: 'sparse', mh };
     // Доля засвеченных пикселей внутри текста — признак блика
     let sat = 0, tot = 0;
     for (let y = y0; y <= y1; y += 2) for (let x = x0; x <= x1; x += 2) { tot++; if (gray[y * w + x] >= 248) sat++; }
-    return { ok: true, n, mh, bbox: { x0, y0, x1, y1 }, glare: tot ? sat / tot : 0 };
+    return { ok: true, n, mh, bbox: { x0, y0, x1, y1 }, glare: tot ? sat / tot : 0, skew: skewOf(pts, mh) };
   }
 
   // Подготовка изображения для распознавания (gray -> out, 0..255)
@@ -1892,11 +1912,17 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     else { SCAN.locked = true; SCAN.lockedId = rec ? rec.id : -1; SCAN.lockOcrT = performance.now(); SCAN.goneT = 0; setFState('lock', 'Отмечен — уберите конверт'); }
   }
   function unlock() { SCAN.locked = false; SCAN.lockedId = -1; resetScanState(); if (STREAM && OCR.ready) setFState('ready', readyText()); }
+  // Текст «не определён»: если ни у кого из похожих не совпала фамилия — скорее всего, адресата нет в базе
+  // (например, конверт другого месяца); иначе — просим выбрать из списка.
+  const missText = (ranked, src) => !ranked.length ? (src === 'photo' ? 'На фото не найден адрес' : 'Адрес не распознан — поправьте конверт и нажмите пробел ещё раз')
+    : ranked.some(m => m.q.fam >= Engine.T) ? (src === 'photo' ? 'По фото уверенно не определить — выберите адресата в списке' : 'Не удалось определить уверенно — выберите адресата в списке')
+    : 'Фамилия с конверта в базе не найдена — проверьте конверт или найдите адресата вручную';
+  const missList = ranked => ranked.filter(m => m.q.fam >= 0.85 || m.q.st >= Engine.T);
   function scanTimeout() {
     if (!SCAN.armed) return;
-    const ranked = (SCAN.acc ? Engine.rank(BASE, SCAN.acc) : []).filter(m => m.q.fam >= 0.85 || m.q.st >= Engine.T);
+    const ranked = missList(SCAN.acc ? Engine.rank(BASE, SCAN.acc) : []);
     disarm();
-    setVerdictState('miss', ranked.length ? 'Не удалось определить уверенно — выберите адресата в списке' : 'Адрес не распознан — поправьте конверт и нажмите пробел ещё раз');
+    setVerdictState('miss', missText(ranked, 'camera'));
     $('vDistrict').textContent = ranked.length ? '?' : '—';
     $('vName').textContent = ''; $('vAddr').textContent = ''; $('vEv').innerHTML = '';
     if (ranked.length) showCandidates(ranked, 'Похожие адресаты');
@@ -1982,6 +2008,14 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     if (SET.proc !== 'auto') return SET.proc;
     SCAN.variant++; return SCAN.variant % 2 ? 'mean' : 'gray';
   }
+  // Вырезает область кадра в холст распознавания; конверт держат под углом — выравниваем строки:
+  // при наклоне 3–5° длинные строки наклейки «заезжают» на соседние, и распознавание путает строки.
+  function drawCrop(cx, src, x0, y0, w, h, ow, oh, skew) {
+    if (!skew || Math.abs(skew) < 1.2) { cx.drawImage(src, x0, y0, w, h, 0, 0, ow, oh); return; }
+    cx.fillStyle = '#e8e8e8'; cx.fillRect(0, 0, ow, oh);
+    cx.save(); cx.translate(ow / 2, oh / 2); cx.rotate(-skew * Math.PI / 180);
+    cx.drawImage(src, x0, y0, w, h, -ow / 2, -oh / 2, ow, oh); cx.restore();
+  }
   function submit(an, wi) {
     const g = an.g, vw = video.videoWidth, vh = video.videoHeight;
     let x0, y0, x1, y1, s;
@@ -1994,7 +2028,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     const ow = Math.max(32, Math.round((x1 - x0) * s)), oh = Math.max(16, Math.round((y1 - y0) * s));
     const c = OCR.canv[wi], cx = c.getContext('2d', { willReadFrequently: true });
     c.width = ow; c.height = oh; cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = 'high';
-    cx.drawImage(video, x0, y0, x1 - x0, y1 - y0, 0, 0, ow, oh);
+    drawCrop(cx, video, x0, y0, x1 - x0, y1 - y0, ow, oh, an.ok ? an.skew : 0);
     const seen = an.ok;
     recognize(c, cx, ow, oh, wi, pickVariant(), SCAN.session, seen).then(text => { if (text != null) onText(text, 'camera', seen); });
   }
@@ -2104,14 +2138,14 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     for (const variant of ['mean', 'gray']) {
       const wi = Math.max(0, OCR.busy.findIndex(b => !b));
       const c = OCR.canv[wi], cx = c.getContext('2d', { willReadFrequently: true });
-      c.width = ow; c.height = oh; cx.imageSmoothingQuality = 'high'; cx.drawImage(bmp, x0, y0, x1 - x0, y1 - y0, 0, 0, ow, oh);
+      c.width = ow; c.height = oh; cx.imageSmoothingQuality = 'high'; drawCrop(cx, bmp, x0, y0, x1 - x0, y1 - y0, ow, oh, an.ok ? an.skew : 0);
       const text = await recognize(c, cx, ow, oh, wi, variant, session);
       if (text == null) return;
       if (onText(text, 'photo')) { done = true; break; }
     }
     if (!done) {
-      const ranked = SCAN.acc ? Engine.rank(BASE, SCAN.acc) : [];
-      setVerdictState('miss', ranked.length ? 'По фото уверенно не определить — выберите адресата в списке' : 'На фото не найден адрес');
+      const ranked = missList(SCAN.acc ? Engine.rank(BASE, SCAN.acc) : []);
+      setVerdictState('miss', missText(ranked, 'photo'));
       $('vDistrict').textContent = ranked.length ? '?' : '—';
       if (ranked.length) showCandidates(ranked, 'Похожие адресаты');
     }
