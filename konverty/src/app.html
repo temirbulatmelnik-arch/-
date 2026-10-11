@@ -383,6 +383,9 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
 }
 .pw:focus { outline: none; border-color: var(--stamp); box-shadow: 0 0 0 3px var(--stamp-soft); }
 .lock .btn.big { width: 100%; }
+/* имя файла прогресса — второй строкой: длинное имя не вылезает за кнопку */
+#progGo { flex-direction: column; gap: 1px; height: auto; min-height: 52px; padding: 7px 18px; line-height: 1.2; }
+#progGo small { font-size: 13px; font-weight: 500; opacity: .88; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .lock-err { margin: 0; min-height: 20px; color: var(--err); font-size: 14px; }
 .lock-err:empty { min-height: 0; }
 .lock-warn { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--warn-soft); color: var(--ink); font-size: 14px; line-height: 1.4; }
@@ -2521,7 +2524,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     if (!FSA) $('pzSub').textContent = 'Выберите файл прогресса, если он есть. В этом браузере сохранять прогресс придётся кнопкой «Сохранить прогресс» — файл скачается в «Загрузки».';
     const h = FSA ? await progHandleGet() : null;
     if (h) {
-      $('progGo').hidden = false; $('progGo').textContent = `Продолжить с файлом «${h.name}»`;
+      $('progGo').hidden = false; $('progGo').innerHTML = `Продолжить с файлом<small>«${esc(h.name)}»</small>`;
       $('progPick').classList.remove('primary', 'big'); $('progPick').textContent = 'Выбрать другой файл прогресса';
       // разрешение на запись ещё действует (например, после блокировки) — продолжаем сами
       try { if ((await h.queryPermission({ mode: 'readwrite' })) === 'granted') { await useProgHandle(h, true); return; } } catch (e) { /* спросим кнопкой */ }

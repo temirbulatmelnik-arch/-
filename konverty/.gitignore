@@ -5,3 +5,9 @@ data/
 *.json
 !package.json
 !package-lock.json
+# инструкция: демо-версия приложения с демо-ключом, промежуточные файлы
+docs/guide/demo/
+docs/guide/xlrender/
+docs/guide/guide.html
+!docs/guide/marks.json
+!docs/guide/shots/meta.json
