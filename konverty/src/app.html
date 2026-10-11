@@ -1426,14 +1426,41 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     $('baseReset').hidden = !custom;
     buildCabinet(); renderProgress(); renderLedger(); renderList(); resetScanState();
   }
+  // Копия прогресса в IndexedDB с немедленной записью на диск: localStorage браузер сбрасывает на диск
+  // с задержкой в несколько секунд, и при внезапном отключении питания последние отметки терялись
+  let progSeq = 0;
+  const progDb = (mode, fn) => new Promise((res, rej) => {
+    const q = indexedDB.open('konv_prog', 1);
+    q.onupgradeneeded = () => q.result.createObjectStore('p');
+    q.onerror = () => rej(q.error);
+    q.onsuccess = () => {
+      let tx, r;
+      try { tx = q.result.transaction('p', mode, { durability: 'strict' }); r = fn(tx.objectStore('p')); } catch (e) { q.result.close(); rej(e); return; }
+      tx.oncomplete = () => { res(r && r.result); q.result.close(); }; tx.onerror = () => rej(tx.error);
+    };
+  });
   function restoreProgress() {
     DONE = new Set(); HIST = [];
     const a = store.get(KEY, []); if (Array.isArray(a)) a.forEach(i => { if (BASE.recs[i]) DONE.add(i); });
     const h = store.get(KEY + '_hist', []); if (Array.isArray(h)) HIST = h.filter(e => e && BASE.recs[e.id]);
+    progSeq = +store.raw(KEY + '_seq') || 0;
+    const key = KEY;
+    progDb('readonly', s => s.get(key)).then(p => {
+      if (!p || key !== KEY || !(p.seq > progSeq) || !Array.isArray(p.done)) return;
+      // в IndexedDB более свежая копия — значит, localStorage не успел записаться (сбой питания)
+      DONE = new Set(p.done.filter(i => BASE.recs[i])); HIST = (p.hist || []).filter(e => e && BASE.recs[e.id]); progSeq = p.seq;
+      store.set(KEY, [...DONE]); store.set(KEY + '_hist', HIST.slice(0, 800)); store.set(KEY + '_seq', progSeq);
+      DISTRICTS.forEach(updateCell); renderProgress(); renderLedger(); renderList();
+    }).catch(() => { /* IndexedDB недоступна — остаётся localStorage */ });
   }
   function saveProgress() {
+    if (!BASE) return;
+    progSeq++;
     const ok = store.set(KEY, [...DONE]);
     store.set(KEY + '_hist', HIST.slice(0, 800));
+    store.set(KEY + '_seq', progSeq);
+    const rec = { seq: progSeq, done: [...DONE], hist: HIST.slice(0, 800) }, key = KEY;
+    progDb('readwrite', s => s.put(rec, key)).catch(() => { /* останется копия в localStorage */ });
     if (!ok) toast('Не удалось сохранить отметку в браузере. Сохраните прогресс в файл в настройках.');
   }
   const doneIn = d => { let n = 0; DONE.forEach(id => { if (BASE.recs[id].r === d) n++; }); return n; };
@@ -2182,7 +2209,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     $('wipeNo').onclick = () => { $('wipeConfirm').hidden = true; };
     $('wipeYes').onclick = () => {
       try { Object.keys(localStorage).filter(k => k.startsWith('konv_')).forEach(k => localStorage.removeItem(k)); } catch (e) { /* нет доступа */ }
-      try { indexedDB.deleteDatabase('keyval-store'); indexedDB.deleteDatabase('konv_key'); } catch (e) { /* нет базы */ }
+      try { indexedDB.deleteDatabase('keyval-store'); indexedDB.deleteDatabase('konv_key'); indexedDB.deleteDatabase('konv_prog'); } catch (e) { /* нет базы */ }
       if (STREAM) STREAM.getTracks().forEach(t => t.stop());
       location.reload();
     };
@@ -2316,6 +2343,21 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
   const otherTab = () => { try { const t = JSON.parse(localStorage.getItem('konv_tab') || 'null'); return !!(t && t.id !== TAB_ID && Date.now() - t.t < 6000); } catch (e) { return false; } };
   const tabBeat = () => { try { localStorage.setItem('konv_tab', JSON.stringify({ id: TAB_ID, t: Date.now() })); } catch (e) { /* нет доступа */ } };
   window.addEventListener('pagehide', () => { try { const t = JSON.parse(localStorage.getItem('konv_tab') || 'null'); if (t && t.id === TAB_ID) localStorage.removeItem('konv_tab'); } catch (e) { /* нет доступа */ } });
+  // Свежая отметка другого окна может остаться от только что закрытого или упавшего браузера —
+  // поэтому спрашиваем: открытое окно отвечает, закрытое — нет
+  window.addEventListener('storage', e => { if (e.key === 'konv_ping' && e.newValue && BASE && $('lock').hidden) { try { localStorage.setItem('konv_pong', e.newValue); } catch (x) { /* нет доступа */ } } });
+  function otherTabAlive() {
+    if (!otherTab()) return Promise.resolve(false);
+    const token = TAB_ID + Date.now();
+    return new Promise(res => {
+      let t = 0;
+      const on = e => { if (e.key === 'konv_pong' && e.newValue === token) done(true); };
+      const done = v => { window.removeEventListener('storage', on); clearTimeout(t); res(v); };
+      window.addEventListener('storage', on);
+      t = setTimeout(() => done(false), 800);
+      try { localStorage.setItem('konv_ping', token); } catch (e) { done(false); }
+    });
+  }
 
   function boot(data) {
     BASE_DATA = CUR_DATA = data;
@@ -2347,7 +2389,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     $('lockGo').disabled = true; $('lockGo').textContent = 'Проверяю ключ…';
     try {
       const data = await openVault(parseKeyFile(await readKey(src)));
-      if (otherTab()) throw keyErr('othertab');
+      if (await otherTabAlive()) throw keyErr('othertab');
       KEYSRC = src; if (src.handle) handleSet(src.handle);
       boot(data);
       tabBeat(); setInterval(tabBeat, 2000);
