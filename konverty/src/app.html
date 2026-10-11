@@ -365,6 +365,8 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
 .pw:focus { outline: none; border-color: var(--stamp); box-shadow: 0 0 0 3px var(--stamp-soft); }
 .lock .btn.big { width: 100%; }
 .lock-err { margin: 0; min-height: 20px; color: var(--err); font-size: 14px; }
+.lock-err:empty { min-height: 0; }
+.lock-warn { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--warn-soft); color: var(--ink); font-size: 14px; line-height: 1.4; }
 .lock-foot { margin: 4px 0 0; padding-top: 12px; border-top: 1px solid var(--rule-2); color: var(--ink-3); font-size: 13px; display: flex; gap: 8px; align-items: flex-start; }
 .lock-foot svg { margin-top: 1px; color: var(--ok); }
 .lock.shake .lock-card { animation: shake .32s ease-out; }
@@ -438,7 +440,9 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
       <label for="lockPw">Пароль</label>
       <input class="pw" id="lockPw" type="password" autocomplete="current-password" spellcheck="false" required>
       <p class="lock-err" id="lockErr" role="alert"></p>
-      <button class="btn primary big" id="lockGo" type="submit">Открыть</button>
+      <noscript><p class="lock-warn">Этот просмотрщик не запускает программы внутри файла, поэтому приложение здесь не откроется. Сохраните файл на компьютер и откройте его в Chrome, Edge или Яндекс Браузере.</p></noscript>
+      <p class="lock-warn" id="lockWarn" hidden></p>
+      <button class="btn primary big" id="lockGo" type="submit" disabled>Открыть</button>
     </form>
     <p class="lock-foot"><svg class="i"><use href="#i-shield"/></svg><span>Работает без интернета. Данные не покидают этот компьютер. После <span id="lockMin">15</span> минут бездействия приложение блокируется.</span></p>
   </div>
@@ -2265,6 +2269,12 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
       $('lockPw').select();
     } finally { $('lockGo').disabled = false; $('lockGo').textContent = 'Открыть'; }
   };
+  // Кнопка оживает только когда скрипт работает; без нужных возможностей браузера — понятное объяснение
+  const missing = !(window.crypto && crypto.subtle) ? 'шифрование' : typeof DecompressionStream === 'undefined' ? 'распаковку данных' : '';
+  if (missing) {
+    $('lockWarn').textContent = `Этот браузер или просмотрщик не поддерживает ${missing}, поэтому базу здесь не открыть. Откройте файл на компьютере в свежем Chrome, Edge или Яндекс Браузере.`;
+    $('lockWarn').hidden = false;
+  } else $('lockGo').disabled = false;
   camUi(false);
   initOCR(); // модуль распознавания готовится, пока вводят пароль
   setTimeout(() => $('lockPw').focus(), 50);
