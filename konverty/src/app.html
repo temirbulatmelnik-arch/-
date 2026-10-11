@@ -366,6 +366,15 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
 .keyzone.ok .kz-icon { stroke: var(--ok); }
 .kz-title { margin: 0; font-weight: 600; font-size: 16px; }
 .kz-sub { margin: 2px 0 0; color: var(--ink-2); font-size: 13px; }
+.steps { list-style: none; margin: 0; padding: 0; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-3); }
+.steps li { display: flex; align-items: center; gap: 6px; }
+.steps li[data-n]::before { content: attr(data-n); width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; border: 1.5px solid currentColor; font-weight: 600; font-size: 12px; }
+.steps li.on { color: var(--stamp); font-weight: 600; }
+.steps li.done { color: var(--ok); }
+.steps li.done::before { content: "✓"; background: var(--ok); border-color: var(--ok); color: var(--sheet); }
+.steps .sep { flex: 0 0 28px; height: 1.5px; background: var(--rule); }
+.step { display: flex; flex-direction: column; gap: 10px; }
+.step .btn:not(.ghost) { width: 100%; }
 .lock .btn.ghost { align-self: center; height: 34px; font-size: 14px; color: var(--ink-2); border-color: transparent; }
 .lock label { font-size: 13px; color: var(--ink-2); }
 .pw {
@@ -381,6 +390,24 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
 .lock-foot svg { margin-top: 1px; color: var(--ok); }
 .lock.shake .lock-card { animation: shake .32s ease-out; }
 @keyframes shake { 25% { transform: translateX(-6px); } 60% { transform: translateX(5px); } }
+
+/* Состояние сохранения прогресса в шапке */
+.save-state { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); white-space: nowrap; }
+.save-state::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); flex: none; }
+.save-state[data-s="ok"] { color: var(--ok); }
+.save-state[data-s="ok"]::before { background: var(--ok); }
+.save-state[data-s="wait"]::before { background: var(--stamp); animation: pulse 1s ease-in-out infinite; }
+.save-state[data-s="warn"] { color: var(--warn); }
+.save-state[data-s="warn"]::before { background: var(--warn); }
+.save-state[data-s="err"] { color: var(--err); }
+.save-state[data-s="err"]::before { background: var(--err); }
+.btn.attn { border-color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); }
+/* Ноутбуки 1280–1440: шапка в одну строку */
+@media (max-width: 1439px) {
+  .meter { flex-basis: 160px; min-width: 140px; }
+  #btnReport { width: 38px; padding: 0; }
+  #btnReport .lbl { display: none; }
+}
 
 /* Фирменный знак в шапке */
 .brand { display: flex; align-items: center; gap: 12px; }
@@ -446,17 +473,34 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     <div class="lock-mark"><svg viewBox="0 0 120 120" aria-hidden="true"><defs><path id="pmLockA" d="M60,60 m-43,0 a43,43 0 1,1 86,0 a43,43 0 1,1 -86,0"/></defs><circle cx="60" cy="60" r="56" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="60" cy="60" r="33" fill="none" stroke="currentColor" stroke-width="1.5"/><text class="pm-ring"><textPath href="#pmLockA" textLength="268" lengthAdjust="spacingAndGlyphs">СОРТИРОВКА КОНВЕРТОВ ★ САНКТ-ПЕТЕРБУРГ ★</textPath></text><path d="M44 50h32v22H44z M44 51l16 12 16-12" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg></div>
     <h1>Сортировка конвертов</h1>
     <p class="lead" id="lockLead">База адресатов зашифрована. Для работы нужна флешка с ключом.</p>
+    <ol class="steps" aria-label="Шаги входа"><li id="st1" class="on" data-n="1">Ключ</li><li class="sep" aria-hidden="true"></li><li id="st2" data-n="2">Прогресс</li></ol>
+    <div class="step" id="step1">
     <div class="keyzone" id="keyZone">
       <svg class="kz-icon" viewBox="0 0 48 48" aria-hidden="true"><rect x="13" y="16" width="22" height="28" rx="4"/><path d="M17 16V6h14v10"/><path d="M21 10h2M25 10h2"/><circle cx="24" cy="30" r="4"/><path d="M24 34v4"/></svg>
       <div><p class="kz-title" id="kzTitle">Вставьте флешку с ключом</p>
       <p class="kz-sub" id="kzSub">и нажмите «Войти по ключу». Можно перетащить файл ключа прямо в это окно.</p></div>
     </div>
+    </div>
+    <div class="step" id="step2" hidden>
+      <div class="keyzone" id="progZone">
+        <svg class="kz-icon" viewBox="0 0 48 48" aria-hidden="true"><path d="M13 5h16l8 8v30H13z"/><path d="M29 5v8h8"/><path d="M19 28l4 4 8-9"/></svg>
+        <div><p class="kz-title" id="pzTitle">Файл прогресса раскладки</p>
+        <p class="kz-sub" id="pzSub">Отметки будут сохраняться в него автоматически. Храните его на флешке рядом с ключом.</p></div>
+      </div>
+      <button class="btn primary big" id="progGo" type="button" hidden>Продолжить с файлом</button>
+      <button class="btn primary big" id="progPick" type="button">Выбрать файл прогресса</button>
+      <button class="btn" id="progNew" type="button">Создать новый файл прогресса</button>
+      <button class="btn ghost" id="progSkip" type="button">Продолжить без файла</button>
+      <input type="file" id="progFileIn" accept=".json,application/json" hidden>
+    </div>
     <p class="lock-err" id="lockErr" role="alert"></p>
     <noscript><p class="lock-warn">Этот просмотрщик не запускает программы внутри файла, поэтому приложение здесь не откроется. Сохраните файл на компьютер и откройте его в Chrome, Edge или Яндекс Браузере.</p></noscript>
     <p class="lock-warn" id="lockWarn" hidden></p>
+    <div class="step" id="step1b">
     <button class="btn primary big" id="lockGo" type="button" disabled>Войти по ключу</button>
     <button class="btn ghost" id="lockPick" type="button" hidden>Выбрать файл ключа вручную…</button>
     <input type="file" id="lockFile" accept=".key" hidden>
+    </div>
     <p class="lock-foot"><svg class="i"><use href="#i-shield"/></svg><span>Работает без интернета. Данные не покидают этот компьютер. Если вынуть флешку, приложение сразу заблокируется.</span></p>
   </div>
 </div>
@@ -469,6 +513,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
   <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5z"/><path d="M8 4v5h7V4"/><rect x="8" y="13" width="8" height="5" rx="1"/></symbol>
   <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
   <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></symbol>
   <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4v12M7 11l5 5 5-5M5 20h14"/></symbol>
@@ -487,7 +532,9 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
       <span class="meter-pct num" id="pPct">0 %</span>
     </div>
     <div class="top-actions">
-      <button class="btn" id="btnReport"><svg class="i"><use href="#i-list"/></svg>Отчёт по районам</button>
+      <span class="save-state" id="saveState" data-s="warn" role="status">Не сохраняется в файл</span>
+      <button class="btn" id="btnSave" title="Сохранить прогресс раскладки в файл (Ctrl+S)"><svg class="i"><use href="#i-save"/></svg>Сохранить прогресс</button>
+      <button class="btn" id="btnReport" title="Отчёт по районам"><svg class="i"><use href="#i-list"/></svg><span class="lbl">Отчёт по районам</span></button>
       <button class="btn icon" id="btnSettings" aria-label="Настройки" title="Настройки"><svg class="i"><use href="#i-gear"/></svg></button>
       <button class="btn icon" id="btnLock" aria-label="Заблокировать" title="Заблокировать (Ctrl+L)"><svg class="i"><use href="#i-lock"/></svg></button>
     </div>
@@ -616,10 +663,12 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     </section>
     <section>
       <h3>Прогресс</h3>
-      <p class="note">Отметки хранятся в этом браузере. Сохраните копию в файл, чтобы перенести на другой компьютер или подстраховаться.</p>
+      <p class="note">Отметки сохраняются в этом браузере и автоматически — в файл прогресса, выбранный при входе.</p>
+      <p class="note" id="progFileInfo"></p>
       <div class="row" style="margin-top:10px">
-        <button class="btn" id="progSave"><svg class="i"><use href="#i-down"/></svg>Сохранить в файл</button>
-        <button class="btn" id="progLoadBtn">Загрузить из файла</button>
+        <button class="btn" id="progSave"><svg class="i"><use href="#i-save"/></svg>Сохранить прогресс</button>
+        <button class="btn" id="progChange" hidden>Сохранять в другой файл…</button>
+        <button class="btn" id="progLoadBtn">Добавить отметки из файла</button>
         <input type="file" id="progLoad" accept=".json,application/json" hidden>
       </div>
       <div class="row" style="margin-top:8px"><button class="btn ghost danger" id="progReset">Сбросить все отметки…</button></div>
@@ -649,6 +698,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
         <dt><kbd>Esc</kbd></dt><dd>очистить поиск, остановить сканирование</dd>
         <dt><kbd>Ctrl Z</kbd></dt><dd>отменить последнюю отметку</dd>
         <dt><kbd>Ctrl L</kbd></dt><dd>заблокировать приложение</dd>
+        <dt><kbd>Ctrl S</kbd></dt><dd>сохранить прогресс в файл</dd>
       </dl>
     </section>
   </div>
@@ -1402,7 +1452,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
 
   // ---------- База и прогресс ----------
   let BASE_DATA = null;
-  let BASE = null, KEY = '', DISTRICTS = [], TOTAL = {}, BASE_CUSTOM = null;
+  let BASE = null, KEY = '', OLD_KEY = '', DISTRICTS = [], TOTAL = {}, BASE_CUSTOM = null;
   let DONE = new Set(), HIST = [];
   const recOf = id => BASE.recs[id];
   const nameOf = r => SET.full ? r.fio : r.fioShort;
@@ -1413,6 +1463,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     // ключ прогресса — обезличенный отпечаток базы; отметки прежней версии (ключ с ФИО) переносятся
     KEY = 'konv_done_h' + hash(JSON.stringify(data.rows));
     const oldKey = 'konv_done_' + BASE.recs.length + '_' + (BASE.recs[0] ? BASE.recs[0].fioRaw : '');
+    OLD_KEY = oldKey;
     if (store.raw(oldKey) != null) {
       if (store.raw(KEY) == null) { store.set(KEY, store.get(oldKey, [])); store.set(KEY + '_hist', store.get(oldKey + '_hist', [])); }
       store.del(oldKey); store.del(oldKey + '_hist');
@@ -1428,7 +1479,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
   }
   // Копия прогресса в IndexedDB с немедленной записью на диск: localStorage браузер сбрасывает на диск
   // с задержкой в несколько секунд, и при внезапном отключении питания последние отметки терялись
-  let progSeq = 0;
+  let progSeq = 0, PROG_READY = Promise.resolve();
   const progDb = (mode, fn) => new Promise((res, rej) => {
     const q = indexedDB.open('konv_prog', 1);
     q.onupgradeneeded = () => q.result.createObjectStore('p');
@@ -1445,11 +1496,12 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     const h = store.get(KEY + '_hist', []); if (Array.isArray(h)) HIST = h.filter(e => e && BASE.recs[e.id]);
     progSeq = +store.raw(KEY + '_seq') || 0;
     const key = KEY;
-    progDb('readonly', s => s.get(key)).then(p => {
+    PROG_READY = progDb('readonly', s => s.get(key)).then(p => {
       if (!p || key !== KEY || !(p.seq > progSeq) || !Array.isArray(p.done)) return;
       // в IndexedDB более свежая копия — значит, localStorage не успел записаться (сбой питания)
       DONE = new Set(p.done.filter(i => BASE.recs[i])); HIST = (p.hist || []).filter(e => e && BASE.recs[e.id]); progSeq = p.seq;
       store.set(KEY, [...DONE]); store.set(KEY + '_hist', HIST.slice(0, 800)); store.set(KEY + '_seq', progSeq);
+      if (p.t) store.set(KEY + '_t', p.t);
       DISTRICTS.forEach(updateCell); renderProgress(); renderLedger(); renderList();
     }).catch(() => { /* IndexedDB недоступна — остаётся localStorage */ });
   }
@@ -1459,10 +1511,15 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     const ok = store.set(KEY, [...DONE]);
     store.set(KEY + '_hist', HIST.slice(0, 800));
     store.set(KEY + '_seq', progSeq);
-    const rec = { seq: progSeq, done: [...DONE], hist: HIST.slice(0, 800) }, key = KEY;
+    const now = Date.now(); store.set(KEY + '_t', now);
+    const rec = { seq: progSeq, t: now, done: [...DONE], hist: HIST.slice(0, 800) }, key = KEY;
     progDb('readwrite', s => s.put(rec, key)).catch(() => { /* останется копия в localStorage */ });
-    if (!ok) toast('Не удалось сохранить отметку в браузере. Сохраните прогресс в файл в настройках.');
+    if (!ok) toast('Не удалось сохранить отметку в браузере. Нажмите «Сохранить прогресс».');
+    if (PROGH) scheduleFileSave(); else unsavedN++;
+    updateSaveUi();
   }
+  // Время последнего изменения прогресса: явная метка или последняя отметка в журнале
+  const browserProgT = () => Math.max(+store.raw(KEY + '_t') || 0, HIST[0] ? +HIST[0].t || 0 : 0);
   const doneIn = d => { let n = 0; DONE.forEach(id => { if (BASE.recs[id].r === d) n++; }); return n; };
 
   // ---------- Сортировочный шкаф (стопки) ----------
@@ -2060,7 +2117,11 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
   // ---------- Клавиатура ----------
   const inField = el => el && (el.tagName === 'INPUT' && !['checkbox', 'radio', 'range', 'button', 'file'].includes(el.type) || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
   document.addEventListener('keydown', e => {
-    if (!$('lock').hidden) { if (e.key === 'Enter' && !$('lockGo').disabled) { e.preventDefault(); $('lockGo').click(); } return; } // заблокировано
+    if (!$('lock').hidden) { // заблокировано: Enter — основная кнопка текущего шага
+      if (e.key === 'Enter') { const b = STAGE === 'prog' ? (!$('progGo').hidden ? $('progGo') : $('progPick')) : $('lockGo'); if (!b.disabled) { e.preventDefault(); b.click(); } }
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyS') { e.preventDefault(); saveNow(); return; }
     if ((e.ctrlKey || e.metaKey) && (e.code === 'KeyL')) { e.preventDefault(); lockNow(); return; }
     // пустое поле поиска не перехватывает пробел: он по-прежнему запускает сканирование
     if (e.target === $('q') && (e.code === 'Space' || e.key === ' ') && !$('q').value.trim() && !e.ctrlKey && !e.altKey && !e.metaKey) {
@@ -2227,20 +2288,16 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     $('vWord').onchange = () => { SET.word = $('vWord').checked; saveSet(); };
     $('vTest').onclick = () => say(phrase('Выборгский'));
     // прогресс
-    $('progSave').onclick = () => {
-      const blob = new Blob([JSON.stringify({ app: 'konverty', key: KEY, done: [...DONE], hist: HIST, savedAt: new Date().toISOString() })], { type: 'application/json' });
-      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-      a.download = `Прогресс конвертов ${new Date().toLocaleDateString('ru-RU')}.json`; document.body.appendChild(a); a.click();
-      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
-      toast('Файл с прогрессом сохранён в «Загрузки».');
-    };
+    $('progSave').onclick = () => saveNow();
+    $('progChange').hidden = !window.showSaveFilePicker;
+    $('progChange').onclick = () => saveNow(true);
     $('progLoadBtn').onclick = () => $('progLoad').click();
     $('progLoad').onchange = async e => {
       const f = e.target.files[0]; e.target.value = ''; if (!f) return;
       try {
         const j = JSON.parse(await f.text());
         if (!j || !Array.isArray(j.done)) throw new Error('не тот файл');
-        if (j.key && j.key !== KEY) { toast('Этот файл сохранён для другой базы адресатов — отметки не загружены.', 6000); return; }
+        if (j.key && j.key !== KEY && j.key !== OLD_KEY) { toast('Этот файл сохранён для другой базы адресатов — отметки не загружены.', 6000); return; }
         j.done.forEach(i => { if (BASE.recs[i]) DONE.add(i); });
         if (Array.isArray(j.hist)) { const have = new Set(HIST.map(h => h.id + ':' + h.t)); j.hist.forEach(h => { if (BASE.recs[h.id] && !have.has(h.id + ':' + h.t)) HIST.push(h); }); HIST.sort((a, b) => b.t - a.t); }
         saveProgress(); DISTRICTS.forEach(updateCell); renderProgress(); renderLedger();
@@ -2309,11 +2366,11 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     if (!rows.length) { toast('В файле не нашлось строк с фамилией.'); return; }
     const data = { districts, rows, source: XL.name };
     if (XL.b64) data.xbook = { name: XL.name, b64: XL.b64, sheets: XL.sheets, ref };
-    CUR_DATA = data; useBase(data, { name: XL.name });
+    CUR_DATA = data; useBase(data, { name: XL.name }); detachProgFile();
     $('mapBox').hidden = true; $('xlInput').value = ''; XL = null;
     toast(`Загружена база: ${nf(rows.length)} записей, ${districts.length} ${plural(districts.length, 'район', 'района', 'районов')}. Она хранится только до закрытия страницы — сделайте новый ключ в разделе «Защита данных».`, 8000);
   };
-  $('baseReset').onclick = () => { CUR_DATA = BASE_DATA; useBase(BASE_DATA, null); toast('Возвращена встроенная база.'); };
+  $('baseReset').onclick = () => { CUR_DATA = BASE_DATA; useBase(BASE_DATA, null); detachProgFile(); toast('Возвращена встроенная база. Сохраните прогресс в её файл кнопкой «Сохранить прогресс».', 7000); };
 
   // ---------- Уведомления ----------
   let toastT = 0;
@@ -2325,8 +2382,10 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
   // ---------- Блокировка ----------
   let CUR_DATA = null, lastAct = Date.now();
   ['keydown', 'pointerdown', 'pointermove', 'wheel'].forEach(t => document.addEventListener(t, () => { lastAct = Date.now(); }, { passive: true, capture: true }));
-  function lockNow(reason, allowAuto) {
+  async function lockNow(reason, allowAuto) {
     saveProgress();
+    // последние отметки — в файл прогресса до перезагрузки (не дольше 1,5 с: флешку могли вынуть)
+    if (PROGH) { clearTimeout(progT); await Promise.race([writeProgressFile(), new Promise(r => setTimeout(r, 1500))]); }
     try {
       if (reason) sessionStorage.setItem('konv_lockmsg', reason);
       if (allowAuto) sessionStorage.removeItem('konv_noauto'); else sessionStorage.setItem('konv_noauto', '1');
@@ -2345,7 +2404,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
   window.addEventListener('pagehide', () => { try { const t = JSON.parse(localStorage.getItem('konv_tab') || 'null'); if (t && t.id === TAB_ID) localStorage.removeItem('konv_tab'); } catch (e) { /* нет доступа */ } });
   // Свежая отметка другого окна может остаться от только что закрытого или упавшего браузера —
   // поэтому спрашиваем: открытое окно отвечает, закрытое — нет
-  window.addEventListener('storage', e => { if (e.key === 'konv_ping' && e.newValue && BASE && $('lock').hidden) { try { localStorage.setItem('konv_pong', e.newValue); } catch (x) { /* нет доступа */ } } });
+  window.addEventListener('storage', e => { if (e.key === 'konv_ping' && e.newValue && BASE) { try { localStorage.setItem('konv_pong', e.newValue); } catch (x) { /* нет доступа */ } } });
   function otherTabAlive() {
     if (!otherTab()) return Promise.resolve(false);
     const token = TAB_ID + Date.now();
@@ -2365,7 +2424,6 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     useBase(BASE_DATA, null);
     initSettingsUi(); setMode(SET.mode);
     setVerdictState('idle', HIST[0] ? 'Готов к работе' : 'Включите камеру и поднесите конверт');
-    if (SET.camWasOn) startCamera(); else camUi(false);
     lastAct = Date.now();
   }
   // ---------- Вход по ключу с флешки ----------
@@ -2378,6 +2436,8 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     notkey: 'Это не файл ключа. Выберите файл «Ключ сортировки конвертов.key» на флешке.',
     wrongkey: 'Этот ключ от другого файла приложения. Нужен ключ, который выдали вместе с этим файлом.',
     othertab: 'Приложение уже открыто в другом окне или вкладке. Работайте в одном окне, иначе отметки перезапишут друг друга.',
+    notprog: 'Это не файл прогресса. Выберите файл «Прогресс раскладки.json» или создайте новый.',
+    otherbase: 'Этот файл прогресса сохранён для другой базы адресатов. Выберите другой файл или создайте новый.',
   };
   function lockMsg(text, kind) {
     $('lockErr').textContent = text || '';
@@ -2385,7 +2445,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     if (text && kind !== 'quiet') { const l = $('lock'); l.classList.remove('shake'); void l.offsetWidth; l.classList.add('shake'); }
   }
   async function unlockWith(src, quiet) {
-    if (keyBusy) return false; keyBusy = true;
+    if (keyBusy || STAGE !== 'key') return false; keyBusy = true;
     $('lockGo').disabled = true; $('lockGo').textContent = 'Проверяю ключ…';
     try {
       const data = await openVault(parseKeyFile(await readKey(src)));
@@ -2395,8 +2455,8 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
       tabBeat(); setInterval(tabBeat, 2000);
       try { sessionStorage.removeItem('konv_noauto'); } catch (e) { /* нет доступа */ }
       lockMsg('', 'ok'); $('kzTitle').textContent = 'Ключ принят';
-      $('lock').hidden = true;
       watchKey();
+      showStep2();
       return true;
     } catch (err) {
       const code = err && (err.code || err.name);
@@ -2437,12 +2497,165 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     e.preventDefault(); $('keyZone').classList.remove('over');
     const it = e.dataTransfer.items && e.dataTransfer.items[0];
     let h = null; try { if (it && it.getAsFileSystemHandle) h = await it.getAsFileSystemHandle(); } catch (err) { h = null; }
+    if (STAGE === 'prog') {                       // на втором шаге перетаскивают файл прогресса
+      if (h && h.kind === 'file') useProgHandle(h, false);
+      else if (e.dataTransfer.files[0]) useProgFile(e.dataTransfer.files[0]);
+      return;
+    }
     if (h && h.kind === 'file') unlockWith({ handle: h });
     else if (e.dataTransfer.files[0]) unlockWith({ file: e.dataTransfer.files[0] });
   });
+
+  // ---------- Шаг 2: файл прогресса ----------
+  let STAGE = 'key', PROGH = null, progT = 0, progWriting = false, progAgain = false, lastFileSave = 0, saveErr = '', unsavedN = 0, lastDownload = 0;
+  const FSA = !!(window.showOpenFilePicker && window.showSaveFilePicker);
+  const PROG_TYPES = [{ description: 'Прогресс раскладки', accept: { 'application/json': ['.json'] } }];
+  const progHandleGet = () => idb('readonly', s => s.get('prog')).catch(() => null);
+  const progHandleSet = h => idb('readwrite', s => s.put(h, 'prog')).catch(() => null);
+  async function showStep2() {
+    STAGE = 'prog';
+    $('step1').hidden = true; $('step1b').hidden = true; $('step2').hidden = false;
+    $('st1').className = 'done'; $('st2').className = 'on';
+    $('lockLead').textContent = 'Ключ принят. Теперь выберите файл прогресса раскладки.';
+    $('progNew').hidden = !FSA;
+    if (!FSA) $('pzSub').textContent = 'Выберите файл прогресса, если он есть. В этом браузере сохранять прогресс придётся кнопкой «Сохранить прогресс» — файл скачается в «Загрузки».';
+    const h = FSA ? await progHandleGet() : null;
+    if (h) {
+      $('progGo').hidden = false; $('progGo').textContent = `Продолжить с файлом «${h.name}»`;
+      $('progPick').classList.remove('primary', 'big'); $('progPick').textContent = 'Выбрать другой файл прогресса';
+      // разрешение на запись ещё действует (например, после блокировки) — продолжаем сами
+      try { if ((await h.queryPermission({ mode: 'readwrite' })) === 'granted') { await useProgHandle(h, true); return; } } catch (e) { /* спросим кнопкой */ }
+      setTimeout(() => $('progGo').focus(), 30);
+    } else setTimeout(() => $('progPick').focus(), 30);
+  }
+  // Отметки из файла: берём их, только если они новее, чем в браузере
+  function applyProgressText(text) {
+    if (!String(text).trim()) return { from: 'new', n: DONE.size };
+    let j; try { j = JSON.parse(text); } catch (e) { throw keyErr('notprog'); }
+    if (!j || !Array.isArray(j.done)) throw keyErr('notprog');
+    if (j.key && j.key !== KEY && j.key !== OLD_KEY) throw keyErr('otherbase');
+    const fh = Array.isArray(j.hist) ? j.hist : [];
+    const ft = Math.max(+j.t || 0, Date.parse(j.savedAt) || 0, fh[0] ? +fh[0].t || 0 : 0), bt = browserProgT();
+    if (ft > bt || (!DONE.size && j.done.length)) {
+      const before = DONE.size;
+      DONE = new Set(j.done.filter(i => BASE.recs[i])); HIST = fh.filter(e => e && BASE.recs[e.id]);
+      saveProgress(); DISTRICTS.forEach(updateCell); renderProgress(); renderLedger(); renderList();
+      return { from: 'file', n: DONE.size, before };
+    }
+    return { from: 'browser', n: DONE.size, fileN: j.done.length };
+  }
+  function progErr(e) {
+    const code = e && (e.code || e.name);
+    lockMsg(KEY_MSG[code] || (code === 'NotFoundError' ? 'Файл прогресса не найден. Проверьте флешку, выберите файл заново или создайте новый.' :
+      code === 'NotAllowedError' ? 'Нужно разрешить доступ к файлу прогресса.' : 'Не удалось открыть файл прогресса: ' + (e && e.message || e)));
+  }
+  async function useProgHandle(h, auto) {
+    try {
+      await PROG_READY;
+      let perm = 'prompt';
+      try { perm = await h.queryPermission({ mode: 'readwrite' }); if (perm !== 'granted' && !auto) perm = await h.requestPermission({ mode: 'readwrite' }); } catch (e) { perm = 'denied'; }
+      const r = applyProgressText(await (await h.getFile()).text());
+      PROGH = h; progHandleSet(h);
+      finishLogin(r, h.name, perm === 'granted');
+    } catch (e) { progErr(e); }
+  }
+  async function useProgFile(f) {
+    try { await PROG_READY; finishLogin(applyProgressText(await f.text()), f.name, false); } catch (e) { progErr(e); }
+  }
+  function finishLogin(r, name, canWrite) {
+    STAGE = 'done';
+    lockMsg('', 'quiet');
+    $('lock').hidden = true;
+    if (SET.camWasOn) startCamera(); else camUi(false);
+    lastAct = Date.now();
+    if (PROGH && canWrite) writeProgressFile(); else updateSaveUi();
+    let msg;
+    if (r.from === 'file') msg = `Прогресс загружен из файла «${name}»: отмечено ${nf(r.n)}.`;
+    else if (r.from === 'new') msg = `Отметки будут сохраняться в файл «${name}». Сейчас отмечено ${nf(r.n)}.`;
+    else if (name) msg = `В браузере отметки новее, чем в файле «${name}» (${nf(r.n)} против ${nf(r.fileN)})` + (PROGH ? ' — файл обновлён.' : '.');
+    else msg = `Работа без файла прогресса: отмечено ${nf(r.n)}. Сохраните прогресс кнопкой «Сохранить прогресс» вверху.`;
+    if (PROGH && !canWrite) msg += ' Чтобы отметки сохранялись в файл, нажмите «Сохранить прогресс» и разрешите запись.';
+    toast(msg, 8000);
+    $('progFileInfo').textContent = PROGH ? `Файл прогресса: «${PROGH.name}».` : 'Файл прогресса не выбран.';
+  }
+  $('progPick').onclick = async () => {
+    if (!FSA) { $('progFileIn').click(); return; }
+    try { const [h] = await window.showOpenFilePicker({ id: 'konv-prog', multiple: false, types: PROG_TYPES }); await useProgHandle(h, false); }
+    catch (e) { if (e && e.name !== 'AbortError') progErr(e); }
+  };
+  $('progFileIn').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) useProgFile(f); };
+  $('progNew').onclick = async () => {
+    try { const h = await window.showSaveFilePicker({ id: 'konv-prog', suggestedName: 'Прогресс раскладки.json', types: PROG_TYPES }); await useProgHandle(h, false); }
+    catch (e) { if (e && e.name !== 'AbortError') progErr(e); }
+  };
+  $('progGo').onclick = async () => { const h = await progHandleGet(); if (h) await useProgHandle(h, false); else $('progPick').click(); };
+  $('progSkip').onclick = async () => { await PROG_READY; PROGH = null; finishLogin({ from: 'browser', n: DONE.size }, '', false); };
+
+  // ---------- Сохранение прогресса в файл ----------
+  function progressJson() {
+    const t = Date.now();
+    return JSON.stringify({ app: 'konverty', kind: 'progress', v: 2, key: KEY, t, savedAt: new Date(t).toISOString(), count: DONE.size, done: [...DONE], hist: HIST.slice(0, 800) });
+  }
+  async function writeProgressFile() {
+    if (!PROGH) return false;
+    if (progWriting) { progAgain = true; return false; }
+    progWriting = true; let ok = false; updateSaveUi('wait');
+    try {
+      if ((await PROGH.queryPermission({ mode: 'readwrite' })) !== 'granted') throw keyErr('nowrite');
+      const w = await PROGH.createWritable(); await w.write(progressJson()); await w.close();
+      lastFileSave = Date.now(); saveErr = ''; ok = true;
+    } catch (e) { saveErr = (e && (e.code || e.name)) || 'err'; }
+    finally { progWriting = false; updateSaveUi(); if (progAgain) { progAgain = false; scheduleFileSave(); } }
+    return ok;
+  }
+  function scheduleFileSave() { if (!PROGH) return; clearTimeout(progT); progT = setTimeout(writeProgressFile, 700); }
+  function updateSaveUi(force) {
+    const el = $('saveState'); if (!el) return;
+    let s, t;
+    if (force === 'wait' || (PROGH && !lastFileSave && !saveErr)) { s = 'wait'; t = 'Сохраняю…'; }
+    else if (PROGH && saveErr) { s = 'err'; t = saveErr === 'nowrite' ? 'Нужно разрешить запись в файл' : saveErr === 'NotFoundError' ? 'Файл прогресса недоступен' : 'Не сохранено в файл'; }
+    else if (PROGH) { s = 'ok'; t = 'Сохранено в ' + hhmm(lastFileSave); }
+    else if (lastDownload && !unsavedN) { s = 'ok'; t = 'Файл скачан в ' + hhmm(lastDownload); }
+    else { s = 'warn'; t = unsavedN ? `Не сохранено в файл: ${nf(unsavedN)} ${plural(unsavedN, 'изменение', 'изменения', 'изменений')}` : 'Файл прогресса не выбран'; }
+    el.dataset.s = s; el.textContent = t;
+    el.title = PROGH ? `Файл прогресса: «${PROGH.name}»` : 'Нажмите «Сохранить прогресс», чтобы сохранить отметки в файл';
+    $('btnSave').classList.toggle('attn', s === 'err' || s === 'warn');
+  }
+  // Кнопка «Сохранить прогресс» (и Ctrl+S): в выбранный файл; если файла нет — выбрать/создать; без доступа к файлам — скачать
+  async function saveNow(other) {
+    if (!BASE) return;
+    saveProgress();
+    if (PROGH && !other) {
+      try { if ((await PROGH.queryPermission({ mode: 'readwrite' })) !== 'granted') await PROGH.requestPermission({ mode: 'readwrite' }); } catch (e) { /* ниже скажем */ }
+      clearTimeout(progT);
+      const ok = await writeProgressFile();
+      toast(ok ? `Прогресс сохранён в файл «${PROGH.name}»: отмечено ${nf(DONE.size)}.` :
+        'Не удалось сохранить в файл. ' + (saveErr === 'NotFoundError' ? 'Проверьте, вставлена ли флешка.' : saveErr === 'nowrite' ? 'Разрешите запись в файл.' : 'Попробуйте «Сохранять в другой файл…» в настройках.'), 7000);
+      return;
+    }
+    if (FSA) {
+      try {
+        const h = await window.showSaveFilePicker({ id: 'konv-prog', suggestedName: 'Прогресс раскладки.json', types: PROG_TYPES });
+        PROGH = h; progHandleSet(h); lastFileSave = 0; saveErr = '';
+        const ok = await writeProgressFile();
+        $('progFileInfo').textContent = `Файл прогресса: «${h.name}».`;
+        toast(ok ? `Прогресс сохранён в файл «${h.name}». Дальше он будет сохраняться автоматически.` : 'Не удалось сохранить в файл.', 7000);
+      } catch (e) { if (e && e.name !== 'AbortError') toast('Не удалось сохранить: ' + e.message, 7000); }
+      return;
+    }
+    saveFile(new Blob([progressJson()], { type: 'application/json' }), `Прогресс раскладки ${new Date().toLocaleDateString('ru-RU')}.json`);
+    lastDownload = Date.now(); unsavedN = 0; updateSaveUi();
+    toast('Файл прогресса сохранён в «Загрузки». Перенесите его на флешку.', 7000);
+  }
+  $('btnSave').onclick = () => saveNow();
+  // Другая база — свой файл прогресса: прежний файл не перезаписываем отметками другой базы
+  function detachProgFile() {
+    PROGH = null; lastFileSave = 0; saveErr = ''; unsavedN = DONE.size ? 1 : 0; clearTimeout(progT);
+    $('progFileInfo').textContent = 'Файл прогресса не выбран: база сменилась.'; updateSaveUi();
+  }
   // Флешку вставили — если браузер уже разрешил чтение ключа, открываемся сами
   async function autoKey() {
-    if ($('lock').hidden || keyBusy) return;
+    if ($('lock').hidden || keyBusy || STAGE !== 'key') return;
     try { if (sessionStorage.getItem('konv_noauto') === '1') return; } catch (e) { /* нет доступа */ } // после ручной блокировки входим только кнопкой
     const h = await handleGet(); if (!h) return;
     $('lockPick').hidden = false;
