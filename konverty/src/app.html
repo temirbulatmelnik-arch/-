@@ -665,13 +665,13 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
         <button role="radio" data-f="all" aria-checked="false">Все</button>
         <button role="radio" data-f="done" aria-checked="false">Отмечены</button>
       </div>
-      <button class="btn" id="repXls" title="Только количество по районам, без ФИО и адресов"><svg class="i"><use href="#i-down"/></svg>Сводка в Excel</button>
-      <button class="btn ghost" id="repXlsFull" title="Полный список с ФИО и адресами">Полный список…</button>
+      <button class="btn primary" id="repBase" title="Исходный файл базы без изменений; строки разложенных конвертов залиты жёлтым"><svg class="i"><use href="#i-down"/></svg>База Excel с отметками</button>
+      <button class="btn" id="repXls" title="Только количество по районам, без ФИО и адресов">Сводка</button>
       <button class="btn icon ghost" data-close aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button>
     </div>
     <div class="confirm" id="fullConfirm" hidden style="margin:10px 18px 0">
-      В файл попадут ФИО и адреса всех адресатов. Храните его только на рабочем компьютере и удалите, когда он станет не нужен.
-      <div class="row"><button class="btn danger" id="fullYes">Выгрузить полный список</button><button class="btn" id="fullNo">Отмена</button></div>
+      Будет сохранён исходный файл базы ветеранов — без изменений, только строки разложенных конвертов залиты жёлтым. В нём ФИО, адреса и даты рождения: храните его только на рабочем компьютере и удаляйте ненужные копии.
+      <div class="row"><button class="btn primary" id="fullYes">Сохранить файл</button><button class="btn" id="fullNo">Отмена</button></div>
     </div>
     <div class="rep">
       <div class="rep-d" id="repD"></div>
@@ -683,6 +683,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
 <div class="toast" id="toast" role="status" hidden></div>
 
 <!--LIBS-->
+<!--XLSXMARK-->
 <!--VAULT-->
 <script>
 /* Движок сопоставления: распознанный текст конверта -> запись базы.
@@ -2087,6 +2088,10 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
   });
   document.querySelectorAll('#report .seg button').forEach(b => { b.onclick = () => { REP.f = b.dataset.f; renderReport(); }; });
   $('btnReport').onclick = () => openReport();
+  function saveFile(blob, name) {
+    const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1500);
+  }
   async function needXlsx() {
     try { await loadLib('lib-xlsx'); } catch (e) { /* ниже */ }
     if (typeof XLSX === 'undefined') { toast('Не запустился модуль Excel. Обновите страницу.'); return false; }
@@ -2103,22 +2108,23 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     XLSX.writeFile(wb, `Конверты — сводка ${new Date().toLocaleDateString('ru-RU')}.xlsx`);
     toast('Сводка без ФИО и адресов сохранена в «Загрузки».');
   };
-  $('repXlsFull').onclick = () => { $('fullConfirm').hidden = false; };
+  $('repBase').onclick = () => {
+    if (!CUR_DATA || !CUR_DATA.xbook) { toast('У этой базы нет исходного Excel-файла. Загрузите базу из Excel в настройках.', 6000); return; }
+    $('fullConfirm').hidden = false;
+  };
   $('fullNo').onclick = () => { $('fullConfirm').hidden = true; };
   $('fullYes').onclick = async () => {
     $('fullConfirm').hidden = true;
-    if (!await needXlsx()) return;
-    const lastT = new Map(); HIST.forEach(e => { if (!e.undone && !e.dup && !lastT.has(e.id)) lastT.set(e.id, e.t); });
-    const sum = summaryRows();
-    const list = [['Район', 'Фамилия', 'Имя', 'Отчество', 'Адрес', 'Индекс', 'Отмечен', 'Время отметки']].concat(
-      BASE.recs.slice().sort((a, b) => a.r.localeCompare(b.r, 'ru') || a.fioRaw.localeCompare(b.fioRaw, 'ru'))
-        .map(r => [r.r, Engine.titleCase(r.famRaw), Engine.titleCase(r.imRaw), Engine.titleCase(r.otRaw), r.addr, r.idxRaw, DONE.has(r.id) ? 'да' : 'нет', lastT.has(r.id) ? new Date(lastT.get(r.id)).toLocaleString('ru-RU') : '']));
-    const wb = XLSX.utils.book_new();
-    const s1 = XLSX.utils.aoa_to_sheet(sum); s1['!cols'] = [{ wch: 22 }, { wch: 8 }, { wch: 10 }, { wch: 10 }];
-    const s2 = XLSX.utils.aoa_to_sheet(list); s2['!cols'] = [{ wch: 20 }, { wch: 18 }, { wch: 14 }, { wch: 18 }, { wch: 52 }, { wch: 8 }, { wch: 9 }, { wch: 18 }];
-    XLSX.utils.book_append_sheet(wb, s1, 'Сводка'); XLSX.utils.book_append_sheet(wb, s2, 'Адресаты');
-    XLSX.writeFile(wb, `Конверты — полный список ${new Date().toLocaleDateString('ru-RU')}.xlsx`);
-    toast('Полный список сохранён в «Загрузки». Удалите файл, когда он станет не нужен.', 6000);
+    const xb = CUR_DATA.xbook;
+    try {
+      await loadLib('lib-fflate');
+      const marks = {};
+      DONE.forEach(id => { const ref = xb.ref[id]; if (!ref) return; const n = xb.sheets[ref[0]]; (marks[n] = marks[n] || []).push(ref[1]); });
+      const { bytes, painted } = XlsxMark.mark(b64d(xb.b64), marks, fflate);
+      const base = xb.name.replace(/\.xlsx$/i, '');
+      saveFile(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `${base} — разложено ${nf(painted)} на ${new Date().toLocaleDateString('ru-RU')}.xlsx`);
+      toast(`Файл сохранён в «Загрузки»: жёлтым залито ${nf(painted)} ${plural(painted, 'строка', 'строки', 'строк')} из ${nf(BASE.recs.length)}.`, 7000);
+    } catch (err) { toast('Не удалось подготовить файл: ' + err.message, 7000); }
   };
 
   // ---------- Настройки ----------
@@ -2134,7 +2140,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     $('optFull').onchange = () => { SET.full = $('optFull').checked; saveSet(); renderList(); renderLedger(); if (!$('report').hidden) renderReport(); const id = $('verdict').dataset.id; if (id) { $('vName').textContent = nameOf(recOf(+id)); $('vAddr').textContent = addrOf(recOf(+id)); } };
     $('lockSel').onchange = () => { SET.lockMin = +$('lockSel').value; saveSet(); };
     // новый ключ и новый файл
-    const save = (blob, name) => { const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1500); };
+    const save = saveFile;
     $('keyNew').onclick = () => { $('keyConfirm').hidden = false; $('keyBase').textContent = BASE_CUSTOM ? `«${BASE_CUSTOM.name}», ${nf(BASE.recs.length)} записей` : `встроенная, ${nf(BASE.recs.length)} записей`; };
     $('keyNo').onclick = () => { $('keyConfirm').hidden = true; };
     $('keyYes').onclick = async () => {
@@ -2211,12 +2217,17 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     const f = e.target.files[0]; if (!f) return;
     if (!await needXlsx()) return;
     try {
-      const wb = XLSX.read(await f.arrayBuffer());
-      let all = [];
-      wb.SheetNames.forEach(n => { all = all.concat(XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, defval: '' })); });
-      let h = all.findIndex(r => r.some(c => /фамил|фио/i.test(String(c)))); if (h < 0) h = 0;
-      const hdr = all[h].map(x => String(x).trim());
-      XL = { name: f.name, hdr, rows: all.slice(h + 1).filter(r => r.some(c => String(c).trim() !== '' && !/фамил/i.test(String(c)))) };
+      const buf = new Uint8Array(await f.arrayBuffer());
+      const wb = XLSX.read(buf);
+      const all = [];
+      wb.SheetNames.forEach((n, si) => {
+        const ws = wb.Sheets[n]; if (!ws || !ws['!ref']) return;
+        const r0 = XLSX.utils.decode_range(ws['!ref']).s.r;
+        XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: true }).forEach((row, i) => all.push({ row, si, r: r0 + i + 1 }));
+      });
+      let h = all.findIndex(o => o.row.some(c => /фамил|фио/i.test(String(c)))); if (h < 0) h = 0;
+      const hdr = all[h].row.map(x => String(x).trim());
+      XL = { name: f.name, hdr, sheets: wb.SheetNames, b64: /\.xlsx$/i.test(f.name) ? b64e(buf) : '', rows: all.slice(h + 1).filter(o => o.row.some(c => String(c).trim() !== '' && !/фамил/i.test(String(c)))) };
       const opts = '<option value="-1">— нет —</option>' + hdr.map((t, i) => `<option value="${i}">${esc(t || 'Колонка ' + (i + 1))}</option>`).join('');
       $('mapGrid').innerHTML = ROLES.map(([k, label]) => `<label class="field"><span>${label}</span><select data-role="${k}">${opts}</select></label>`).join('');
       ROLES.forEach(([k, , re]) => {
@@ -2233,17 +2244,22 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     const col = k => +$('mapGrid').querySelector(`[data-role="${k}"]`).value;
     const v = (r, k) => { const i = col(k); return i >= 0 ? String(r[i] == null ? '' : r[i]).trim() : ''; };
     if (col('r') < 0 || (col('fam') < 0 && col('fio') < 0)) { toast('Укажите колонку района и колонку фамилии (или ФИО).'); return; }
-    const districts = [], rows = [];
-    XL.rows.forEach(r => {
+    const districts = [], rows = [], ref = [];
+    XL.rows.forEach(o => {
+      const r = o.row;
       let fam = v(r, 'fam'), im = v(r, 'im'), ot = v(r, 'ot');
       if (!fam && col('fio') >= 0) { const p = v(r, 'fio').split(/\s+/); fam = p[0] || ''; im = p[1] || ''; ot = p.slice(2).join(' '); }
       if (!fam) return;
       const d = v(r, 'r') || 'Район не указан';
-      let di = districts.indexOf(d); if (di < 0) { districts.push(d); di = districts.length - 1; }
+      // «ВЫБОРГСКИЙ» и «Выборгский» — одна стопка
+      let di = districts.findIndex(x => x.toLowerCase() === d.toLowerCase());
+      if (di < 0) { districts.push(d); di = districts.length - 1; } else if (districts[di] === districts[di].toUpperCase() && d !== d.toUpperCase()) districts[di] = d;
       rows.push([di, fam, im, ot, v(r, 'idx'), v(r, 'town'), v(r, 'np'), v(r, 'st'), v(r, 'house'), v(r, 'korp'), v(r, 'apt')]);
+      ref.push([o.si, o.r]);
     });
     if (!rows.length) { toast('В файле не нашлось строк с фамилией.'); return; }
     const data = { districts, rows, source: XL.name };
+    if (XL.b64) data.xbook = { name: XL.name, b64: XL.b64, sheets: XL.sheets, ref };
     CUR_DATA = data; useBase(data, { name: XL.name });
     $('mapBox').hidden = true; $('xlInput').value = ''; XL = null;
     toast(`Загружена база: ${nf(rows.length)} записей, ${districts.length} ${plural(districts.length, 'район', 'района', 'районов')}. Она хранится только до закрытия страницы — сделайте новый ключ в разделе «Защита данных».`, 8000);
