@@ -2118,7 +2118,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
   const inField = el => el && (el.tagName === 'INPUT' && !['checkbox', 'radio', 'range', 'button', 'file'].includes(el.type) || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
   document.addEventListener('keydown', e => {
     if (!$('lock').hidden) { // заблокировано: Enter — основная кнопка текущего шага
-      if (e.key === 'Enter') { const b = STAGE === 'prog' ? (!$('progGo').hidden ? $('progGo') : $('progPick')) : $('lockGo'); if (!b.disabled) { e.preventDefault(); b.click(); } }
+      if (e.key === 'Enter') { const b = STAGE === 'prog' ? $('step2').querySelector('.btn.primary:not([hidden])') : $('lockGo'); if (b && !b.disabled) { e.preventDefault(); b.click(); } }
       return;
     }
     if ((e.ctrlKey || e.metaKey) && e.code === 'KeyS') { e.preventDefault(); saveNow(); return; }
@@ -2516,7 +2516,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     STAGE = 'prog';
     $('step1').hidden = true; $('step1b').hidden = true; $('step2').hidden = false;
     $('st1').className = 'done'; $('st2').className = 'on';
-    $('lockLead').textContent = 'Ключ принят. Теперь выберите файл прогресса раскладки.';
+    $('lockLead').textContent = 'Ключ принят. Остался файл прогресса раскладки.';
     $('progNew').hidden = !FSA;
     if (!FSA) $('pzSub').textContent = 'Выберите файл прогресса, если он есть. В этом браузере сохранять прогресс придётся кнопкой «Сохранить прогресс» — файл скачается в «Загрузки».';
     const h = FSA ? await progHandleGet() : null;
@@ -2526,6 +2526,14 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
       // разрешение на запись ещё действует (например, после блокировки) — продолжаем сами
       try { if ((await h.queryPermission({ mode: 'readwrite' })) === 'granted') { await useProgHandle(h, true); return; } } catch (e) { /* спросим кнопкой */ }
       setTimeout(() => $('progGo').focus(), 30);
+    } else if (FSA) {
+      // первый запуск: файла ещё нет — главное действие «Создать»
+      $('progPick').before($('progNew'));
+      $('progNew').classList.add('primary', 'big'); $('progPick').classList.remove('primary', 'big');
+      $('progPick').textContent = 'У меня уже есть файл прогресса';
+      $('pzTitle').textContent = 'Первый запуск? Создайте файл прогресса';
+      $('pzSub').textContent = 'Нажмите «Создать новый файл прогресса» и сохраните его на флешку рядом с ключом. Если файл уже есть (например, с другого компьютера) — выберите его.';
+      setTimeout(() => $('progNew').focus(), 30);
     } else setTimeout(() => $('progPick').focus(), 30);
   }
   // Отметки из файла: берём их, только если они новее, чем в браузере
