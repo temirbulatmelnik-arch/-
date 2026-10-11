@@ -1076,6 +1076,17 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     return ev.idx6.some(n => /^19\d{4}$/.test(n));
   }
 
+  // В кадре точно прочитаны имя или отчество (в любом падеже), которых нет ни у одного из кандидатов
+  function otherName(cands, ev) {
+    if (!ev || !ev.base) return false;
+    for (const [w, e] of ev.vq) {
+      if (e.nq < 0.9) continue;
+      const t = ev.base.vtype.get(w) || 0, k = t === 2 ? 'im' : t === 4 ? 'ot' : '';
+      if (k && cands.every(m => m.rec[k] !== w && stem(m.rec[k]) !== stem(w))) return true;
+    }
+    return false;
+  }
+
   // Решение: уверенно ли определён адресат.
   // ranked — кандидаты по убыванию, ev — признаки кадра (нужны для проверки противоречий)
   function decide(ranked, ev, opt) {
@@ -1127,7 +1138,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     return res.slice(0, limit || 50);
   }
 
-  const api = { canon, splitWords, stem, lev, Base, tokenize, evidence, mergeEvidence, rank, decide, addrConflict, search, fieldScores, titleCase, T };
+  const api = { canon, splitWords, stem, lev, Base, tokenize, evidence, mergeEvidence, rank, decide, addrConflict, otherName, search, fieldScores, titleCase, T };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Engine = api;
 })(typeof window !== 'undefined' ? window : globalThis);
 
@@ -1969,13 +1980,19 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     else { SCAN.locked = true; SCAN.lockedId = rec ? rec.id : -1; SCAN.lockOcrT = performance.now(); SCAN.goneT = 0; setFState('lock', 'Отмечен — уберите конверт'); }
   }
   function unlock() { SCAN.locked = false; SCAN.lockedId = -1; resetScanState(); if (STREAM && OCR.ready) setFState('ready', readyText()); }
-  // Текст «не определён»: если ни у кого из похожих не совпала фамилия — скорее всего, адресата нет в базе
-  // (например, конверт другого месяца); если ФИО совпало, а адрес другой — это может быть тёзка;
+  // Текст «не определён» (ranked — похожие адресаты, ev — накопленные признаки кадров):
+  // ФИО совпало, а адрес на конверте другой — возможно, тёзка не из этого списка;
+  // фамилия не совпала ни у кого — скорее всего, адресата нет в базе (например, конверт другого месяца);
+  // фамилия совпала точно, а имя или отчество на конверте точно прочитано и чужое — в базе только однофамильцы;
   // иначе — просим выбрать из списка.
-  const missText = (ranked, src, ev) => !ranked.length ? (src === 'photo' ? 'На фото не найден адрес' : 'Адрес не распознан — поправьте конверт и нажмите пробел ещё раз')
-    : ranked[0].nName === 2 && ranked[0].q.fam >= 0.85 && Engine.addrConflict(ranked[0], ev) ? 'ФИО как у ветерана из базы, но адрес на конверте другой — сверьте адрес, прежде чем отмечать'
-    : ranked.some(m => m.q.fam >= Engine.T) ? (src === 'photo' ? 'По фото уверенно не определить — выберите адресата в списке' : 'Не удалось определить уверенно — выберите адресата в списке')
-    : 'Фамилия с конверта в базе не найдена — проверьте конверт или найдите адресата вручную';
+  function missText(ranked, src, ev) {
+    if (!ranked.length) return src === 'photo' ? 'На фото не найден адрес' : 'Адрес не распознан — поправьте конверт и нажмите пробел ещё раз';
+    const top = ranked[0], fam = ranked.filter(m => m.q.fam >= 0.85), same = fam.filter(m => m.q.fam >= 0.9);
+    if (top.nName === 2 && top.q.fam >= 0.85 && Engine.addrConflict(top, ev)) return 'ФИО как у ветерана из базы, но адрес на конверте другой — сверьте адрес, прежде чем отмечать';
+    if (!fam.length) return 'Фамилия с конверта в базе не найдена — проверьте конверт или найдите адресата вручную';
+    if (same.length && fam.every(m => m.nName === 0) && Engine.otherName(fam, ev)) return 'Совпала только фамилия: имя и отчество на конверте другие — проверьте конверт';
+    return src === 'photo' ? 'По фото уверенно не определить — выберите адресата в списке' : 'Не удалось определить уверенно — выберите адресата в списке';
+  }
   const missList = ranked => ranked.filter(m => m.q.fam >= 0.85 || m.q.st >= Engine.T);
   function scanTimeout() {
     if (!SCAN.armed) return;
