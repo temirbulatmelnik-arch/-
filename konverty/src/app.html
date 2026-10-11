@@ -1069,6 +1069,13 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     return limit ? out.slice(0, limit) : out;
   }
 
+  // Адрес на конверте не тот, что у кандидата: улица не совпала, а индекс Санкт-Петербурга в кадре прочитан,
+  // и он чужой даже с поправкой на одну ошибку распознавания. Так выглядит конверт тёзки, которого нет в базе
+  function addrConflict(m, ev) {
+    if (!ev || !m.rec.idx || m.q.st >= T || m.q.idx > 0) return false;
+    return ev.idx6.some(n => /^19\d{4}$/.test(n));
+  }
+
   // Решение: уверенно ли определён адресат.
   // ranked — кандидаты по убыванию, ev — признаки кадра (нужны для проверки противоречий)
   function decide(ranked, ev, opt) {
@@ -1097,6 +1104,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
         if (o.q.st >= 0.85 && (o.q.house || o.q.idx >= 1) && o.rec.street.join(' ') !== key) return null;
       }
     }
+    if (addrConflict(top, ev)) return null;      // ФИО как у кандидата, а адрес на конверте другой
     if (ev && ev.base && (q.im < T || q.ot < T)) {   // чужое имя или отчество, прочитанное точно (в любом падеже)
       for (const [w, e] of ev.vq) {
         if (e.nq < 0.9) continue;
@@ -1119,7 +1127,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     return res.slice(0, limit || 50);
   }
 
-  const api = { canon, splitWords, stem, lev, Base, tokenize, evidence, mergeEvidence, rank, decide, search, fieldScores, titleCase, T };
+  const api = { canon, splitWords, stem, lev, Base, tokenize, evidence, mergeEvidence, rank, decide, addrConflict, search, fieldScores, titleCase, T };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Engine = api;
 })(typeof window !== 'undefined' ? window : globalThis);
 
@@ -1962,16 +1970,18 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
   }
   function unlock() { SCAN.locked = false; SCAN.lockedId = -1; resetScanState(); if (STREAM && OCR.ready) setFState('ready', readyText()); }
   // Текст «не определён»: если ни у кого из похожих не совпала фамилия — скорее всего, адресата нет в базе
-  // (например, конверт другого месяца); иначе — просим выбрать из списка.
-  const missText = (ranked, src) => !ranked.length ? (src === 'photo' ? 'На фото не найден адрес' : 'Адрес не распознан — поправьте конверт и нажмите пробел ещё раз')
+  // (например, конверт другого месяца); если ФИО совпало, а адрес другой — это может быть тёзка;
+  // иначе — просим выбрать из списка.
+  const missText = (ranked, src, ev) => !ranked.length ? (src === 'photo' ? 'На фото не найден адрес' : 'Адрес не распознан — поправьте конверт и нажмите пробел ещё раз')
+    : ranked[0].nName === 2 && ranked[0].q.fam >= 0.85 && Engine.addrConflict(ranked[0], ev) ? 'ФИО как у ветерана из базы, но адрес на конверте другой — сверьте адрес, прежде чем отмечать'
     : ranked.some(m => m.q.fam >= Engine.T) ? (src === 'photo' ? 'По фото уверенно не определить — выберите адресата в списке' : 'Не удалось определить уверенно — выберите адресата в списке')
     : 'Фамилия с конверта в базе не найдена — проверьте конверт или найдите адресата вручную';
   const missList = ranked => ranked.filter(m => m.q.fam >= 0.85 || m.q.st >= Engine.T);
   function scanTimeout() {
     if (!SCAN.armed) return;
-    const ranked = missList(SCAN.acc ? Engine.rank(BASE, SCAN.acc) : []);
-    disarm();
-    setVerdictState('miss', missText(ranked, 'camera'));
+    const acc = SCAN.acc, ranked = missList(acc ? Engine.rank(BASE, acc) : []);
+    disarm();                                    // сбрасывает SCAN.acc — поэтому кадры запомнены заранее
+    setVerdictState('miss', missText(ranked, 'camera', acc));
     $('vDistrict').textContent = ranked.length ? '?' : '—';
     $('vName').textContent = ''; $('vAddr').textContent = ''; $('vEv').innerHTML = '';
     if (ranked.length) showCandidates(ranked, 'Похожие адресаты');
@@ -2197,8 +2207,8 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
       if (onText(text, 'photo')) { done = true; break; }
     }
     if (!done) {
-      const ranked = missList(SCAN.acc ? Engine.rank(BASE, SCAN.acc) : []);
-      setVerdictState('miss', missText(ranked, 'photo'));
+      const acc = SCAN.acc, ranked = missList(acc ? Engine.rank(BASE, acc) : []);
+      setVerdictState('miss', missText(ranked, 'photo', acc));
       $('vDistrict').textContent = ranked.length ? '?' : '—';
       if (ranked.length) showCandidates(ranked, 'Похожие адресаты');
     }

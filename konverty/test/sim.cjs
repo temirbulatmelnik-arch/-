@@ -89,6 +89,15 @@ if (mode === 'neg') {
     const row = D.rows[c].slice(); row[1] = D.rows[id][1]; row[2] = D.rows[id][2]; row[3] = D.rows[id][3];
     return { text: G.envelope(row, fem(id), B.recs[c], { dat: 1 }), district: B.recs[c].r, expect: id, note: 'adr' };
   }, 1, 0.03);
+  // Тёзка не из списка: ФИО как у человека из базы, а улица и индекс другие (улицы в базе нет)
+  const FAKE = ['ул. Лиственничная', 'пр. Звездочётный', 'ул. Малахитовая', 'пер. Янтарный', 'ул. Брусничная'];
+  const far = (a, b) => { let d = 0; for (let i = 0; i < 6; i++) d += a[i] !== b[i]; return d >= 2; };
+  scenario('настоящее ФИО + адрес не из базы (тёзка не из списка)', (id, rec) => {
+    const row = D.rows[id].slice(); let idx;
+    do { idx = '19' + String(Math.floor(G.rnd() * 10000)).padStart(4, '0'); } while (row[4] && !far(idx, row[4]));
+    row[4] = idx; row[8] = String(1 + Math.floor(G.rnd() * 120)); row[9] = String(1 + Math.floor(G.rnd() * 4)); row[10] = String(1 + Math.floor(G.rnd() * 300));
+    return { text: G.envelope(row, fem(id), { addrShort: G.pick(FAKE) }, { dat: 1 }), district: '', expect: null };
+  }, 1, 0.03);
   scenario('та же фамилия и адрес, другое имя (родственник не из базы)', (id, rec) => {
     const b = D.rows[Math.floor(G.rnd() * D.rows.length)]; if (!b[2] || b[2] === D.rows[id][2]) return null;
     const row = D.rows[id].slice(); row[2] = b[2]; row[3] = b[3];
