@@ -45,6 +45,8 @@ const CSS = `
 @font-face{font-family:"PT Sans Narrow";font-weight:400;src:url(../../node_modules/@fontsource/pt-sans-narrow/files/pt-sans-narrow-latin-400-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+2000-206F,U+20AC,U+2122,U+2212}
 @font-face{font-family:"PT Sans Narrow";font-weight:700;src:url(../../node_modules/@fontsource/pt-sans-narrow/files/pt-sans-narrow-cyrillic-700-normal.woff2) format("woff2");unicode-range:U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116}
 @font-face{font-family:"PT Sans Narrow";font-weight:700;src:url(../../node_modules/@fontsource/pt-sans-narrow/files/pt-sans-narrow-latin-700-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+2000-206F,U+20AC,U+2122,U+2212}
+/* Без размытых теней и полупрозрачности: в PDF они становятся «мягкими масками», а часть просмотрщиков
+   рисует на их месте серые прямоугольники. Глубину дают только непрозрачные рамки и «бортики». */
 /* Цвета приложения: фиолетовые «почтовые» чернила, авиа-кант; выноски — красные, чтобы не сливаться с кнопками */
 :root{--ink:#1C1D2E;--ink2:#555870;--ink3:#8A8DA3;--paper:#F4F4F8;--rule:#DADBE5;--stamp:#4A4EA8;--stamp-soft:#ECEDF9;
   --ok:#1F7A4D;--ok-soft:#E4F3EA;--warn:#A8650F;--warn-soft:#FBF0DD;--err:#B53A35;--err-soft:#F9E5E3;--call:#D7372F;--air:#C8473F}
@@ -68,14 +70,14 @@ kbd{display:inline-block;font:600 8.6pt/1.45 "Golos Text";padding:0 1.6mm;border
 .cover{page:cover;width:210mm;height:297mm;position:relative;display:flex;flex-direction:column;background:#fff;overflow:hidden}
 .air{height:9mm;flex:none;background:repeating-linear-gradient(-45deg,var(--stamp) 0 9mm,#fff 9mm 13mm,var(--air) 13mm 22mm,#fff 22mm 26mm)}
 .cover-in{flex:1;padding:24mm 22mm 0;display:flex;flex-direction:column;
-  background:radial-gradient(150mm 110mm at 105% -5%,var(--stamp-soft),transparent 70%),repeating-linear-gradient(-45deg,transparent 0 5.5mm,#F1F1F6 5.5mm 5.8mm)}
+  background:repeating-linear-gradient(-45deg,#fff 0 5.5mm,#F1F1F6 5.5mm 5.8mm)}
 .cover-mark{width:42mm;height:42mm;color:var(--stamp);transform:rotate(-8deg);margin-bottom:12mm}
 .cover-mark svg{width:100%;height:100%}
 .kicker{font:600 11pt "Golos Text";letter-spacing:.06em;text-transform:uppercase;color:var(--stamp);margin-bottom:5mm}
 .cover h1{font-size:56pt;line-height:.95;margin-bottom:8mm}
 .cover-lead{font-size:14.5pt;line-height:1.4;color:var(--ink2);max-width:150mm;margin-bottom:14mm}
 .cover-three{display:grid;grid-template-columns:repeat(3,1fr);gap:5mm;max-width:166mm}
-.c3{background:#fff;border:1px solid var(--rule);border-radius:12px;padding:5mm 5mm 4.5mm;box-shadow:0 4mm 9mm -6mm rgba(28,29,46,.25)}
+.c3{background:#fff;border:1px solid var(--rule);border-radius:12px;padding:5mm 5mm 4.5mm;box-shadow:0 1.2mm 0 #E4E5EE}
 .c3 .ico{width:9mm;height:9mm;color:var(--stamp);margin-bottom:3mm}
 .c3 b{display:block;font:700 13.5pt "PT Sans Narrow";margin-bottom:1mm}
 .c3 span{font-size:9.6pt;color:var(--ink2);line-height:1.4;display:block}
@@ -97,11 +99,11 @@ kbd{display:inline-block;font:600 8.6pt/1.45 "Golos Text";padding:0 1.6mm;border
 .step-b p:not(.step-t){color:var(--ink2)}
 /* ---------- Снимки и выноски ---------- */
 .shot{margin:2.5mm 0 3mm;break-inside:avoid}
-.shot-in{position:relative;border-radius:9px;box-shadow:0 0 0 1px var(--rule),0 3mm 7mm -4mm rgba(28,29,46,.3);background:#fff}
+.shot-in{position:relative;border-radius:9px;box-shadow:0 0 0 1px #D5D7E2;background:#fff}
 .shot img{display:block;width:100%;border-radius:9px}
 .shot figcaption{font-size:8.8pt;color:var(--ink3);margin-top:2mm}
-.hl{position:absolute;border:2.4px solid var(--call);border-radius:7px;box-shadow:0 0 0 3px rgba(215,55,47,.16)}
-.hl i{position:absolute;left:-3.4mm;top:-3.4mm;width:6.4mm;height:6.4mm;border-radius:50%;background:var(--call);color:#fff;font:700 10pt/6.4mm "Golos Text";text-align:center;font-style:normal;box-shadow:0 0 0 .6mm #fff,0 .6mm 1.6mm rgba(0,0,0,.35)}
+.hl{position:absolute;border:2.4px solid var(--call);border-radius:7px;box-shadow:0 0 0 1.2px #fff}
+.hl i{position:absolute;left:-3.4mm;top:-3.4mm;width:6.4mm;height:6.4mm;border-radius:50%;background:var(--call);color:#fff;font:700 10pt/6.4mm "Golos Text";text-align:center;font-style:normal;box-shadow:0 0 0 .6mm #fff}
 .hl.a-tr i{left:auto;right:-3.4mm}
 .hl.a-l i{left:-8.2mm;top:calc(50% - 3.2mm)}
 .hl.a-r i{left:calc(100% + 1.8mm);top:calc(50% - 3.2mm)}
@@ -136,22 +138,22 @@ kbd{display:inline-block;font:600 8.6pt/1.45 "Golos Text";padding:0 1.6mm;border
 /* ---------- Защита: плитки ---------- */
 .tiles{display:grid;grid-template-columns:1fr 1fr;gap:3mm}
 .tile{display:grid;grid-template-columns:11mm 1fr;gap:3.2mm;padding:3.2mm 3.8mm;border:1px solid var(--rule);border-radius:10px;break-inside:avoid;background:#fff}
-.tile .ic{width:11mm;height:11mm;border-radius:50%;background:var(--stamp-soft);display:grid;place-items:center}
-.tile .ic .ico{width:5.8mm;height:5.8mm;color:var(--stamp)}
+.tile .ic{width:11mm;height:11mm;display:grid;place-items:center}
+.tile .ic .ico{width:7mm;height:7mm;color:var(--stamp)}
 .tile b{display:block;font:700 12.6pt/1.15 "PT Sans Narrow";margin:.6mm 0 1mm}
 .tile span{font-size:9.2pt;line-height:1.42;color:var(--ink2);display:block}
 .fine{font-size:8.2pt;color:var(--ink3);line-height:1.4;margin-top:2.6mm}
 .pd-band{display:grid;grid-template-columns:14mm 1fr;gap:4mm;align-items:center;padding:4mm 5mm;border-radius:11px;background:var(--stamp);color:#fff;margin:1mm 0 4.5mm}
 .pd-band .ico{width:12mm;height:12mm;color:#fff}
 .pd-band b{display:block;font:700 15pt/1.15 "PT Sans Narrow";margin-bottom:1mm}
-.pd-band span{font-size:10pt;line-height:1.45;opacity:.92}
+.pd-band span{font-size:10pt;line-height:1.45;color:#EEEFFB}
 /* ---------- Что где лежит ---------- */
 .where{display:grid;grid-template-columns:1fr 1fr;gap:6mm;margin:3mm 0 5mm}
 .box{border:1.5px solid var(--rule);border-radius:12px;padding:4mm;break-inside:avoid;background:#fff}
 .box-h{display:flex;align-items:center;gap:2.6mm;font:700 13.5pt "PT Sans Narrow";margin-bottom:3mm}
 .box-h .ico{width:7.5mm;height:7.5mm;color:var(--stamp)}
-.file{display:grid;grid-template-columns:8mm 1fr;gap:2.6mm;align-items:center;padding:2.4mm 3mm;border-radius:8px;background:var(--paper);margin-top:2mm}
-.file .ico{width:6mm;height:6mm;color:var(--ink2)}
+.file{display:grid;grid-template-columns:8mm 1fr;gap:2.6mm;align-items:center;padding:2.4mm 3mm;border-radius:8px;background:#fff;border:1px solid var(--rule);margin-top:2mm}
+.file .ico{width:6mm;height:6mm;color:var(--stamp)}
 .file b{font-size:9.6pt;display:block;line-height:1.25;word-break:break-word}
 .file span{font-size:8.6pt;color:var(--ink2)}
 .box.after{max-width:118mm;margin-top:5mm}

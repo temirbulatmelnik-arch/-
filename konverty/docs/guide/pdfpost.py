@@ -1,11 +1,13 @@
 # Доводка PDF после печати из Chromium:
 #  1) исправляет названия закладок: Chromium удваивает текст заголовков во flex-контейнере
 #     («Первый запускПервый запуск») и склеивает строки через <br> («Сортировкаконвертов»);
-#  2) печатает {"заголовок": страница} — по нему собирается оглавление.
+#  2) печатает {"заголовок": страница} — по нему собирается оглавление;
+#  3) не пропускает «мягкие маски» и полупрозрачность (их дают размытые тени и rgba в CSS):
+#     просмотрщики без их поддержки рисуют на этом месте серые прямоугольники.
 # Запуск: python3 pdfpost.py файл.pdf '["Заголовок 1", ...]'
 import json, sys
 from pypdf import PdfReader, PdfWriter
-from pypdf.generic import NameObject, TextStringObject
+from pypdf.generic import ArrayObject, DictionaryObject, IndirectObject, NameObject, StreamObject, TextStringObject
 
 path, known = sys.argv[1], json.loads(sys.argv[2])
 squash = lambda t: ''.join(t.split())
@@ -38,6 +40,28 @@ while stack:
     for key in ('/Next', '/First'):
         if key in it:
             stack.append(it[key])
+seen, bad = set(), []
+def walk(o):
+    if isinstance(o, IndirectObject):
+        if o.idnum in seen:
+            return
+        seen.add(o.idnum)
+        o = o.get_object()
+    if isinstance(o, (DictionaryObject, StreamObject)):
+        for k, v in o.items():
+            if k == '/SMask' and v != '/None':
+                bad.append('мягкая маска')
+            elif k in ('/ca', '/CA') and float(v) < 1:
+                bad.append('полупрозрачность')
+            if k != '/Parent':
+                walk(v)
+    elif isinstance(o, ArrayObject):
+        for v in o:
+            walk(v)
+for pg in w.pages:
+    walk(pg.indirect_reference)
+if bad:
+    sys.exit('В PDF есть ' + ', '.join(sorted(set(bad))) + ' — уберите размытые тени и rgba/opacity из CSS')
 w.add_metadata({'/Subject': 'Как работать с приложением «Сортировка конвертов»: вход по ключу, раскладка конвертов, сохранение прогресса, выгрузка в Excel, защита персональных данных'})
 with open(path, 'wb') as f:
     w.write(f)
