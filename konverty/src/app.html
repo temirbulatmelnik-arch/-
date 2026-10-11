@@ -1411,6 +1411,68 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     return out;
   }
 
+  // Блок «ФИО + адрес» на оконном конверте: строки ниже штрихкода (и строки цифр под ним), выровненные по левому краю
+  // со строкой ФИО. ink — вырезка после обработки (< 128 — чернила), mh — высота букв, R — прямоугольники штрихкода
+  // из bars(). Возвращает {x0, y0, x1, y1} или null, если блок уверенно не найден (тогда распознаём всю вырезку).
+  function addrBlock(ink, w, h, mh, R) {
+    if (!R || !R.length) return null;
+    let bx0 = 1e9, bx1 = -1, yTopMin = 1e9, yBotMin = 1e9, yBotMax = -1;
+    for (const r of R) { bx0 = Math.min(bx0, r.x0); bx1 = Math.max(bx1, r.x1); yTopMin = Math.min(yTopMin, r.y0); yBotMin = Math.min(yBotMin, r.y1); yBotMax = Math.max(yBotMax, r.y1); }
+    // чернила ниже верха штрихкода, без самого штрихкода
+    const Y0 = Math.max(0, yTopMin), hh = h - Y0;
+    if (hh < mh * 3) return null;
+    const bin = new Uint8Array(w * hh);
+    for (let y = 0; y < hh; y++) for (let x = 0; x < w; x++) if (ink[(Y0 + y) * w + x] < 128) bin[y * w + x] = 1;
+    for (const r of R) for (let y = Math.max(Y0, r.y0 - 2); y <= Math.min(h - 1, r.y1 + 2); y++) for (let x = Math.max(0, r.x0 - 2); x <= Math.min(w - 1, r.x1 + 2); x++) bin[(y - Y0) * w + x] = 0;
+    // буквы и слитные куски слов (на смазанном снимке буквы сливаются — ширина может быть большой, высота — как у букв)
+    const comps = components(bin, w, hh).filter(c => c.h >= mh * 0.45 && c.h <= mh * 1.7 && c.w <= mh * 30 && c.a >= 6);
+    if (comps.length < 5) return null;
+    // строки: по середине по высоте; в строке — куски, разделённые разрывами больше 2,2 буквы
+    comps.sort((a, b) => (a.y0 + a.y1) - (b.y0 + b.y1));
+    const lines = [];
+    for (const c of comps) {
+      const cy = (c.y0 + c.y1) / 2;
+      let L = lines.find(l => Math.abs(l.cy - cy) <= mh * 0.45);
+      if (!L) { L = { cy, cs: [] }; lines.push(L); }
+      L.cs.push(c); L.cy = L.cs.reduce((s, q) => s + (q.y0 + q.y1) / 2, 0) / L.cs.length;
+    }
+    const med = a => { const s = a.slice().sort((p, q) => p - q); return s[s.length >> 1]; };
+    for (const L of lines) {
+      L.cs.sort((a, b) => a.x0 - b.x0);
+      L.segs = [];                                                       // куски строки: только ширина и число букв
+      let cur = null;
+      for (const c of L.cs) {
+        if (cur && c.x0 - cur.x1 <= mh * 2.2) { cur.x1 = Math.max(cur.x1, c.x1); cur.n++; }
+        else { if (cur) L.segs.push(cur); cur = { x0: c.x0, x1: c.x1, n: 1 }; }
+      }
+      if (cur) L.segs.push(cur);
+      L.hm = med(L.cs.map(c => c.h));
+      L.y0 = Math.min(...L.cs.map(c => c.y0)) + Y0; L.y1 = Math.max(...L.cs.map(c => c.y1)) + Y0;
+    }
+    // часть строки в пределах наклейки: правее левого края (номер партии ≈ на 14 букв левее штрихкода) и не правее её
+    const near = (L, x0, x1) => L.segs.filter(s => s.x1 >= x0 && s.x0 <= x1);
+    // строка ФИО: первая строка обычного текста ниже штрихкода (строка цифр под штрихкодом мельче)
+    const cand = lines.filter(L => L.y0 >= yBotMin - mh * 0.2 && L.hm >= mh * 0.75)
+      .map(L => ({ L, ss: near(L, bx0 - mh * 14, bx1 + mh * 2) })).filter(o => o.ss.reduce((n, s) => n + s.n, 0) >= 4)
+      .sort((a, b) => a.L.y0 - b.L.y0);
+    if (!cand.length) return null;
+    const nm = cand[0];
+    if (nm.L.y0 - yBotMax > mh * 4) return null;                         // слишком далеко от штрихкода — не та наклейка
+    const blk = { x0: Math.min(...nm.ss.map(s => s.x0)), x1: Math.max(...nm.ss.map(s => s.x1)), y0: nm.L.y0, y1: nm.L.y1 };
+    // строки адреса: ниже, без больших разрывов; берём их куски, которые начинаются у левого края блока или лежат в нём
+    let lastY = nm.L.y1;
+    for (const L of lines.filter(q => q.y0 > nm.L.y0 + mh * 0.5).sort((a, b) => a.y0 - b.y0)) {
+      if (L.y0 - lastY > mh * 1.6) break;
+      if (L.hm < mh * 0.6) continue;
+      const ss = near(L, blk.x0 - mh * 2.5, blk.x1 + mh * 8);
+      if (!ss.length || Math.abs(Math.min(...ss.map(s => s.x0)) - blk.x0) > mh * 2.5 && Math.min(...ss.map(s => s.x0)) < blk.x0) continue;
+      blk.x0 = Math.min(blk.x0, ...ss.map(s => s.x0)); blk.x1 = Math.max(blk.x1, ...ss.map(s => s.x1)); blk.y1 = Math.max(blk.y1, L.y1); lastY = L.y1;
+    }
+    if (blk.y1 - blk.y0 < mh * 1.8) return null;                         // хотя бы две строки
+    return { x0: Math.max(0, Math.round(blk.x0 - mh)), x1: Math.min(w - 1, Math.round(blk.x1 + mh)),
+             y0: Math.max(0, Math.round(blk.y0 - mh * 0.45)), y1: Math.min(h - 1, Math.round(blk.y1 + mh * 0.6)) };
+  }
+
   /* Анализ кадра (уменьшенная копия области рамки):
      есть ли текст, где он, какого размера буквы, много ли бликов. */
   function analyze(gray, w, h, opt) {
@@ -1543,7 +1605,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     return out;
   }
 
-  const api = { toGray, sauvola, components, analyze, prepare, bars };
+  const api = { toGray, sauvola, components, analyze, prepare, bars, addrBlock };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.ImgProc = api;
 })(typeof window !== 'undefined' ? window : globalThis);
 
@@ -2208,11 +2270,18 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     const id = cx.getImageData(0, 0, ow, oh);
     const gray = ImgProc.toGray(id.data, ow * oh, new Uint8Array(ow * oh));
     const out = ImgProc.prepare(gray, ow, oh, variant, { charH: CHAR_H, K: SET.K });
-    // штрихкод (оконные конверты) закрашиваем — уже на выровненной вырезке, где буквы высотой около CHAR_H
-    for (const r of ImgProc.bars(gray, ow, oh, CHAR_H, null, out))
+    // Оконный конверт: штрихкод находим на выровненной вырезке (буквы высотой около CHAR_H) и распознаём только
+    // блок «ФИО + адрес» под ним — без штрихкода, номера партии и посторонних надписей: картинка меньше, распознаётся
+    // быстрее и без мусорного текста. Если блок уверенно не найден — вся вырезка, штрихкод закрашен.
+    const R = ImgProc.bars(gray, ow, oh, CHAR_H, null, out);
+    for (const r of R)
       for (let y = Math.max(0, r.y0 - 2), ye = Math.min(oh - 1, r.y1 + 2); y <= ye; y++) out.fill(255, y * ow + Math.max(0, r.x0 - 2), y * ow + Math.min(ow, r.x1 + 3));
-    for (let i = 0, j = 0; i < ow * oh; i++, j += 4) { id.data[j] = id.data[j + 1] = id.data[j + 2] = out[i]; id.data[j + 3] = 255; }
-    cx.putImageData(id, 0, 0);
+    const B = ImgProc.addrBlock(out, ow, oh, CHAR_H, R);
+    const X = B ? B.x0 : 0, Y = B ? B.y0 : 0, W = B ? B.x1 - B.x0 + 1 : ow, H = B ? B.y1 - B.y0 + 1 : oh;
+    const od = B ? cx.createImageData(W, H) : id;
+    for (let y = 0, j = 0; y < H; y++) for (let x = 0, k = (Y + y) * ow + X; x < W; x++, k++, j += 4) { od.data[j] = od.data[j + 1] = od.data[j + 2] = out[k]; od.data[j + 3] = 255; }
+    if (B) { c.width = W; c.height = H; }
+    cx.putImageData(od, 0, 0);
     if (SET.showProc && preview !== false) drawPip(c); // кадр без найденного текста не показываем
     OCR.busy[wi] = true;
     return OCR.workers[wi].recognize(c, {}, { text: true, blocks: false, hocr: false, tsv: false })
