@@ -3,6 +3,7 @@
 //  - шифрует базу адресатов случайным 256-битным ключом (AES-256-GCM); ключ сохраняется в отдельный файл для флешки.
 //  - встраивает исходный Excel базы (тоже зашифрованным), чтобы выгружать его с жёлтой заливкой разложенных.
 // Запуск: node build.mjs --data base.json --xlsx база.xlsx --xlsx-name "База ветеранов.xlsx" --out dist/konverty.html --key dist/ключ.key
+//         [--reuse-key старый.key — обновить приложение, не меняя ключ на флешке]
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -59,7 +60,15 @@ if (XFILE) {
   data.xbook = { name: arg('xlsx-name', path.basename(XFILE)), b64: buf.toString('base64'), sheets: wb.SheetNames, ref };
   console.log(`Excel: ${ref.length} записей сопоставлены со строками файла`);
 }
-const raw = crypto.getRandomValues(new Uint8Array(32)), iv = crypto.getRandomValues(new Uint8Array(12));
+// --reuse-key: зашифровать тем же ключом, что уже лежит на флешке (не нужно менять ключ при обновлении)
+let raw;
+if (arg('reuse-key')) {
+  const p = fs.readFileSync(arg('reuse-key'), 'utf8').trim().split(/\s+/);
+  if (p[0] !== 'KONVERTY-KEY-1' || !p[1]) throw new Error('--reuse-key: это не файл ключа');
+  raw = new Uint8Array(Buffer.from(p[1], 'base64'));
+  if (raw.length !== 32) throw new Error('--reuse-key: повреждённый ключ');
+} else raw = crypto.getRandomValues(new Uint8Array(32));
+const iv = crypto.getRandomValues(new Uint8Array(12));
 const key = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt']);
 const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, zlib.gzipSync(Buffer.from(JSON.stringify(data)))));
 const B = u => Buffer.from(u).toString('base64');

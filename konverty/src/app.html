@@ -895,7 +895,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
       let o = vq.get(w);
       if (o === undefined) { o = { q: 0, a: -1, b: -1, nq: 0, na: -1, nb: -1 }; vq.set(w, o); }
       if (q > o.q) { o.q = q; o.a = cur.a; o.b = cur.b; }
-      if (!cur.ad && q > o.nq) { o.nq = q; o.na = cur.a; o.nb = cur.b; }
+      if (!cur.ad && q > o.nq) { o.nq = q; o.na = cur.a; o.nb = cur.b; o.nt = cur.w; }
     };
     const consider = (tk, isJoin) => {
       const t = tk.w; cur = tk;
@@ -940,7 +940,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
       let o = acc.vq.get(w);
       if (o === undefined) { o = { q: 0, a: -1, b: -1, nq: 0, na: -1, nb: -1 }; acc.vq.set(w, o); }
       if (e.q > o.q) { o.q = e.q; o.a = e.a + shift; o.b = e.b + shift; }
-      if (e.nq > o.nq) { o.nq = e.nq; o.na = e.na + shift; o.nb = e.nb + shift; }
+      if (e.nq > o.nq) { o.nq = e.nq; o.na = e.na + shift; o.nb = e.nb + shift; o.nt = e.nt; }
     }
     ev.nums.forEach(n => acc.nums.add(n));
     ev.idx6.forEach(n => { if (!acc.idx6.includes(n)) acc.idx6.push(n); });
@@ -948,14 +948,18 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     return acc;
   }
 
+  // Слово, похожее на отчество в любом падеже: «Федоровне», «Ильиничной», «Петровичу»
+  const PATR_RE = /(вн|ичн)(а|ы|е|у|ои|ою)$|(ович|евич)(а|у|ем|е)?$/;
   const ham1 = (a, b) => { if (a.length !== b.length) return false; let d = 0; for (let i = 0; i < a.length; i++) if (a[i] !== b[i] && ++d > 1) return false; return d === 1; };
 
   function fieldScores(rec, ev) {
     const ent = w => { const x = ev.vq.get(w); return x && x.q > 0 ? x : null; };
     // для ФИО — только слова вне адресных строк
-    const nent = w => { const x = ev.vq.get(w); return x && x.nq > 0 ? { q: x.nq, a: x.na, b: x.nb } : null; };
+    const nent = w => { const x = ev.vq.get(w); return x && x.nq > 0 ? { q: x.nq, a: x.na, b: x.nb, t: x.nt } : null; };
     const best = ws => { let e = null; for (const w of ws) { const x = nent(w); if (x && (!e || x.q > e.q)) e = x; } return e; };
-    const eFam = best(rec.fam), eIm = rec.im ? nent(rec.im) : null, eOt = rec.ot ? nent(rec.ot) : null;
+    let eFam = best(rec.fam);
+    if (eFam && eFam.t && PATR_RE.test(eFam.t) && !rec.fam.some(w => PATR_RE.test(w))) eFam = null;
+    const eIm = rec.im ? nent(rec.im) : null, eOt = rec.ot ? nent(rec.ot) : null;
     let eSt = null, qSt = 0;
     if (rec.street.length) {
       const es = rec.street.map(ent);
@@ -1040,12 +1044,12 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
         if (o.q.st >= 0.85 && (o.q.house || o.q.idx >= 1) && o.rec.street.join(' ') !== key) return null;
       }
     }
-    if (ev && ev.base && (q.im < T || q.ot < T)) {   // чужое имя или отчество, прочитанное точно
+    if (ev && ev.base && (q.im < T || q.ot < T)) {   // чужое имя или отчество, прочитанное точно (в любом падеже)
       for (const [w, e] of ev.vq) {
-        if (e.nq < 1) continue;
+        if (e.nq < 0.9) continue;
         const t = ev.base.vtype.get(w) || 0;
-        if (q.im < T && t === 2 && w !== rec.im) return null;
-        if (q.ot < T && t === 4 && w !== rec.ot) return null;
+        if (q.im < T && t === 2 && w !== rec.im && stem(w) !== stem(rec.im)) return null;
+        if (q.ot < T && t === 4 && w !== rec.ot && stem(w) !== stem(rec.ot)) return null;
       }
     }
     return top;
@@ -1598,6 +1602,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
 
   // ---------- Отметка ----------
   function commit(rec, src, match) {
+    lastAct = Date.now();
     const dup = DONE.has(rec.id);
     if (!dup) DONE.add(rec.id);
     const entry = { id: rec.id, t: Date.now(), src, dup: dup ? 1 : 0 };
@@ -1639,10 +1644,19 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     LIST = { mode: items.length ? 'cand' : 'none', items, sel: 0, title };
     renderList();
   }
+  // «bdfyjdf» → «иванов»: набрали в английской раскладке
+  const EN_KEYS = "qwertyuiop[]asdfghjkl;'zxcvbnm,.`", RU_KEYS = 'йцукенгшщзхъфывапролджэячсмитьбюё';
+  const toRu = t => t.toLowerCase().replace(/[a-z\[\];',.`]/g, c => RU_KEYS[EN_KEYS.indexOf(c)] || c);
   function runSearch() {
-    const q = $('q').value.trim();
+    let q = $('q').value.trim();
     if (!q) { LIST = { mode: 'none', items: [], sel: 0 }; renderList(); return; }
-    const res = Engine.search(BASE, q, id => DONE.has(id), 200);
+    let res;
+    // латинские буквы в фамилии — почти наверняка не та раскладка (поиск отбросил бы их молча)
+    if (/[a-z]/i.test(q)) {
+      const r2 = Engine.search(BASE, toRu(q), id => DONE.has(id), 200);
+      if (r2.length) { res = r2; $('q').value = toRu($('q').value); }
+    }
+    if (!res) res = Engine.search(BASE, q, id => DONE.has(id), 200);
     LIST = { mode: 'search', items: res.slice(0, 60), total: res.length, sel: 0 };
     renderList();
   }
@@ -1687,6 +1701,11 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     video.srcObject = STREAM;
     try { await video.play(); } catch (e) { /* автозапуск видео */ }
     TRACK = STREAM.getVideoTracks()[0];
+    TRACK.addEventListener('ended', () => {
+      if (!STREAM) return;
+      stopCamera(); camUi(false, 'Камера отключилась. Подключите её и нажмите «Включить камеру».');
+      setVerdictState('miss', 'Камера отключилась'); toast('Камера отключилась. Подключите её и нажмите «Включить камеру».', 7000);
+    });
     SET.camWasOn = true; saveSet();
     camUi(true); applyCameraCaps(); listCameras();
     setFState(OCR.ready ? 'ready' : 'load', OCR.ready ? readyText() : 'Загружаю распознавание…');
@@ -1823,7 +1842,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     return g;
   }
   const anaC = document.createElement('canvas'), anaX = anaC.getContext('2d', { willReadFrequently: true });
-  let grayBuf = new Uint8Array(1), LAST_AN = null, LOOP = false, lastAnaT = 0;
+  let grayBuf = new Uint8Array(1), LAST_AN = null, LOOP = false, lastAnaT = 0, lastOkT = 0;
   function analyzeFrame() {
     const g = guide();
     const AW = Math.max(64, Math.min(1024, Math.round(g.w))), AH = Math.max(32, Math.round(AW * g.h / g.w));
@@ -1844,9 +1863,12 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     const now = performance.now();
     const wantOcr = OCR.ready && (SET.mode === 'space' ? SCAN.armed : true);
     const free = wantOcr ? OCR.busy.findIndex(b => !b) : -1;
-    if (free < 0 && now - lastAnaT < 220) return; // без распознавания анализируем ~4 раза в секунду (подсказки и рамка)
+    // Полная скорость — пока идёт сканирование или в кадре недавно был текст; над пустым столом — 4 раза в секунду
+    const lively = SCAN.armed || (SET.mode === 'auto' && !SCAN.locked && now - lastOkT < 2000);
+    if (now - lastAnaT < (!lively ? 250 : free < 0 ? 220 : 0)) return;
     lastAnaT = now;
     let an; try { an = analyzeFrame(); } catch (e) { return; }
+    if (an.ok) lastOkT = now;
     LAST_AN = an; drawOverlay(an); updateHint(an);
     if (SET.mode === 'auto') autoWatch(an, now);
     if (free < 0) return;
@@ -1855,7 +1877,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
       if (SCAN.locked) {            // конверт уже отмечен: изредка проверяем, не подложили ли следующий
         if (!an.ok || now - SCAN.lockOcrT < 900) return;
         SCAN.lockOcrT = now;
-      } else if (!an.ok && SCAN.noText++ % 6 !== 0) return; // без текста — изредка, на случай сильного блика
+      } else if (!an.ok && SCAN.noText++ % (lively ? 6 : 3) !== 0) return; // без текста — изредка, на случай сильного блика
     } else if (!an.ok && SCAN.noText++ % 2 !== 0) return;
     submit(an, free);
   }
@@ -2276,14 +2298,24 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
   // ---------- Блокировка ----------
   let CUR_DATA = null, lastAct = Date.now();
   ['keydown', 'pointerdown', 'pointermove', 'wheel'].forEach(t => document.addEventListener(t, () => { lastAct = Date.now(); }, { passive: true, capture: true }));
-  function lockNow(reason) {
+  function lockNow(reason, allowAuto) {
     saveProgress();
-    try { if (reason) sessionStorage.setItem('konv_lockmsg', reason); } catch (e) { /* нет доступа */ }
+    try {
+      if (reason) sessionStorage.setItem('konv_lockmsg', reason);
+      if (allowAuto) sessionStorage.removeItem('konv_noauto'); else sessionStorage.setItem('konv_noauto', '1');
+      if (localStorage.getItem('konv_tab') && JSON.parse(localStorage.getItem('konv_tab')).id === TAB_ID) localStorage.removeItem('konv_tab');
+    } catch (e) { /* нет доступа */ }
     if (STREAM) STREAM.getTracks().forEach(t => t.stop());
     location.reload(); // перезагрузка стирает расшифрованную базу из памяти
   }
   $('btnLock').onclick = () => lockNow();
-  setInterval(() => { if (BASE && !SCAN.armed && Date.now() - lastAct > SET.lockMin * 60000) lockNow(); }, 20000);
+  setInterval(() => { if (BASE && !SCAN.armed && Date.now() - lastAct > SET.lockMin * 60000) lockNow(`Приложение заблокировано после ${SET.lockMin} минут бездействия.`); }, 20000);
+
+  // ---------- Одно окно приложения: две вкладки перезаписывали бы отметки друг друга ----------
+  const TAB_ID = Math.random().toString(36).slice(2);
+  const otherTab = () => { try { const t = JSON.parse(localStorage.getItem('konv_tab') || 'null'); return !!(t && t.id !== TAB_ID && Date.now() - t.t < 6000); } catch (e) { return false; } };
+  const tabBeat = () => { try { localStorage.setItem('konv_tab', JSON.stringify({ id: TAB_ID, t: Date.now() })); } catch (e) { /* нет доступа */ } };
+  window.addEventListener('pagehide', () => { try { const t = JSON.parse(localStorage.getItem('konv_tab') || 'null'); if (t && t.id === TAB_ID) localStorage.removeItem('konv_tab'); } catch (e) { /* нет доступа */ } });
 
   function boot(data) {
     BASE_DATA = CUR_DATA = data;
@@ -2303,6 +2335,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     NotAllowedError: 'Нужно разрешить чтение ключа: нажмите «Войти по ключу» и подтвердите.',
     notkey: 'Это не файл ключа. Выберите файл «Ключ сортировки конвертов.key» на флешке.',
     wrongkey: 'Этот ключ от другого файла приложения. Нужен ключ, который выдали вместе с этим файлом.',
+    othertab: 'Приложение уже открыто в другом окне или вкладке. Работайте в одном окне, иначе отметки перезапишут друг друга.',
   };
   function lockMsg(text, kind) {
     $('lockErr').textContent = text || '';
@@ -2314,14 +2347,18 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     $('lockGo').disabled = true; $('lockGo').textContent = 'Проверяю ключ…';
     try {
       const data = await openVault(parseKeyFile(await readKey(src)));
+      if (otherTab()) throw keyErr('othertab');
       KEYSRC = src; if (src.handle) handleSet(src.handle);
+      boot(data);
+      tabBeat(); setInterval(tabBeat, 2000);
+      try { sessionStorage.removeItem('konv_noauto'); } catch (e) { /* нет доступа */ }
       lockMsg('', 'ok'); $('kzTitle').textContent = 'Ключ принят';
       $('lock').hidden = true;
-      boot(data); watchKey();
+      watchKey();
       return true;
     } catch (err) {
       const code = err && (err.code || err.name);
-      if (!quiet) lockMsg(KEY_MSG[code] || 'Не удалось открыть базу: ' + (err && err.message || err));
+      if (!quiet || code === 'othertab') lockMsg(KEY_MSG[code] || 'Не удалось открыть базу: ' + (err && err.message || err));
       return false;
     } finally { keyBusy = false; $('lockGo').disabled = false; $('lockGo').textContent = 'Войти по ключу'; }
   }
@@ -2330,7 +2367,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     clearInterval(watchT);
     watchT = setInterval(async () => {
       try { if (KEYSRC.handle) await KEYSRC.handle.getFile(); else await KEYSRC.file.slice(0, 1).arrayBuffer(); }
-      catch (e) { clearInterval(watchT); lockNow('Флешку с ключом вынули — приложение заблокировано. Вставьте её снова.'); }
+      catch (e) { clearInterval(watchT); lockNow('Флешку с ключом вынули — приложение заблокировано. Вставьте её снова.', true); }
     }, 2000);
   }
   async function pickKey() {
@@ -2363,7 +2400,8 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
   });
   // Флешку вставили — если браузер уже разрешил чтение ключа, открываемся сами
   async function autoKey() {
-    if (!$('lock').hidden || keyBusy) return;
+    if ($('lock').hidden || keyBusy) return;
+    try { if (sessionStorage.getItem('konv_noauto') === '1') return; } catch (e) { /* нет доступа */ } // после ручной блокировки входим только кнопкой
     const h = await handleGet(); if (!h) return;
     $('lockPick').hidden = false;
     try { if ((await h.queryPermission({ mode: 'read' })) === 'granted') await unlockWith({ handle: h }, true); } catch (e) { /* ждём флешку */ }
