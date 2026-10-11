@@ -1,7 +1,7 @@
 // Сборка офлайн-версии «Сортировки конвертов»:
 //  - встраивает модуль распознавания, русский словарь, модуль Excel и шрифты (сеть не нужна);
-//  - шифрует базу адресатов паролем (AES-256-GCM, ключ PBKDF2-SHA256, 600 000 итераций).
-// Запуск: KONV_PASSWORD='…' node build.mjs --data путь/к/base.json --out dist/konverty.html
+//  - шифрует базу адресатов случайным 256-битным ключом (AES-256-GCM); ключ сохраняется в отдельный файл для флешки.
+// Запуск: node build.mjs --data путь/к/base.json --out dist/konverty.html --key dist/ключ.key
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -9,9 +9,8 @@ import { webcrypto as crypto } from 'node:crypto';
 
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
 const DATA = arg('data'), OUT = arg('out', 'dist/Сортировка конвертов (защищено).html');
-const PW = process.env.KONV_PASSWORD || '';
+const KEYOUT = arg('key', 'dist/Ключ сортировки конвертов.key');
 if (!DATA) throw new Error('Укажите --data base.json (формат: {districts, rows, source})');
-if (PW.length < 10) throw new Error('Задайте пароль не короче 10 символов в переменной KONV_PASSWORD');
 
 const nm = p => path.join('node_modules', p);
 const b64 = p => fs.readFileSync(nm(p)).toString('base64');
@@ -30,12 +29,12 @@ for (const w of [400, 700]) for (const [sub, r] of [['cyrillic', CYR], ['latin',
 // Шифрование базы
 const data = JSON.parse(fs.readFileSync(DATA, 'utf8'));
 if (!Array.isArray(data.rows) || !Array.isArray(data.districts)) throw new Error('В файле базы нет rows/districts');
-const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12)), iter = 600000;
-const baseKey = await crypto.subtle.importKey('raw', new TextEncoder().encode(PW), 'PBKDF2', false, ['deriveKey']);
-const key = await crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: iter }, baseKey, { name: 'AES-GCM', length: 256 }, false, ['encrypt']);
+const raw = crypto.getRandomValues(new Uint8Array(32)), iv = crypto.getRandomValues(new Uint8Array(12));
+const key = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt']);
 const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, zlib.gzipSync(Buffer.from(JSON.stringify(data)))));
 const B = u => Buffer.from(u).toString('base64');
-const vault = { v: 1, kdf: 'PBKDF2-SHA256', iter, salt: B(salt), iv: B(iv), ct: B(ct) };
+const kid = B(new Uint8Array(await crypto.subtle.digest('SHA-256', raw)).subarray(0, 9));
+const vault = { v: 2, kind: 'keyfile', kid, iv: B(iv), ct: B(ct) };
 
 let html = fs.readFileSync('src/app.html', 'utf8');
 const put = (mark, text) => { if (!html.includes(mark)) throw new Error('нет метки ' + mark); html = html.replace(mark, () => text); };
@@ -50,4 +49,6 @@ put('<!--LIBS-->', [
 put('<!--VAULT-->', `<script id="vault" type="application/json">${JSON.stringify(vault)}</script>`);
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, html);
-console.log(`Готово: ${OUT} — ${(html.length / 1048576).toFixed(1)} МБ, ${data.rows.length} адресатов`);
+fs.mkdirSync(path.dirname(KEYOUT), { recursive: true });
+fs.writeFileSync(KEYOUT, `KONVERTY-KEY-1\n${B(raw)}\n`, { mode: 0o600 });
+console.log(`Готово: ${OUT} — ${(html.length / 1048576).toFixed(1)} МБ, ${data.rows.length} адресатов; ключ: ${KEYOUT}`);

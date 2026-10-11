@@ -356,7 +356,17 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
 .lock-mark svg { width: 100%; height: 100%; transform: rotate(-8deg); }
 .lock h1 { margin: 0; font: 700 34px/1.02 var(--f-sign); letter-spacing: .005em; text-wrap: balance; }
 .lock .lead { margin: 0; color: var(--ink-2); font-size: 15px; }
-.lock form { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.keyzone {
+  display: flex; gap: 14px; align-items: center; padding: 16px; margin-top: 4px; border-radius: 12px;
+  border: 1.5px dashed var(--rule); background: var(--sheet-2); transition: border-color .15s, background-color .15s;
+}
+.keyzone.over { border-color: var(--stamp); background: var(--stamp-soft); }
+.keyzone.ok { border-style: solid; border-color: var(--ok); background: var(--ok-soft); }
+.kz-icon { width: 44px; height: 44px; flex: none; fill: none; stroke: var(--stamp); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.keyzone.ok .kz-icon { stroke: var(--ok); }
+.kz-title { margin: 0; font-weight: 600; font-size: 16px; }
+.kz-sub { margin: 2px 0 0; color: var(--ink-2); font-size: 13px; }
+.lock .btn.ghost { align-self: center; height: 34px; font-size: 14px; color: var(--ink-2); border-color: transparent; }
 .lock label { font-size: 13px; color: var(--ink-2); }
 .pw {
   width: 100%; height: 48px; padding: 0 14px; border-radius: 10px; border: 1.5px solid var(--rule);
@@ -435,16 +445,19 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
   <div class="lock-card">
     <div class="lock-mark"><svg viewBox="0 0 120 120" aria-hidden="true"><defs><path id="pmLockA" d="M60,60 m-43,0 a43,43 0 1,1 86,0 a43,43 0 1,1 -86,0"/></defs><circle cx="60" cy="60" r="56" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="60" cy="60" r="33" fill="none" stroke="currentColor" stroke-width="1.5"/><text class="pm-ring"><textPath href="#pmLockA" textLength="268" lengthAdjust="spacingAndGlyphs">СОРТИРОВКА КОНВЕРТОВ ★ САНКТ-ПЕТЕРБУРГ ★</textPath></text><path d="M44 50h32v22H44z M44 51l16 12 16-12" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg></div>
     <h1>Сортировка конвертов</h1>
-    <p class="lead" id="lockLead">База адресатов зашифрована. Введите пароль, чтобы начать работу.</p>
-    <form id="lockForm" autocomplete="off">
-      <label for="lockPw">Пароль</label>
-      <input class="pw" id="lockPw" type="password" autocomplete="current-password" spellcheck="false" required>
-      <p class="lock-err" id="lockErr" role="alert"></p>
-      <noscript><p class="lock-warn">Этот просмотрщик не запускает программы внутри файла, поэтому приложение здесь не откроется. Сохраните файл на компьютер и откройте его в Chrome, Edge или Яндекс Браузере.</p></noscript>
-      <p class="lock-warn" id="lockWarn" hidden></p>
-      <button class="btn primary big" id="lockGo" type="submit" disabled>Открыть</button>
-    </form>
-    <p class="lock-foot"><svg class="i"><use href="#i-shield"/></svg><span>Работает без интернета. Данные не покидают этот компьютер. После <span id="lockMin">15</span> минут бездействия приложение блокируется.</span></p>
+    <p class="lead" id="lockLead">База адресатов зашифрована. Для работы нужна флешка с ключом.</p>
+    <div class="keyzone" id="keyZone">
+      <svg class="kz-icon" viewBox="0 0 48 48" aria-hidden="true"><rect x="13" y="16" width="22" height="28" rx="4"/><path d="M17 16V6h14v10"/><path d="M21 10h2M25 10h2"/><circle cx="24" cy="30" r="4"/><path d="M24 34v4"/></svg>
+      <div><p class="kz-title" id="kzTitle">Вставьте флешку с ключом</p>
+      <p class="kz-sub" id="kzSub">и нажмите «Войти по ключу». Можно перетащить файл ключа прямо в это окно.</p></div>
+    </div>
+    <p class="lock-err" id="lockErr" role="alert"></p>
+    <noscript><p class="lock-warn">Этот просмотрщик не запускает программы внутри файла, поэтому приложение здесь не откроется. Сохраните файл на компьютер и откройте его в Chrome, Edge или Яндекс Браузере.</p></noscript>
+    <p class="lock-warn" id="lockWarn" hidden></p>
+    <button class="btn primary big" id="lockGo" type="button" disabled>Войти по ключу</button>
+    <button class="btn ghost" id="lockPick" type="button" hidden>Выбрать файл ключа вручную…</button>
+    <input type="file" id="lockFile" accept=".key" hidden>
+    <p class="lock-foot"><svg class="i"><use href="#i-shield"/></svg><span>Работает без интернета. Данные не покидают этот компьютер. Если вынуть флешку, приложение сразу заблокируется.</span></p>
   </div>
 </div>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -555,14 +568,12 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
       <label class="field"><span>Блокировать после бездействия</span>
         <select id="lockSel"><option value="5">5 минут</option><option value="10">10 минут</option><option value="15">15 минут</option><option value="30">30 минут</option></select>
       </label>
-      <p class="note">Сменить пароль или сохранить загруженную из Excel базу можно только в новый защищённый файл. Старый файл после этого удалите.</p>
-      <div class="row" style="margin-top:8px"><button class="btn" id="pwOpen"><svg class="i"><use href="#i-lock"/></svg>Создать защищённый файл…</button></div>
-      <form class="pwform" id="pwForm" hidden autocomplete="off">
-        <input class="pw" id="pw1" type="password" placeholder="Новый пароль, не короче 10 символов" autocomplete="new-password">
-        <input class="pw" id="pw2" type="password" placeholder="Повторите пароль" autocomplete="new-password">
-        <p class="note" id="pwNote">В файл войдёт текущая база: <b id="pwBase"></b>.</p>
-        <div class="row"><button class="btn primary" type="submit" id="pwGo">Сохранить файл</button><button class="btn" type="button" id="pwCancel">Отмена</button></div>
-      </form>
+      <p class="note">Новый ключ нужен, если флешка могла попасть в чужие руки или вы загрузили базу из Excel. Будут скачаны два файла: новый ключ и новый файл приложения. Старый ключ к новому файлу не подойдёт.</p>
+      <div class="row" style="margin-top:8px"><button class="btn" id="keyNew"><svg class="i"><use href="#i-lock"/></svg>Сделать новый ключ…</button></div>
+      <div class="confirm" id="keyConfirm" hidden style="background:var(--stamp-soft)">
+        В новый файл войдёт текущая база: <b id="keyBase"></b>. После скачивания скопируйте новый ключ на флешку вместо старого, откройте новый файл и удалите старые.
+        <div class="row"><button class="btn primary" id="keyYes">Скачать ключ и файл</button><button class="btn" id="keyNo">Отмена</button></div>
+      </div>
       <div class="row" style="margin-top:12px"><button class="btn ghost danger" id="wipeOpen">Стереть данные с этого компьютера…</button></div>
       <div class="confirm" id="wipeConfirm" hidden>
         Удалить из браузера все отметки, журнал и настройки? Перед этим сохраните прогресс в файл, если он ещё нужен. Сам файл приложения и выгрузки в «Загрузках» удалите вручную.
@@ -626,7 +637,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
         <div class="map-grid" id="mapGrid"></div>
         <div class="row" style="margin-top:10px"><button class="btn primary" id="mapApply">Загрузить базу</button><button class="btn" id="mapCancel">Отмена</button></div>
       </div>
-      <p class="note">Загруженная база хранится только до закрытия страницы. Чтобы работать с ней дальше, создайте защищённый файл (раздел «Защита данных»), а исходный Excel удалите.</p>
+      <p class="note">Загруженная база хранится только до закрытия страницы. Чтобы работать с ней дальше, сделайте новый ключ (раздел «Защита данных»), а исходный Excel удалите.</p>
       <div class="row" style="margin-top:8px"><button class="btn ghost" id="baseReset" hidden>Вернуть встроенную базу</button></div>
     </section>
     <section>
@@ -1327,23 +1338,40 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
   // ---------- Шифрование базы (AES-256-GCM, ключ из пароля через PBKDF2-SHA256) ----------
   const b64d = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
   const b64e = u => { let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); };
-  async function deriveKey(pw, salt, iter) {
-    const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey']);
-    return crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: iter }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
-  }
   const pipeBytes = (bytes, stream) => new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer().then(b => new Uint8Array(b));
-  async function openVault(pw) {
+  const KEY_HEAD = 'KONVERTY-KEY-1';
+  const keyErr = code => Object.assign(new Error(code), { code });
+  function parseKeyFile(text) {
+    const p = String(text || '').trim().split(/\s+/);
+    if (p[0] !== KEY_HEAD || !p[1]) throw keyErr('notkey');
+    let raw; try { raw = b64d(p[1]); } catch (e) { throw keyErr('notkey'); }
+    if (raw.length !== 32) throw keyErr('notkey');
+    return raw;
+  }
+  const keyId = async raw => b64e(new Uint8Array(await crypto.subtle.digest('SHA-256', raw)).subarray(0, 9));
+  async function openVault(raw) {
     const v = JSON.parse($('vault').textContent);
-    const key = await deriveKey(pw, b64d(v.salt), v.iter);
-    const plain = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64d(v.iv) }, key, b64d(v.ct))); // неверный пароль -> исключение
+    if (v.kid && v.kid !== await keyId(raw)) throw keyErr('wrongkey');
+    const key = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt']);
+    let plain; try { plain = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64d(v.iv) }, key, b64d(v.ct))); } catch (e) { throw keyErr('wrongkey'); }
     return JSON.parse(new TextDecoder().decode(await pipeBytes(plain, new DecompressionStream('gzip'))));
   }
-  async function sealVault(data, pw) {
-    const iter = 600000, salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+  async function sealVault(data) {
+    const raw = crypto.getRandomValues(new Uint8Array(32)), iv = crypto.getRandomValues(new Uint8Array(12));
     const gz = await pipeBytes(new TextEncoder().encode(JSON.stringify(data)), new CompressionStream('gzip'));
-    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await deriveKey(pw, salt, iter), gz));
-    return { v: 1, kdf: 'PBKDF2-SHA256', iter, salt: b64e(salt), iv: b64e(iv), ct: b64e(ct) };
+    const key = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt']);
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, gz));
+    return { vault: { v: 2, kind: 'keyfile', kid: await keyId(raw), iv: b64e(iv), ct: b64e(ct) }, keyText: KEY_HEAD + '\n' + b64e(raw) + '\n' };
   }
+  // Где лежит ключ: запоминаем «ссылку» на файл на флешке (сам ключ в браузере не хранится)
+  const idb = (mode, fn) => new Promise((res, rej) => {
+    const q = indexedDB.open('konv_key', 1);
+    q.onupgradeneeded = () => q.result.createObjectStore('h');
+    q.onerror = () => rej(q.error);
+    q.onsuccess = () => { let tx, r; try { tx = q.result.transaction('h', mode); r = fn(tx.objectStore('h')); } catch (e) { q.result.close(); rej(e); return; } tx.oncomplete = () => { res(r && r.result); q.result.close(); }; tx.onerror = () => rej(tx.error); };
+  });
+  const handleGet = () => idb('readonly', s => s.get('key')).catch(() => null);
+  const handleSet = h => idb('readwrite', s => s.put(h, 'key')).catch(() => null);
   const hash = s => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(36); };
 
   // ---------- Встроенные библиотеки (хранятся в файле в base64, запускаются без сети) ----------
@@ -1982,7 +2010,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
   // ---------- Клавиатура ----------
   const inField = el => el && (el.tagName === 'INPUT' && !['checkbox', 'radio', 'range', 'button', 'file'].includes(el.type) || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
   document.addEventListener('keydown', e => {
-    if (!$('lock').hidden) return; // заблокировано: работает только поле пароля
+    if (!$('lock').hidden) { if (e.key === 'Enter' && !$('lockGo').disabled) { e.preventDefault(); $('lockGo').click(); } return; } // заблокировано
     if ((e.ctrlKey || e.metaKey) && (e.code === 'KeyL')) { e.preventDefault(); lockNow(); return; }
     // пустое поле поиска не перехватывает пробел: он по-прежнему запускает сканирование
     if (e.target === $('q') && (e.code === 'Space' || e.key === ' ') && !$('q').value.trim() && !e.ctrlKey && !e.altKey && !e.metaKey) {
@@ -2105,32 +2133,28 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     $('optFull').checked = SET.full; $('lockSel').value = String(SET.lockMin);
     $('optFull').onchange = () => { SET.full = $('optFull').checked; saveSet(); renderList(); renderLedger(); if (!$('report').hidden) renderReport(); const id = $('verdict').dataset.id; if (id) { $('vName').textContent = nameOf(recOf(+id)); $('vAddr').textContent = addrOf(recOf(+id)); } };
     $('lockSel').onchange = () => { SET.lockMin = +$('lockSel').value; saveSet(); };
-    // новый защищённый файл
-    $('pwOpen').onclick = () => { $('pwForm').hidden = false; $('pwBase').textContent = BASE_CUSTOM ? `«${BASE_CUSTOM.name}», ${nf(BASE.recs.length)} записей` : `встроенная, ${nf(BASE.recs.length)} записей`; $('pw1').focus(); };
-    $('pwCancel').onclick = () => { $('pwForm').hidden = true; $('pw1').value = $('pw2').value = ''; };
-    $('pwForm').onsubmit = async e => {
-      e.preventDefault();
-      const a = $('pw1').value, b = $('pw2').value;
-      if (a.length < 10) { toast('Пароль должен быть не короче 10 символов.'); return; }
-      if (a !== b) { toast('Пароли не совпадают.'); return; }
-      $('pwGo').disabled = true; $('pwGo').textContent = 'Шифрую…';
+    // новый ключ и новый файл
+    const save = (blob, name) => { const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1500); };
+    $('keyNew').onclick = () => { $('keyConfirm').hidden = false; $('keyBase').textContent = BASE_CUSTOM ? `«${BASE_CUSTOM.name}», ${nf(BASE.recs.length)} записей` : `встроенная, ${nf(BASE.recs.length)} записей`; };
+    $('keyNo').onclick = () => { $('keyConfirm').hidden = true; };
+    $('keyYes').onclick = async () => {
+      $('keyYes').disabled = true;
       try {
-        const vault = await sealVault(CUR_DATA, a);
+        const { vault, keyText } = await sealVault(CUR_DATA);
         const html = SELF_HTML.replace(/(<script id="vault" type="application\/json">)[\s\S]*?(<\/script>)/, (m, p1, p2) => p1 + JSON.stringify(vault) + p2);
-        const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
-        const link = document.createElement('a'); link.href = url; link.download = 'Сортировка конвертов (защищено).html';
-        document.body.appendChild(link); link.click(); setTimeout(() => { URL.revokeObjectURL(url); link.remove(); }, 1000);
-        $('pwForm').hidden = true; $('pw1').value = $('pw2').value = '';
-        toast('Новый защищённый файл сохранён в «Загрузки». Откройте его, проверьте пароль и удалите старый файл.', 9000);
-      } catch (err) { toast('Не удалось создать файл: ' + err.message); }
-      finally { $('pwGo').disabled = false; $('pwGo').textContent = 'Сохранить файл'; }
+        save(new Blob([keyText], { type: 'application/octet-stream' }), 'Ключ сортировки конвертов.key');
+        setTimeout(() => save(new Blob([html], { type: 'text/html' }), 'Сортировка конвертов (защищено).html'), 700);
+        $('keyConfirm').hidden = true;
+        toast('Скачаны новый ключ и новый файл. Скопируйте ключ на флешку вместо старого, откройте новый файл, старые удалите.', 10000);
+      } catch (err) { toast('Не удалось создать ключ: ' + err.message); }
+      finally { $('keyYes').disabled = false; }
     };
     // стирание данных
     $('wipeOpen').onclick = () => { $('wipeConfirm').hidden = false; };
     $('wipeNo').onclick = () => { $('wipeConfirm').hidden = true; };
     $('wipeYes').onclick = () => {
       try { Object.keys(localStorage).filter(k => k.startsWith('konv_')).forEach(k => localStorage.removeItem(k)); } catch (e) { /* нет доступа */ }
-      try { indexedDB.deleteDatabase('keyval-store'); } catch (e) { /* нет базы */ }
+      try { indexedDB.deleteDatabase('keyval-store'); indexedDB.deleteDatabase('konv_key'); } catch (e) { /* нет базы */ }
       if (STREAM) STREAM.getTracks().forEach(t => t.stop());
       location.reload();
     };
@@ -2222,7 +2246,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     const data = { districts, rows, source: XL.name };
     CUR_DATA = data; useBase(data, { name: XL.name });
     $('mapBox').hidden = true; $('xlInput').value = ''; XL = null;
-    toast(`Загружена база: ${nf(rows.length)} записей, ${districts.length} ${plural(districts.length, 'район', 'района', 'районов')}. Она хранится только до закрытия страницы — создайте защищённый файл.`, 8000);
+    toast(`Загружена база: ${nf(rows.length)} записей, ${districts.length} ${plural(districts.length, 'район', 'района', 'районов')}. Она хранится только до закрытия страницы — сделайте новый ключ в разделе «Защита данных».`, 8000);
   };
   $('baseReset').onclick = () => { CUR_DATA = BASE_DATA; useBase(BASE_DATA, null); toast('Возвращена встроенная база.'); };
 
@@ -2236,12 +2260,13 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
   // ---------- Блокировка ----------
   let CUR_DATA = null, lastAct = Date.now();
   ['keydown', 'pointerdown', 'pointermove', 'wheel'].forEach(t => document.addEventListener(t, () => { lastAct = Date.now(); }, { passive: true, capture: true }));
-  function lockNow() {
+  function lockNow(reason) {
     saveProgress();
+    try { if (reason) sessionStorage.setItem('konv_lockmsg', reason); } catch (e) { /* нет доступа */ }
     if (STREAM) STREAM.getTracks().forEach(t => t.stop());
     location.reload(); // перезагрузка стирает расшифрованную базу из памяти
   }
-  $('btnLock').onclick = lockNow;
+  $('btnLock').onclick = () => lockNow();
   setInterval(() => { if (BASE && !SCAN.armed && Date.now() - lastAct > SET.lockMin * 60000) lockNow(); }, 20000);
 
   function boot(data) {
@@ -2253,31 +2278,90 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     if (SET.camWasOn) startCamera(); else camUi(false);
     lastAct = Date.now();
   }
-  $('lockMin').textContent = SET.lockMin;
-  $('lockForm').onsubmit = async e => {
-    e.preventDefault();
-    const pw = $('lockPw').value; if (!pw) return;
-    $('lockGo').disabled = true; $('lockGo').textContent = 'Проверяю…'; $('lockErr').textContent = '';
-    try {
-      const data = await openVault(pw);
-      $('lockPw').value = '';
-      $('lock').hidden = true;
-      boot(data);
-    } catch (err) {
-      $('lockErr').textContent = err && err.name === 'OperationError' ? 'Неверный пароль. Проверьте раскладку и Caps Lock.' : 'Не удалось открыть базу: ' + (err && err.message || err);
-      const l = $('lock'); l.classList.remove('shake'); void l.offsetWidth; l.classList.add('shake');
-      $('lockPw').select();
-    } finally { $('lockGo').disabled = false; $('lockGo').textContent = 'Открыть'; }
+  // ---------- Вход по ключу с флешки ----------
+  let KEYSRC = null, keyBusy = false, watchT = 0;
+  const readKey = async src => src.handle ? (await src.handle.getFile()).text() : src.file.text();
+  const KEY_MSG = {
+    NotFoundError: 'Ключ не найден. Вставьте флешку с ключом и нажмите «Войти по ключу».',
+    NotReadableError: 'Ключ не читается. Вставьте флешку с ключом заново.',
+    NotAllowedError: 'Нужно разрешить чтение ключа: нажмите «Войти по ключу» и подтвердите.',
+    notkey: 'Это не файл ключа. Выберите файл «Ключ сортировки конвертов.key» на флешке.',
+    wrongkey: 'Этот ключ от другого файла приложения. Нужен ключ, который выдали вместе с этим файлом.',
   };
+  function lockMsg(text, kind) {
+    $('lockErr').textContent = text || '';
+    $('keyZone').classList.toggle('ok', kind === 'ok');
+    if (text && kind !== 'quiet') { const l = $('lock'); l.classList.remove('shake'); void l.offsetWidth; l.classList.add('shake'); }
+  }
+  async function unlockWith(src, quiet) {
+    if (keyBusy) return false; keyBusy = true;
+    $('lockGo').disabled = true; $('lockGo').textContent = 'Проверяю ключ…';
+    try {
+      const data = await openVault(parseKeyFile(await readKey(src)));
+      KEYSRC = src; if (src.handle) handleSet(src.handle);
+      lockMsg('', 'ok'); $('kzTitle').textContent = 'Ключ принят';
+      $('lock').hidden = true;
+      boot(data); watchKey();
+      return true;
+    } catch (err) {
+      const code = err && (err.code || err.name);
+      if (!quiet) lockMsg(KEY_MSG[code] || 'Не удалось открыть базу: ' + (err && err.message || err));
+      return false;
+    } finally { keyBusy = false; $('lockGo').disabled = false; $('lockGo').textContent = 'Войти по ключу'; }
+  }
+  // Флешку вынули — блокируем
+  function watchKey() {
+    clearInterval(watchT);
+    watchT = setInterval(async () => {
+      try { if (KEYSRC.handle) await KEYSRC.handle.getFile(); else await KEYSRC.file.slice(0, 1).arrayBuffer(); }
+      catch (e) { clearInterval(watchT); lockNow('Флешку с ключом вынули — приложение заблокировано. Вставьте её снова.'); }
+    }, 2000);
+  }
+  async function pickKey() {
+    if (window.showOpenFilePicker) {
+      try {
+        const [h] = await window.showOpenFilePicker({ multiple: false, types: [{ description: 'Ключ сортировки конвертов', accept: { 'application/octet-stream': ['.key'] } }] });
+        await unlockWith({ handle: h });
+      } catch (e) { if (e && e.name !== 'AbortError') lockMsg('Не удалось открыть файл ключа: ' + e.message); }
+    } else $('lockFile').click();
+  }
+  $('lockFile').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) unlockWith({ file: f }); };
+  $('lockPick').onclick = pickKey;
+  $('lockGo').onclick = async () => {
+    const h = await handleGet();
+    if (!h) { pickKey(); return; }
+    try { if ((await h.queryPermission({ mode: 'read' })) !== 'granted' && (await h.requestPermission({ mode: 'read' })) !== 'granted') { lockMsg(KEY_MSG.NotAllowedError); return; } }
+    catch (e) { pickKey(); return; }
+    if (!await unlockWith({ handle: h })) $('lockPick').hidden = false;
+  };
+  // Перетаскивание файла ключа в окно
+  const zone = $('lock');
+  zone.addEventListener('dragover', e => { e.preventDefault(); $('keyZone').classList.add('over'); });
+  zone.addEventListener('dragleave', e => { if (e.target === zone) $('keyZone').classList.remove('over'); });
+  zone.addEventListener('drop', async e => {
+    e.preventDefault(); $('keyZone').classList.remove('over');
+    const it = e.dataTransfer.items && e.dataTransfer.items[0];
+    let h = null; try { if (it && it.getAsFileSystemHandle) h = await it.getAsFileSystemHandle(); } catch (err) { h = null; }
+    if (h && h.kind === 'file') unlockWith({ handle: h });
+    else if (e.dataTransfer.files[0]) unlockWith({ file: e.dataTransfer.files[0] });
+  });
+  // Флешку вставили — если браузер уже разрешил чтение ключа, открываемся сами
+  async function autoKey() {
+    if (!$('lock').hidden || keyBusy) return;
+    const h = await handleGet(); if (!h) return;
+    $('lockPick').hidden = false;
+    try { if ((await h.queryPermission({ mode: 'read' })) === 'granted') await unlockWith({ handle: h }, true); } catch (e) { /* ждём флешку */ }
+  }
+  try { const m = sessionStorage.getItem('konv_lockmsg'); if (m) { sessionStorage.removeItem('konv_lockmsg'); lockMsg(m, 'quiet'); } } catch (e) { /* нет доступа */ }
   // Кнопка оживает только когда скрипт работает; без нужных возможностей браузера — понятное объяснение
   const missing = !(window.crypto && crypto.subtle) ? 'шифрование' : typeof DecompressionStream === 'undefined' ? 'распаковку данных' : '';
   if (missing) {
     $('lockWarn').textContent = `Этот браузер или просмотрщик не поддерживает ${missing}, поэтому базу здесь не открыть. Откройте файл на компьютере в свежем Chrome, Edge или Яндекс Браузере.`;
     $('lockWarn').hidden = false;
-  } else $('lockGo').disabled = false;
+  } else { $('lockGo').disabled = false; autoKey(); setInterval(autoKey, 2500); }
   camUi(false);
-  initOCR(); // модуль распознавания готовится, пока вводят пароль
-  setTimeout(() => $('lockPw').focus(), 50);
+  initOCR(); // модуль распознавания готовится, пока вставляют флешку
+  setTimeout(() => $('lockGo').focus(), 50);
 })();
 
 </script>
