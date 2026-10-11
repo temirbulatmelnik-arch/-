@@ -1076,13 +1076,15 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     return ev.idx6.some(n => /^19\d{4}$/.test(n));
   }
 
-  // В кадре точно прочитаны имя или отчество (в любом падеже), которых нет ни у одного из кандидатов
-  function otherName(cands, ev) {
-    if (!ev || !ev.base) return false;
+  // В кадре точно прочитаны чужие имя или отчество (в любом падеже) — значит, это другой человек
+  function nameConflict(m, ev) {
+    if (!ev || !ev.base || (m.q.im >= T && m.q.ot >= T)) return false;
+    const { rec, q } = m;
     for (const [w, e] of ev.vq) {
       if (e.nq < 0.9) continue;
-      const t = ev.base.vtype.get(w) || 0, k = t === 2 ? 'im' : t === 4 ? 'ot' : '';
-      if (k && cands.every(m => m.rec[k] !== w && stem(m.rec[k]) !== stem(w))) return true;
+      const t = ev.base.vtype.get(w) || 0;
+      if (q.im < T && t === 2 && w !== rec.im && stem(w) !== stem(rec.im)) return true;
+      if (q.ot < T && t === 4 && w !== rec.ot && stem(w) !== stem(rec.ot)) return true;
     }
     return false;
   }
@@ -1116,14 +1118,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
       }
     }
     if (addrConflict(top, ev)) return null;      // ФИО как у кандидата, а адрес на конверте другой
-    if (ev && ev.base && (q.im < T || q.ot < T)) {   // чужое имя или отчество, прочитанное точно (в любом падеже)
-      for (const [w, e] of ev.vq) {
-        if (e.nq < 0.9) continue;
-        const t = ev.base.vtype.get(w) || 0;
-        if (q.im < T && t === 2 && w !== rec.im && stem(w) !== stem(rec.im)) return null;
-        if (q.ot < T && t === 4 && w !== rec.ot && stem(w) !== stem(rec.ot)) return null;
-      }
-    }
+    if (nameConflict(top, ev)) return null;      // чужое имя или отчество, прочитанное точно
     return top;
   }
 
@@ -1138,7 +1133,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     return res.slice(0, limit || 50);
   }
 
-  const api = { canon, splitWords, stem, lev, Base, tokenize, evidence, mergeEvidence, rank, decide, addrConflict, otherName, search, fieldScores, titleCase, T };
+  const api = { canon, splitWords, stem, lev, Base, tokenize, evidence, mergeEvidence, rank, decide, addrConflict, nameConflict, search, fieldScores, titleCase, T };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Engine = api;
 })(typeof window !== 'undefined' ? window : globalThis);
 
@@ -1982,15 +1977,18 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
   function unlock() { SCAN.locked = false; SCAN.lockedId = -1; resetScanState(); if (STREAM && OCR.ready) setFState('ready', readyText()); }
   // Текст «не определён» (ranked — похожие адресаты, ev — накопленные признаки кадров):
   // ФИО совпало, а адрес на конверте другой — возможно, тёзка не из этого списка;
-  // фамилия не совпала ни у кого — скорее всего, адресата нет в базе (например, конверт другого месяца);
-  // фамилия совпала точно, а имя или отчество на конверте точно прочитано и чужое — в базе только однофамильцы;
+  // у всех, чья фамилия похожа, имя или отчество на конверте точно другое (или фамилии нет ни у кого) —
+  //   скорее всего, адресата нет в базе (например, конверт другого месяца): говорим, что совпало;
   // иначе — просим выбрать из списка.
   function missText(ranked, src, ev) {
     if (!ranked.length) return src === 'photo' ? 'На фото не найден адрес' : 'Адрес не распознан — поправьте конверт и нажмите пробел ещё раз';
-    const top = ranked[0], fam = ranked.filter(m => m.q.fam >= 0.85), same = fam.filter(m => m.q.fam >= 0.9);
+    const top = ranked[0], fam = ranked.filter(m => m.q.fam >= 0.85);
     if (top.nName === 2 && top.q.fam >= 0.85 && Engine.addrConflict(top, ev)) return 'ФИО как у ветерана из базы, но адрес на конверте другой — сверьте адрес, прежде чем отмечать';
-    if (!fam.length) return 'Фамилия с конверта в базе не найдена — проверьте конверт или найдите адресата вручную';
-    if (same.length && fam.every(m => m.nName === 0) && Engine.otherName(fam, ev)) return 'Совпала только фамилия: имя и отчество на конверте другие — проверьте конверт';
+    if (!fam.some(m => !Engine.nameConflict(m, ev))) {
+      if (!fam.some(m => m.q.fam >= 0.9)) return 'Фамилия с конверта в базе не найдена — проверьте конверт или найдите адресата вручную';
+      return fam.every(m => m.nName === 0) ? 'Совпала только фамилия: имя и отчество на конверте другие — проверьте конверт'
+        : 'ФИО совпадает не полностью: имя или отчество на конверте другое — проверьте конверт';
+    }
     return src === 'photo' ? 'По фото уверенно не определить — выберите адресата в списке' : 'Не удалось определить уверенно — выберите адресата в списке';
   }
   const missList = ranked => ranked.filter(m => m.q.fam >= 0.85 || m.q.st >= Engine.T);
