@@ -9,7 +9,8 @@
     "build": "tsc -p tsconfig.json && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "icons": "pwa-assets-generator"
+    "icons": "pwa-assets-generator",
+    "figure": "node tools/build-athlete.mjs"
   },
   "dependencies": {
     "@fontsource-variable/golos-text": "5.3.0",
