@@ -1,0 +1,104 @@
+import { AnimatePresence, motion } from 'motion/react';
+import { BarChart3, BookOpen, House, Layers } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Sheet } from './components/ui';
+import { unlockAudio } from './engine/cues';
+import { levelById } from './engine/program';
+import { Learn } from './screens/Learn';
+import { Onboarding } from './screens/Onboarding';
+import { Plan } from './screens/Plan';
+import { Player } from './screens/Player';
+import { Progress } from './screens/Progress';
+import { Settings } from './screens/Settings';
+import { Today } from './screens/Today';
+import { useStore } from './store/store';
+
+type Tab = 'today' | 'plan' | 'learn' | 'progress';
+
+const TABS: { id: Tab; label: string; icon: typeof House }[] = [
+  { id: 'today', label: 'Сегодня', icon: House },
+  { id: 'plan', label: 'Программа', icon: Layers },
+  { id: 'learn', label: 'Техника', icon: BookOpen },
+  { id: 'progress', label: 'Прогресс', icon: BarChart3 },
+];
+
+function useTheme() {
+  const theme = useStore(s => s.settings.theme);
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const root = document.documentElement;
+    const apply = () => {
+      // «как в системе»: тема страницы-хозяина (data-theme), если она задана, иначе тема ОС
+      const host = root.getAttribute('data-theme');
+      const system = host === 'dark' || host === 'light' ? host === 'dark' : mq.matches;
+      const dark = theme === 'dark' || (theme === 'system' && system);
+      root.classList.toggle('dark', dark);
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#0b1220' : '#f3f5fa');
+    };
+    apply();
+    mq.addEventListener('change', apply);
+    const mo = new MutationObserver(apply);
+    mo.observe(root, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => { mq.removeEventListener('change', apply); mo.disconnect(); };
+  }, [theme]);
+}
+
+export default function App() {
+  useTheme();
+  const onboarded = useStore(s => s.onboarded);
+  const finishOnboarding = useStore(s => s.finishOnboarding);
+  const levelId = useStore(s => s.levelId);
+  const [tab, setTab] = useState<Tab>('today');
+  const [playing, setPlaying] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  useEffect(() => window.scrollTo({ top: 0 }), [tab]);
+
+  if (!onboarded) return <Onboarding onDone={finishOnboarding} />;
+
+  const start = () => {
+    unlockAudio();
+    setPlaying(true);
+  };
+
+  return (
+    <div className="pt-safe mx-auto min-h-dvh w-full max-w-md pb-28">
+      <AnimatePresence mode="wait">
+        <motion.main key={tab} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
+          {tab === 'today' && <Today onStart={start} onSettings={() => setSettingsOpen(true)} onPlan={() => setTab('plan')} />}
+          {tab === 'plan' && <Plan />}
+          {tab === 'learn' && <Learn />}
+          {tab === 'progress' && <Progress />}
+        </motion.main>
+      </AnimatePresence>
+
+      <nav className="pb-safe fixed inset-x-0 bottom-0 z-30 border-t border-line bg-bg/85 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-md">
+          {TABS.map(t => {
+            const active = t.id === tab;
+            return (
+              <button key={t.id} type="button" onClick={() => setTab(t.id)} aria-current={active ? 'page' : undefined}
+                className={`relative flex flex-1 flex-col items-center gap-1 pt-2.5 pb-2 text-[11px] font-medium transition-colors ${active ? 'text-ink' : 'text-faint'}`}>
+                {active && <motion.span layoutId="tab-dot" className="absolute top-0 h-0.5 w-8 rounded-full bg-calm" />}
+                <t.icon size={22} strokeWidth={active ? 2.4 : 2} />
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+
+      <Sheet open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Настройки">
+        <Settings />
+      </Sheet>
+
+      <AnimatePresence>
+        {playing && (
+          <motion.div key="player" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-40">
+            <Player level={levelById(levelId)} onClose={() => setPlaying(false)} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
