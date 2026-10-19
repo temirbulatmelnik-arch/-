@@ -1,16 +1,23 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { Check, Frown, Meh, Pause, Play, SkipForward, Smile, Vibrate, VibrateOff, Volume2, VolumeX, X } from 'lucide-react';
+import { Check, CircleDot, Frown, Maximize2, Meh, Minimize2, Pause, PersonStanding, Play, SkipForward, Smile, Vibrate, VibrateOff, Volume2, VolumeX, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { SphincterRing } from '../components/SphincterRing';
+import { ExerciseDemo, FigureLegend, GuideText } from '../components/ExerciseDemo';
+import { Figure, poseFor } from '../components/Figure';
+import type { FigureMotion, FigureZoom } from '../components/Figure3D';
+import { SphincterRing, phaseColor } from '../components/SphincterRing';
 import { IconButton, PrimaryButton, SecondaryButton, Switch } from '../components/ui';
-import { BLOCK_INFO, type Level } from '../engine/program';
+import { speak } from '../engine/cues';
+import { GUIDES } from '../engine/guides';
+import { BLOCK_INFO, type BlockType, type Level } from '../engine/program';
 import { todayCount, type Rating } from '../engine/stats';
-import { buildTimeline, formatDuration, levelAt } from '../engine/timeline';
+import { buildTimeline, formatDuration, levelAt, type Phase } from '../engine/timeline';
 import { useWorkout, type WorkoutState } from '../engine/useWorkout';
 import { useStore } from '../store/store';
 
 /** Тренировка идёт в дневную цель, если выполнено не меньше этой доли */
 const COMPLETE_SHARE = 0.6;
+/** Через сколько секунд упражнение начнётся само, если не нажать «Начать» */
+const INTRO_AUTOSTART = 30;
 
 const clock = (sec: number) => {
   const s = Math.max(0, Math.ceil(sec));
@@ -25,6 +32,10 @@ export function Player({ level, onClose }: { level: Level; onClose: () => void }
   const { state, pause, resume, skip } = useWorkout(tl, settings);
   const [confirmExit, setConfirmExit] = useState(false);
   const savedId = useRef<string | null>(null);
+  const [intro, setIntro] = useState<number | null>(null);
+  const shownIntros = useRef(new Set<number>());
+  const [zoom, setZoom] = useState<FigureZoom>('pelvis');
+  const figureMotion = useRef<FigureMotion>({ level: 0, phase: 'prep' });
 
   const step = tl.steps[state.index];
   const lvl = levelAt(tl, state.index, state.offset);
@@ -33,6 +44,26 @@ export function Player({ level, onClose }: { level: Level; onClose: () => void }
   const blockNo = step.block + 1;
   const quick = step.blockType === 'quick' && step.phase !== 'prep';
   const audible = settings.sound || settings.voice;
+  figureMotion.current = { level: lvl, phase: step.phase };
+
+  // перед каждым упражнением — пауза и подробное объяснение с 3D-демонстрацией
+  useEffect(() => {
+    if (!settings.intro || state.done || step.phase !== 'prep' || shownIntros.current.has(step.block)) return;
+    shownIntros.current.add(step.block);
+    pause();
+    setIntro(step.block);
+    speak(GUIDES[step.blockType].voice, settings);
+  }, [state.index]);
+
+  const startBlock = () => {
+    setIntro(null);
+    resume();
+  };
+  const skipBlock = () => {
+    setIntro(null);
+    skip();
+    resume();
+  };
 
   const completed = state.worked >= tl.total * COMPLETE_SHARE;
 
@@ -91,18 +122,41 @@ export function Player({ level, onClose }: { level: Level; onClose: () => void }
           })}
         </div>
 
-        {/* кольцо */}
-        <div className="flex flex-1 flex-col items-center justify-center py-4">
-          <SphincterRing level={lvl} phase={step.phase} progress={progress}>
-            {quick ? (
-              <div className="text-center">
-                <div className="text-[64px] leading-none font-semibold">{step.rep}</div>
-                <div className="mt-1 text-[15px] text-muted">из {step.reps}</div>
-              </div>
-            ) : (
-              <div className="text-[76px] leading-none font-semibold" aria-live="off">{left}</div>
-            )}
-          </SphincterRing>
+        {/* вид: фигура или кольцо */}
+        <div className="mt-3 flex justify-center">
+          <div className="inline-flex rounded-xl bg-surface-2 p-0.5 text-[13px] font-medium">
+            {([['figure', 'Фигура', PersonStanding], ['ring', 'Кольцо', CircleDot]] as const).map(([id, label, Icon]) => (
+              <button key={id} type="button" onClick={() => setSettings({ playerView: id })} aria-pressed={settings.playerView === id}
+                className={`flex items-center gap-1.5 rounded-[10px] px-3 py-1.5 transition ${settings.playerView === id ? 'bg-bg text-ink shadow-sm' : 'text-muted'}`}>
+                <Icon size={15} /> {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-1 flex-col items-center justify-center py-3">
+          {settings.playerView === 'figure' ? (
+            <div className="relative w-full max-w-[340px]">
+              <Figure motion={figureMotion} pose={poseFor(level.position)} zoom={zoom} className="aspect-square w-full overflow-hidden rounded-3xl bg-surface-2"
+                fallback={<SphincterRing level={lvl} phase={step.phase} progress={progress} />} />
+              <Countdown value={quick ? step.rep ?? 0 : left} sub={quick ? `из ${step.reps}` : undefined} progress={progress} phase={step.phase} level={lvl} />
+              <button type="button" onClick={() => setZoom(zoom === 'body' ? 'pelvis' : 'body')}
+                className="absolute top-3 right-3 flex items-center gap-1.5 rounded-xl bg-bg/80 px-2.5 py-1.5 text-[13px] font-medium backdrop-blur">
+                {zoom === 'body' ? <><Maximize2 size={14} /> Крупно</> : <><Minimize2 size={14} /> Целиком</>}
+              </button>
+            </div>
+          ) : (
+            <SphincterRing level={lvl} phase={step.phase} progress={progress}>
+              {quick ? (
+                <div className="text-center">
+                  <div className="text-[64px] leading-none font-semibold">{step.rep}</div>
+                  <div className="mt-1 text-[15px] text-muted">из {step.reps}</div>
+                </div>
+              ) : (
+                <div className="text-[76px] leading-none font-semibold" aria-live="off">{left}</div>
+              )}
+            </SphincterRing>
+          )}
 
           <AnimatePresence mode="wait">
             <motion.div
@@ -111,7 +165,7 @@ export function Player({ level, onClose }: { level: Level; onClose: () => void }
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: quick ? 0.08 : 0.25 }}
-              className="mt-6 min-h-[112px] text-center"
+              className="mt-4 min-h-[104px] text-center"
               aria-live="polite"
             >
               <div className="text-[26px] leading-tight font-semibold">{step.label}</div>
@@ -140,13 +194,28 @@ export function Player({ level, onClose }: { level: Level; onClose: () => void }
       </div>
 
       <AnimatePresence>
+        {intro !== null && !confirmExit && (
+          <BlockIntro
+            key={intro}
+            type={tl.blocks[intro].type}
+            index={intro}
+            count={tl.blocks.length}
+            level={level}
+            onStart={startBlock}
+            onSkip={skipBlock}
+            onExit={() => setConfirmExit(true)}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {confirmExit && (
           <motion.div className="fixed inset-0 z-50 grid place-items-center bg-black/50 px-6" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <motion.div className="card w-full max-w-sm p-6 text-center" initial={{ scale: 0.95 }} animate={{ scale: 1 }}>
               <h2 className="text-xl font-semibold">Завершить тренировку?</h2>
               <p className="mt-2 text-[15px] text-muted">Выполненная часть сохранится в журнале. В дневную цель идут тренировки, выполненные хотя бы на {COMPLETE_SHARE * 100} %.</p>
               <div className="mt-5 grid gap-2">
-                <PrimaryButton onClick={() => { setConfirmExit(false); resume(); }}>Продолжить</PrimaryButton>
+                <PrimaryButton onClick={() => { setConfirmExit(false); if (intro === null) resume(); }}>Продолжить</PrimaryButton>
                 <SecondaryButton onClick={exit}>Завершить</SecondaryButton>
               </div>
             </motion.div>
@@ -154,6 +223,75 @@ export function Player({ level, onClose }: { level: Level; onClose: () => void }
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+/** Обратный отсчёт поверх 3D-фигуры */
+function Countdown({ value, sub, progress, phase, level }: { value: number; sub?: string; progress: number; phase: Phase; level: number }) {
+  const r = 30, len = 2 * Math.PI * r;
+  return (
+    <div className="pointer-events-none absolute top-3 left-3 grid size-[76px] place-items-center rounded-full bg-bg/85 backdrop-blur">
+      <svg viewBox="0 0 76 76" className="absolute inset-0 -rotate-90" aria-hidden>
+        <circle cx="38" cy="38" r={r} fill="none" stroke="var(--line)" strokeWidth="4" />
+        <circle cx="38" cy="38" r={r} fill="none" style={{ stroke: phaseColor(phase, level) }} strokeWidth="4" strokeLinecap="round"
+          strokeDasharray={len} strokeDashoffset={len * (1 - progress)} />
+      </svg>
+      <div className="text-center leading-none">
+        <div className="text-[28px] font-semibold tabular-nums">{value}</div>
+        {sub && <div className="mt-0.5 text-[11px] text-muted">{sub}</div>}
+      </div>
+    </div>
+  );
+}
+
+/** Подробное объяснение перед упражнением: 3D-демонстрация, шаги, дыхание, ошибки */
+function BlockIntro({ type, index, count, level, onStart, onSkip, onExit }: {
+  type: BlockType; index: number; count: number; level: Level; onStart: () => void; onSkip: () => void; onExit: () => void;
+}) {
+  const [left, setLeft] = useState(INTRO_AUTOSTART);
+  const [auto, setAuto] = useState(true);
+  const startRef = useRef(onStart);
+  startRef.current = onStart;
+
+  useEffect(() => {
+    if (!auto) return;
+    const id = setInterval(() => setLeft(l => {
+      if (l <= 1) { clearInterval(id); startRef.current(); return 0; }
+      return l - 1;
+    }), 1000);
+    return () => clearInterval(id);
+  }, [auto]);
+
+  return (
+    <motion.div
+      className="pt-safe fixed inset-0 z-50 flex flex-col bg-bg"
+      initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}
+      role="dialog" aria-modal="true" aria-label={BLOCK_INFO[type].title}
+    >
+      <div className="mx-auto w-full max-w-md flex-1 overflow-y-auto px-5 pb-4">
+        <div className="flex items-center gap-2 pt-3">
+          <IconButton label="Завершить тренировку" onClick={onExit} className="bg-surface-2"><X size={20} /></IconButton>
+          <div className="flex-1 text-center text-[13px] font-medium tracking-wide text-muted uppercase">Упражнение {index + 1} из {count}</div>
+          <div className="size-11" />
+        </div>
+        <h1 className="mt-3 text-[28px] leading-tight font-semibold tracking-tight">{BLOCK_INFO[type].title}</h1>
+        <p className="mb-4 text-[15px] text-muted">{BLOCK_INFO[type].short}</p>
+        <ExerciseDemo type={type} position={level.position} />
+        <div className="mt-2"><FigureLegend /></div>
+        <div className="mt-5"><GuideText type={type} position={level.position} /></div>
+      </div>
+      <div className="pb-safe border-t border-line bg-bg/95 backdrop-blur">
+        <div className="mx-auto w-full max-w-md px-5 pt-3 pb-4">
+          <PrimaryButton onClick={onStart}><Play size={20} fill="currentColor" /> Начать</PrimaryButton>
+          <div className="mt-2 flex items-center justify-between text-[13px] text-muted">
+            {auto ? (
+              <button type="button" onClick={() => setAuto(false)} className="py-1">Начнётся через {left} с · <span className="underline underline-offset-2">не начинать</span></button>
+            ) : <span>Начните, когда будете готовы</span>}
+            <button type="button" onClick={onSkip} className="py-1 font-medium">Пропустить</button>
+          </div>
+        </div>
+      </div>
+    </motion.div>
   );
 }
 

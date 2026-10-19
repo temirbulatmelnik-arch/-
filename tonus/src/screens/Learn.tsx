@@ -1,7 +1,9 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { AlertTriangle, BookOpen, CalendarClock, Check, ChevronDown, CircleDot, ExternalLink, HeartPulse, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { AlertTriangle, BookOpen, CalendarClock, Check, ChevronDown, CircleDot, ExternalLink, HeartPulse, PersonStanding, ShieldCheck, Sparkles, X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
+import { ExerciseDemo, FigureLegend, GuideText } from '../components/ExerciseDemo';
 import { PelvisDiagram } from '../components/PelvisDiagram';
+import { BLOCK_INFO, type BlockType, type Position } from '../engine/program';
 import { ScreenHeader } from '../components/ui';
 
 function Section({ icon, title, children, open: initial = false }: { icon: ReactNode; title: string; children: ReactNode; open?: boolean }) {
@@ -40,12 +42,39 @@ const SOURCES: [string, string][] = [
   ['Обзор программ тренировки тазового дна у мужчин', 'https://portfolio.jcu.edu.au/Publications/JCU174411'],
 ];
 
+const TYPES: BlockType[] = ['breath', 'slow', 'quick', 'lift', 'endurance', 'release'];
+const POSITIONS: [Position, string][] = [['lying', 'Лёжа'], ['sitting', 'Сидя'], ['standing', 'Стоя']];
+
+function Exercises3D() {
+  const [type, setType] = useState<BlockType>('slow');
+  const [position, setPosition] = useState<Position>('lying');
+  const chip = (on: boolean) => `shrink-0 rounded-full px-3 py-1.5 text-[14px] font-medium transition ${on ? 'bg-ink text-bg' : 'bg-surface-2 text-muted'}`;
+  return (
+    <div>
+      <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 pb-3">
+        {TYPES.map(t => <button key={t} type="button" onClick={() => setType(t)} aria-pressed={t === type} className={chip(t === type)}>{BLOCK_INFO[t].title}</button>)}
+      </div>
+      <div className="mb-3 flex gap-2">
+        {POSITIONS.map(([p, label]) => <button key={p} type="button" onClick={() => setPosition(p)} aria-pressed={p === position} className={chip(p === position)}>{label}</button>)}
+      </div>
+      <ExerciseDemo type={type} position={position} />
+      <div className="mt-2"><FigureLegend /></div>
+      <h3 className="mt-5 mb-2 text-[18px] font-semibold">{BLOCK_INFO[type].title}</h3>
+      <GuideText type={type} />
+    </div>
+  );
+}
+
 export function Learn() {
   return (
     <div className="pb-4">
       <ScreenHeader title="Техника" subtitle="Как делать правильно и безопасно" />
       <div className="space-y-3 px-5">
-        <Section icon={<CircleDot size={20} />} title="Где эти мышцы" open>
+        <Section icon={<PersonStanding size={20} />} title="Упражнения в 3D" open>
+          <Exercises3D />
+        </Section>
+
+        <Section icon={<CircleDot size={20} />} title="Где эти мышцы">
           <PelvisDiagram />
           <p className="mt-4">
             Мышцы тазового дна натянуты, как гамак, от лобковой кости до копчика. Вокруг заднего прохода — кольцо

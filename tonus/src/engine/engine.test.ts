@@ -115,3 +115,21 @@ describe('напоминания', () => {
     expect(ics.match(/BEGIN:VALARM/g)).toHaveLength(2);
   });
 });
+
+describe('инструкции и демо', () => {
+  it('у каждого упражнения есть инструкция и короткий демо-цикл, который заканчивается расслаблением', async () => {
+    const { GUIDES, demoTimeline } = await import('./guides');
+    const { BLOCK_INFO } = await import('./program');
+    for (const type of Object.keys(BLOCK_INFO) as (keyof typeof BLOCK_INFO)[]) {
+      const g = GUIDES[type];
+      expect(g.steps.length).toBeGreaterThanOrEqual(3);
+      expect(g.mistakes.length).toBeGreaterThanOrEqual(2);
+      expect(g.breath && g.feel && g.goal && g.voice).toBeTruthy();
+      const tl = demoTimeline(type);
+      expect(tl.steps.every(s => s.phase !== 'prep')).toBe(true);
+      expect(tl.total).toBeGreaterThan(4);
+      expect(tl.total).toBeLessThan(15);
+      expect(tl.steps[tl.steps.length - 1].level).toBe(0);
+    }
+  });
+});

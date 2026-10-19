@@ -16,6 +16,10 @@ export interface Settings {
   theme: Theme;
   /** скрыть подсказку «Установите на телефон» на главном экране */
   installHintHidden: boolean;
+  /** подробное объяснение с 3D-демонстрацией перед каждым упражнением */
+  intro: boolean;
+  /** что показывать во время тренировки: 3D-фигуру или кольцо */
+  playerView: 'figure' | 'ring';
 }
 
 interface State {
@@ -41,6 +45,8 @@ const DEFAULT_SETTINGS: Settings = {
   reminders: ['08:30', '14:00', '21:00'],
   theme: 'system',
   installHintHidden: false,
+  intro: true,
+  playerView: 'figure',
 };
 
 export const useStore = create<State>()(

@@ -27,7 +27,10 @@ export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(pkg.version) },
   build: {
     // одностраничное превью (VITE_NO_SW=1) собирается без страницы установки — она живёт на сайте
-    rollupOptions: { input: process.env.VITE_NO_SW ? { main: 'index.html' } : { main: 'index.html', install: 'install.html' } },
+    chunkSizeWarningLimit: 1000, // three.js — отдельный ленивый модуль ~1 МБ
+    rollupOptions: process.env.VITE_NO_SW
+      ? { input: { main: 'index.html' }, output: { inlineDynamicImports: true } }
+      : { input: { main: 'index.html', install: 'install.html' } },
   },
   plugins: [
     webClipProfile(),

@@ -93,11 +93,12 @@ function blockSteps(b: Block, block: number): Step[] {
   return out;
 }
 
-export function buildTimeline(level: Level): Timeline {
+/** blocksOnly — без шагов подготовки (для демонстрации упражнения по кругу) */
+export function buildTimeline(level: Level, { blocksOnly = false } = {}): Timeline {
   const steps: Step[] = [];
   level.blocks.forEach((b, i) => {
     const info = BLOCK_INFO[b.type];
-    steps.push({
+    if (!blocksOnly) steps.push({
       phase: 'prep', block: i, blockType: b.type,
       label: info.title,
       hint: i === 0 ? `${POSITION_LABEL[level.position]}. ${info.how}` : info.how,

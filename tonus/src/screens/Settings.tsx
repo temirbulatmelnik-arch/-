@@ -1,4 +1,4 @@
-import { BellRing, Download, ExternalLink, Minus, Mic, Plus, Smartphone, Timer, Trash2, Upload, Vibrate, Volume2 } from 'lucide-react';
+import { BellRing, Download, ExternalLink, Minus, Mic, PersonStanding, Plus, Smartphone, Timer, Trash2, Upload, Vibrate, Volume2 } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { SecondaryButton, Switch } from '../components/ui';
 import { voiceSupported } from '../engine/cues';
@@ -42,6 +42,7 @@ export function Settings() {
           <Switch checked={settings.voice} onChange={v => setSettings({ voice: v })} label="Голосовые подсказки" hint={voiceSupported() ? '«Сжать», «Расслабить», названия блоков' : 'Браузер не поддерживает голос'} icon={<Mic size={18} />} />
           <Switch checked={settings.vibration} onChange={v => setSettings({ vibration: v })} label="Вибрация" hint="Можно заниматься с закрытыми глазами (Android)" icon={<Vibrate size={18} />} />
           <Switch checked={settings.ticks} onChange={v => setSettings({ ticks: v })} label="Отсчёт последних секунд" hint="Тихие щелчки в конце удержания" icon={<Timer size={18} />} />
+          <Switch checked={settings.intro} onChange={v => setSettings({ intro: v })} label="Объяснение перед упражнением" hint="3D-демонстрация и подробная инструкция, тренировка ждёт до 30 с" icon={<PersonStanding size={18} />} />
         </div>
       </section>
 

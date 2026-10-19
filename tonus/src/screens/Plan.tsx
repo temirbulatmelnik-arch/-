@@ -1,6 +1,7 @@
 import { motion } from 'motion/react';
-import { Check, Clock } from 'lucide-react';
+import { Check, ChevronRight, Clock } from 'lucide-react';
 import { useState } from 'react';
+import { ExerciseDemo, FigureLegend, GuideText } from '../components/ExerciseDemo';
 import { Chip, ScreenHeader, Sheet, PrimaryButton, plural } from '../components/ui';
 import { BLOCK_INFO, LEVELS, POSITION_LABEL, POSITION_SHORT, type BlockType, type Level } from '../engine/program';
 import { levelReadiness } from '../engine/stats';
@@ -15,6 +16,8 @@ const dot = (t: BlockType) => (BLOCK_INFO[t].color === 'squeeze' ? 'bg-squeeze' 
 export function Plan() {
   const { levelId, history, setLevel } = useStore();
   const [open, setOpen] = useState<Level | null>(null);
+  const [exercise, setExercise] = useState<BlockType | null>(null);
+  const current = LEVELS.find(l => l.id === levelId) ?? LEVELS[0];
   const ready = levelReadiness(history, levelId);
 
   return (
@@ -25,12 +28,15 @@ export function Plan() {
         <h2 className="text-[17px] font-semibold">Из чего состоит тренировка</h2>
         <ul className="mt-3 space-y-3">
           {BLOCK_ORDER.map(t => (
-            <li key={t} className="flex gap-3">
-              <span className={`mt-1.5 size-2.5 shrink-0 rounded-full ${dot(t)}`} />
-              <div>
-                <div className="text-[15px] font-medium">{BLOCK_INFO[t].title} <span className="font-normal text-muted">— {BLOCK_INFO[t].short.toLowerCase()}</span></div>
-                <p className="text-[14px] leading-snug text-muted">{BLOCK_INFO[t].how}</p>
-              </div>
+            <li key={t}>
+              <button type="button" onClick={() => setExercise(t)} className="flex w-full gap-3 text-left">
+                <span className={`mt-1.5 size-2.5 shrink-0 rounded-full ${dot(t)}`} />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[15px] font-medium">{BLOCK_INFO[t].title} <span className="font-normal text-muted">— {BLOCK_INFO[t].short.toLowerCase()}</span></span>
+                  <span className="block text-[14px] leading-snug text-muted">{BLOCK_INFO[t].how}</span>
+                  <span className="mt-1 inline-flex items-center gap-0.5 text-[13px] font-medium text-calm">Показать в 3D <ChevronRight size={14} /></span>
+                </span>
+              </button>
             </li>
           ))}
         </ul>
@@ -75,6 +81,16 @@ export function Plan() {
           );
         })}
       </ol>
+
+      <Sheet open={!!exercise} onClose={() => setExercise(null)} title={exercise ? BLOCK_INFO[exercise].title : ''}>
+        {exercise && (
+          <div>
+            <ExerciseDemo type={exercise} position={current.position} />
+            <div className="mt-2"><FigureLegend /></div>
+            <div className="mt-5"><GuideText type={exercise} position={current.position} /></div>
+          </div>
+        )}
+      </Sheet>
 
       <Sheet open={!!open} onClose={() => setOpen(null)} title={open ? `Уровень ${open.id} · ${open.name}` : ''}>
         {open && <LevelDetails level={open} current={open.id === levelId} onSelect={() => { setLevel(open.id); setOpen(null); }} />}
