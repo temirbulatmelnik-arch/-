@@ -47,11 +47,12 @@ npm run preview   # посмотреть собранную версию
 
 ### Публикация на GitHub Pages
 
-Сценарий `.github/workflows/tonus-pages.yml` собирает приложение, прогоняет тесты и выкладывает сайт при каждом изменении в `tonus/`.
+Сценарий `.github/workflows/tonus-pages.yml` при каждом изменении в `tonus/` собирает приложение, прогоняет тесты и кладёт готовый сайт в ветку `gh-pages`. GitHub Pages раздаёт эту ветку как сайт; ничего настраивать не нужно. Запустить вручную: **Actions → «Тонус — публикация на GitHub Pages» → Run workflow**.
 
-1. Один раз включить Pages: в репозитории **Settings → Pages → Build and deployment → Source: GitHub Actions**.
-2. Запустить публикацию: **Actions → «Тонус — публикация на GitHub Pages» → Run workflow** (или любое изменение в `tonus/`).
-3. Приложение: `https://temirbulatmelnik-arch.github.io/-/`, страница установки: `https://temirbulatmelnik-arch.github.io/-/install.html`.
+- Приложение: `https://temirbulatmelnik-arch.github.io/-/`
+- Страница установки: `https://temirbulatmelnik-arch.github.io/-/install.html`
+
+Если сайт не открылся, проверьте **Settings → Pages**: источник должен быть «Deploy from a branch», ветка `gh-pages`, папка `/ (root)`.
 
 Если переименовать репозиторий (например, в `tonus`), адрес станет `…github.io/tonus/`. Сайт открыт всем, у кого есть ссылка, но журнал тренировок хранится только на телефоне и на сайт не попадает.
 
