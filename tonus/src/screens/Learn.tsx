@@ -45,11 +45,11 @@ const SOURCES: [string, string][] = [
 ];
 
 const TYPES: BlockType[] = ['breath', 'slow', 'quick', 'lift', 'endurance', 'release'];
-const POSITIONS: [Position, string][] = [['lying', 'Лёжа'], ['sitting', 'Сидя'], ['standing', 'Стоя']];
+const POSITIONS: [Position, string][] = [['sitting', 'Сидя'], ['standing', 'Стоя']];
 
 function Exercises3D() {
   const [type, setType] = useState<BlockType>('slow');
-  const [position, setPosition] = useState<Position>('lying');
+  const [position, setPosition] = useState<Position>('sitting');
   const chip = (on: boolean) => `shrink-0 rounded-full px-3 py-1.5 text-[14px] font-medium transition ${on ? 'bg-ink text-bg' : 'bg-surface-2 text-muted'}`;
   return (
     <div>
@@ -83,8 +83,9 @@ export function Learn() {
             сфинктера. Они держат газы и стул, поддерживают органы малого таза и участвуют в половой функции.
           </p>
           <p className="mt-3">
-            <b>Как найти:</b> сидя или лёжа представьте, что сдерживаете газы. Сожмите кольцо вокруг заднего прохода и
-            подтяните его вверх и внутрь — как будто втягиваете. Почувствовали подъём промежности — это они.
+            <b>Как найти:</b> сядьте на твёрдый стул и представьте, что сдерживаете газы. Сожмите кольцо вокруг заднего прохода и
+            подтяните его вверх и внутрь — как будто втягиваете. Сиденье подскажет: промежность чуть отрывается от него вверх.
+            Это они.
           </p>
           <p className="mt-3 text-muted">
             Проверка: положите ладонь на ягодицы — при правильном сжатии они остаются мягкими. Задний проход
@@ -97,7 +98,7 @@ export function Learn() {
             <Do>Сжимайте <b>вверх и внутрь</b>, без рывка, а затем <b>полностью</b> отпускайте.</Do>
             <Do>Дышите свободно: можно считать вслух — так задержать дыхание невозможно.</Do>
             <Do>Отдыхайте между сжатиями не меньше, чем длилось сжатие.</Do>
-            <Do>Начинайте лёжа, затем сидя, потом стоя.</Do>
+            <Do>Начинайте сидя на твёрдом стуле, затем переходите к упражнениям стоя.</Do>
             <Do>Лучше меньше, но правильно: если мышца устала и «уплывает», остановитесь.</Do>
             <Do>Опорожните мочевой пузырь перед тренировкой.</Do>
           </ul>

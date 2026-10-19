@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LEVELS, levelById } from './program';
+import { DEFAULT_START, LEVELS, STARTS, levelById } from './program';
 import { buildTimeline, levelAt, locate, nextBlockStart } from './timeline';
 import { bestStreak, levelReadiness, streak, todayCount, type SessionRecord } from './stats';
 
@@ -20,6 +20,13 @@ describe('программа', () => {
       if (b.type === 'slow') expect(b.hold).toBeLessThanOrEqual(10);
       if (b.type === 'endurance') expect(b.intensity).toBeLessThanOrEqual(0.5);
     }
+  });
+
+  it('стартовые уровни существуют и идут по возрастанию, по умолчанию — «спортивный»', () => {
+    const ids = STARTS.map(s => s.levelId);
+    expect(ids).toEqual([...ids].sort((x, y) => x - y));
+    for (const id of ids) expect(levelById(id).id).toBe(id);
+    expect(ids).toContain(DEFAULT_START);
   });
 
   it('каждая тренировка начинается с дыхания и заканчивается расслаблением', () => {

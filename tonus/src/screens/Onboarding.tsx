@@ -1,8 +1,9 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { AlertTriangle, Clock, Lock, Volume2 } from 'lucide-react';
-import { useState } from 'react';
+import { AlertTriangle, Check, Clock, Lock, Volume2 } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
 import { PelvisDiagram } from '../components/PelvisDiagram';
 import { PrimaryButton } from '../components/ui';
+import { DEFAULT_START, STARTS } from '../engine/program';
 
 function Hero() {
   return (
@@ -20,7 +21,32 @@ function Hero() {
   );
 }
 
-const SLIDES = [
+function StartPicker({ value, onChange }: { value: number; onChange: (id: number) => void }) {
+  return (
+    <div className="space-y-2.5 text-left" role="radiogroup" aria-label="Подготовка">
+      {STARTS.map(s => {
+        const on = s.levelId === value;
+        return (
+          <button key={s.levelId} type="button" role="radio" aria-checked={on} onClick={() => onChange(s.levelId)}
+            className={`card flex w-full items-start gap-3 p-4 text-left transition ${on ? 'ring-2 ring-calm' : ''}`}>
+            <span className={`mt-0.5 grid size-6 shrink-0 place-items-center rounded-full border-2 ${on ? 'border-calm bg-calm text-bg' : 'border-line'}`}>
+              {on && <Check size={14} strokeWidth={3.5} />}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[16px] font-semibold">{s.title} <span className="font-normal text-muted">· уровень {s.levelId}</span></span>
+              <span className="mt-0.5 block text-[14px] leading-snug text-muted">{s.text}</span>
+            </span>
+          </button>
+        );
+      })}
+      <p className="pt-1 text-center text-[13px] text-muted">Уровень можно сменить в любой момент на вкладке «Программа».</p>
+    </div>
+  );
+}
+
+type Slide = { title: string; body: ReactNode | 'start'; visual: ReactNode };
+
+const SLIDES: Slide[] = [
   {
     title: 'Тонус',
     body: (
@@ -45,6 +71,7 @@ const SLIDES = [
     ),
     visual: <div className="mx-auto w-full max-w-xs"><PelvisDiagram /></div>,
   },
+  { title: 'Ваша подготовка', body: 'start', visual: null },
   {
     title: 'Безопасность',
     body: (
@@ -59,15 +86,16 @@ const SLIDES = [
   },
 ];
 
-export function Onboarding({ onDone }: { onDone: () => void }) {
+export function Onboarding({ onDone }: { onDone: (levelId: number) => void }) {
   const [i, setI] = useState(0);
+  const [start, setStart] = useState(DEFAULT_START);
   const slide = SLIDES[i];
   const last = i === SLIDES.length - 1;
 
   return (
     <div className="pt-safe pb-safe mx-auto flex min-h-dvh w-full max-w-md flex-col px-6">
       <div className="flex justify-end pt-4">
-        {!last && <button type="button" onClick={onDone} className="px-2 py-2 text-[15px] text-muted">Пропустить</button>}
+        {!last && <button type="button" onClick={() => onDone(start)} className="px-2 py-2 text-[15px] text-muted">Пропустить</button>}
       </div>
       <AnimatePresence mode="wait">
         <motion.div
@@ -80,7 +108,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         >
           {slide.visual && <div className="mb-8">{slide.visual}</div>}
           <h1 className="mb-4 text-[30px] leading-tight font-semibold tracking-tight">{slide.title}</h1>
-          {slide.body}
+          {slide.body === 'start' ? <StartPicker value={start} onChange={setStart} /> : slide.body}
         </motion.div>
       </AnimatePresence>
       <div className="pb-6">
@@ -89,7 +117,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             <motion.span key={k} className="h-2 rounded-full bg-calm" animate={{ width: k === i ? 24 : 8, opacity: k === i ? 1 : 0.3 }} />
           ))}
         </div>
-        <PrimaryButton onClick={() => (last ? onDone() : setI(i + 1))}>{last ? 'Понятно, начинаем' : 'Далее'}</PrimaryButton>
+        <PrimaryButton onClick={() => (last ? onDone(start) : setI(i + 1))}>{last ? 'Понятно, начинаем' : 'Далее'}</PrimaryButton>
       </div>
     </div>
   );

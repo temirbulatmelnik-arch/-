@@ -1,5 +1,5 @@
 // 3D-фигура для упражнений: реалистичный спортивный мужчина 190 см / 90 кг (MakeHuman, CC0) со скелетом
-// и запечёнными текстурами кожи и рельефа, в положении лёжа, сидя или стоя.
+// и запечёнными текстурами кожи и рельефа, в положении сидя или стоя.
 // Вид «насквозь»: кожа становится полупрозрачной, внутри — настоящая анатомия Z-Anatomy / BodyParts3D
 // (CC BY-SA): кости таза, бёдра, позвоночник, рёбра, мышца, поднимающая задний проход, наружный сфинктер,
 // мочевой пузырь, простата, диафрагма. Анатомия прикреплена к костям скелета и движется вместе с позой.
@@ -16,7 +16,7 @@ import type { Phase } from '../engine/timeline';
 import { ANATOMY_COLORS } from './anatomyColors';
 
 export interface FigureMotion { level: number; phase: Phase }
-export type FigurePose = 'lying' | 'sitting' | 'standing';
+export type FigurePose = 'sitting' | 'standing';
 /** body — тело целиком; pelvis — вид насквозь */
 export type FigureZoom = 'body' | 'pelvis';
 /** на чём держать камеру в виде насквозь: таз (сжатия) или туловище целиком (дыхание) */
@@ -162,17 +162,15 @@ function boneInMesh(inst: Instance, b: THREE.Object3D, offset = new THREE.Vector
 const VIEW: Record<FigurePose, { dir: Vec3; floor: Vec3; body: number; torso: number; pelvis: number }> = {
   standing: { dir: [0.5, 0.18, 0.85], floor: [0.42, -0.32, 0.85], body: 3.6, torso: 1.55, pelvis: 0.95 },
   sitting: { dir: [0.6, 0.28, 0.75], floor: [0.45, -0.1, 0.88], body: 3.1, torso: 1.45, pelvis: 0.95 },
-  lying: { dir: [0.78, 0.58, 0.25], floor: [0.32, 0.48, 0.82], body: 2.9, torso: 1.4, pelvis: 0.9 },
 };
 
 /** Ставит кости в позу и возвращает, где оказалась фигура и куда смотреть камере.
  *  Позы задаются направлениями костей в системе тела (Y — к голове, Z — вперёд, X — влево),
- *  поэтому не зависят от исходной А-позы модели. Положение лёжа — та же поза, повёрнутая на спину. */
+ *  поэтому не зависят от исходной А-позы модели. */
 function applyPose(inst: Instance, meta: AthleteMeta, pose: FigurePose) {
   const { by } = inst;
   Object.values(by).forEach(b => b.quaternion.identity());
   const restDir = (a: string, b: string) => rest(meta, b).sub(rest(meta, a)).normalize();
-  const len = (a: string, b: string) => rest(meta, b).distanceTo(rest(meta, a));
   /** повернуть кость так, чтобы она смотрела на child в направлении dir (с учётом поворота родителей) */
   const aim = (bone: string, child: string, dir: Vec3) => {
     const b = by[bone];
@@ -196,32 +194,13 @@ function applyPose(inst: Instance, meta: AthleteMeta, pose: FigurePose) {
   const group = new THREE.Object3D();
   if (pose === 'standing') {
     arms([0.13, -1, 0.02], [0.1, -1, 0.16], [0.06, -1, 0.1]);
-  } else if (pose === 'sitting') {
+  } else {
     sides.forEach(([s, x]) => {
       aim(`thigh_${s}`, `calf_${s}`, [0.12 * x, -0.04, 1]);
       aim(`calf_${s}`, `foot_${s}`, [0.03 * x, -1, 0.06]);
     });
     feetFlat(footRest);
     arms([0.2, -0.9, 0.38], [0.08, -0.45, 0.9], [0.02, -0.5, 0.86]);
-  } else {
-    // лёжа на спине, колени согнуты, стопы на полу: подбираем угол голени так, чтобы стопа встала на пол
-    const lift = -meta.landmarks.minZ;
-    const thigh: Vec3 = [0.1, -0.66, 0.75];
-    const t = new THREE.Vector3(...thigh).normalize();
-    const hip = rest(meta, 'thigh_l');
-    const ankleZ = ankleRest.y - lift;
-    const cz = THREE.MathUtils.clamp((ankleZ - hip.z - t.z * len('thigh_l', 'calf_l')) / len('calf_l', 'foot_l'), -0.99, 0.99);
-    sides.forEach(([s, x]) => {
-      aim(`thigh_${s}`, `calf_${s}`, [thigh[0] * x, thigh[1], thigh[2]]);
-      aim(`calf_${s}`, `foot_${s}`, [0.02 * x, -Math.sqrt(1 - cz * cz), cz]);
-    });
-    feetFlat([0, -0.94, -0.34]);
-    arms([0.2, -1, -0.04], [0.12, -1, -0.04], [0.06, -1, -0.06]);
-    group.rotation.x = -Math.PI / 2;
-    group.position.y = lift;
-    group.position.z = 0.8;
-  }
-  if (pose === 'sitting') {
     // таз опускается так, чтобы лодыжки оказались на прежней высоте над полом
     inst.mesh.updateMatrixWorld(true);
     group.position.y = ankleRest.y - boneInMesh(inst, by.foot_l).y;
@@ -242,7 +221,6 @@ function applyPose(inst: Instance, meta: AthleteMeta, pose: FigurePose) {
   const fdir = new THREE.Vector3(...v.floor).normalize();
   return {
     position: group.position.toArray() as Vec3,
-    rotation: [group.rotation.x, 0, 0] as Vec3,
     camera: {
       body: { target: center.toArray() as Vec3, pos: center.clone().addScaledVector(dir, v.body).toArray() as Vec3 },
       torso: { target: torso.toArray() as Vec3, pos: torso.clone().addScaledVector(dir, v.torso).toArray() as Vec3 },
@@ -431,7 +409,7 @@ function Athlete({ inst, data, motion, theme, xray, focus, layout }: {
   const headRest = rest(meta, 'head');
 
   return (
-    <group position={layout.position} rotation={layout.rotation}>
+    <group position={layout.position}>
       <primitive object={inst.mesh} />
       {createPortal(
         <>
@@ -450,19 +428,12 @@ function Athlete({ inst, data, motion, theme, xray, focus, layout }: {
 }
 
 function Props({ pose, theme, seat, xray }: { pose: FigurePose; theme: Theme; seat: number; xray: boolean }) {
-  const mat = useMemo(() => theme.calm.clone().lerp(theme.floor, 0.78), [theme]);
   return (
     <>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.001, 0]} receiveShadow>
         <circleGeometry args={[1.45, 64]} />
         <meshStandardMaterial color={theme.floor} roughness={1} />
       </mesh>
-      {pose === 'lying' && (
-        <mesh position={[0, 0.006, 0]} scale={[0.72, 0.012, 2.1]} receiveShadow>
-          <boxGeometry />
-          <meshStandardMaterial color={mat} roughness={0.9} />
-        </mesh>
-      )}
       {pose === 'sitting' && (
         <mesh position={[0, seat / 2, -0.05]} castShadow receiveShadow>
           <cylinderGeometry args={[0.22, 0.2, seat, 40]} />

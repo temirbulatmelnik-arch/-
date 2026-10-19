@@ -1,9 +1,10 @@
 // Программа тренировок. Числа взяты из памяток NHS по упражнениям для анального сфинктера
 // и тазового дна: медленные удержания до 10 с с отдыхом не короче удержания, до 10–12 повторов;
-// быстрые сокращения по 1 с, 10–20 повторов; 3 подхода в день; позиции лёжа → сидя → стоя.
-// Подробности и источники — в README.
+// быстрые сокращения по 1 с, 10–20 повторов; 3 подхода в день.
+// Положения только сидя и стоя. Вместо «лёжа» — твёрдый стул: сиденье даёт обратную связь,
+// при правильном сжатии задний проход отрывается от него вверх. Подробности и источники — в README.
 
-export type Position = 'lying' | 'sitting' | 'standing' | 'any';
+export type Position = 'sitting' | 'standing' | 'any';
 
 export type Block =
   | { type: 'breath'; cycles: number; inhale: number; exhale: number }
@@ -26,17 +27,15 @@ export interface Level {
 }
 
 export const POSITION_LABEL: Record<Position, string> = {
-  lying: 'Лёжа на спине, колени согнуты',
-  sitting: 'Сидя, стопы на полу',
+  sitting: 'Сидя на твёрдом стуле, стопы на полу',
   standing: 'Стоя, ноги на ширине плеч',
-  any: 'В любом положении',
+  any: 'Сидя или стоя',
 };
 
 export const POSITION_SHORT: Record<Position, string> = {
-  lying: 'лёжа',
   sitting: 'сидя',
   standing: 'стоя',
-  any: 'любое положение',
+  any: 'сидя или стоя',
 };
 
 interface BlockInfo {
@@ -90,11 +89,11 @@ const RELEASE: Block = { type: 'release', cycles: 3, inhale: 4, exhale: 6 };
 
 export const LEVELS: Level[] = [
   {
-    id: 1, name: 'Знакомство', subtitle: 'Находим нужные мышцы', position: 'lying', minSessions: 9,
+    id: 1, name: 'Знакомство', subtitle: 'Находим нужные мышцы', position: 'sitting', minSessions: 9,
     blocks: [BREATH, { type: 'slow', reps: 8, hold: 3, rest: 6 }, { type: 'quick', reps: 8, on: 1, off: 2 }, RELEASE],
   },
   {
-    id: 2, name: 'Основа', subtitle: 'Удержание 5 секунд', position: 'lying', minSessions: 12,
+    id: 2, name: 'Основа', subtitle: 'Удержание 5 секунд', position: 'sitting', minSessions: 12,
     blocks: [BREATH, { type: 'slow', reps: 8, hold: 5, rest: 8 }, { type: 'quick', reps: 10, on: 1, off: 2 }, RELEASE],
   },
   {
@@ -106,11 +105,11 @@ export const LEVELS: Level[] = [
     blocks: [BREATH, { type: 'slow', reps: 10, hold: 8, rest: 8 }, { type: 'quick', reps: 12, on: 1, off: 2 }, { type: 'lift', reps: 2, floor: 3, rest: 8 }, RELEASE],
   },
   {
-    id: 5, name: 'Выносливость', subtitle: '10 × 10 секунд', position: 'sitting', minSessions: 15,
+    id: 5, name: 'Выносливость', subtitle: '10 × 10 секунд', position: 'standing', minSessions: 15,
     blocks: [BREATH, { type: 'slow', reps: 10, hold: 10, rest: 10 }, { type: 'quick', reps: 15, on: 1, off: 2 }, { type: 'lift', reps: 3, floor: 3, rest: 8 }, RELEASE],
   },
   {
-    id: 6, name: 'Стоя', subtitle: 'Против силы тяжести', position: 'standing', minSessions: 18,
+    id: 6, name: 'Нагрузка', subtitle: 'Долгое удержание вполсилы', position: 'standing', minSessions: 18,
     blocks: [BREATH, { type: 'slow', reps: 10, hold: 10, rest: 10 }, { type: 'quick', reps: 20, on: 1, off: 2 }, { type: 'lift', reps: 3, floor: 3, rest: 8 }, { type: 'endurance', reps: 1, hold: 20, rest: 20, intensity: 0.5 }, RELEASE],
   },
   {
@@ -122,5 +121,13 @@ export const LEVELS: Level[] = [
     blocks: [BREATH, { type: 'slow', reps: 10, hold: 10, rest: 10 }, { type: 'quick', reps: 20, on: 1, off: 2 }, { type: 'lift', reps: 2, floor: 3, rest: 8 }, { type: 'endurance', reps: 1, hold: 30, rest: 30, intensity: 0.5 }, RELEASE],
   },
 ];
+
+/** С какого уровня начать. Спортивным людям вводные уровни обычно слишком лёгкие */
+export const STARTS: { levelId: number; title: string; text: string }[] = [
+  { levelId: 1, title: 'С нуля', text: 'Мало двигаюсь или впервые ищу эти мышцы. Начнём с коротких удержаний по 3 секунды.' },
+  { levelId: 3, title: 'Спортивный', text: 'Регулярно тренируюсь, хорошо чувствую тело. Сразу удержания по 6 секунд и «лифт».' },
+  { levelId: 5, title: 'Уже тренировал', text: 'Делал упражнения Кегеля и умею сжимать сфинктер без ягодиц. Сразу стоя, удержания по 10 секунд.' },
+];
+export const DEFAULT_START = 3;
 
 export const levelById = (id: number): Level => LEVELS.find(l => l.id === id) ?? LEVELS[0];
