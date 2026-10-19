@@ -77,6 +77,10 @@ describe('программа', () => {
     }
   });
 
+  it('лёгкая и «только расслабление» — один и тот же объект при каждом вызове, иначе плеер начинает заново', () => {
+    for (const l of LEVELS) for (const k of ['main', 'light', 'relax'] as const) expect(sessionLevel(l, k)).toBe(sessionLevel(l, k));
+  });
+
   it('основная укладывается в 2–12 минут, лёгкая — в 1–5', () => {
     for (const l of LEVELS) {
       const { total } = buildTimeline(l);

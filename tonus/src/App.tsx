@@ -49,7 +49,10 @@ export default function App() {
   useTheme();
   const onboarded = useStore(s => s.onboarded);
   const finishOnboarding = useStore(s => s.finishOnboarding);
-  const { levelId, levelSince, intensive, checks } = useStore();
+  const levelId = useStore(s => s.levelId);
+  const levelSince = useStore(s => s.levelSince);
+  const intensive = useStore(s => s.intensive);
+  const checks = useStore(s => s.checks);
   const [tab, setTab] = useState<Tab>('today');
   const [playing, setPlaying] = useState<SessionKind | null>(null);
   const [checking, setChecking] = useState(false);

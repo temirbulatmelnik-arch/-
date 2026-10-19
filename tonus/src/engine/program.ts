@@ -193,10 +193,15 @@ export const SESSION_TITLE: Record<SessionKind, string> = {
   relax: 'Только расслабление',
 };
 
-/** Уровень с блоками нужной тренировки: плеер и лента шагов работают с ним как с обычным уровнем */
+const sessions = new WeakMap<Level, Partial<Record<SessionKind, Level>>>();
+
+/** Уровень с блоками нужной тренировки: плеер и лента шагов работают с ним как с обычным уровнем.
+ *  Один и тот же объект на каждый вызов: плеер перезапускает тренировку, если уровень сменился */
 export function sessionLevel(level: Level, kind: SessionKind): Level {
   if (kind === 'main') return level;
-  return { ...level, blocks: kind === 'light' ? level.light : RELAX_BLOCKS };
+  const byKind = sessions.get(level) ?? {};
+  sessions.set(level, byKind);
+  return (byKind[kind] ??= { ...level, blocks: kind === 'light' ? level.light : RELAX_BLOCKS });
 }
 
 /** С какого уровня начать. Спортивным людям вводные уровни обычно слишком лёгкие */
