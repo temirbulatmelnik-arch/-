@@ -34,7 +34,14 @@ function loadAthlete(): Promise<Athlete> {
     const url = (f: string) => new URL(`figure/${f}`, document.baseURI).href;
     const [meta, bin] = await Promise.all([
       fetch(url('athlete.json')).then(r => { if (!r.ok) throw new Error('athlete.json'); return r.json() as Promise<AthleteMeta>; }),
-      fetch(url('athlete.bin')).then(r => { if (!r.ok) throw new Error('athlete.bin'); return r.arrayBuffer(); }),
+      fetch(url('athlete.bin')).then(async r => {
+        if (r.ok && !r.headers.get('content-type')?.includes('text/html')) return r.arrayBuffer();
+        // превью на claude.ai не отдаёт .bin — там та же геометрия лежит в base64
+        const res = await fetch(url('athlete.bin.json'));
+        if (!res.ok) throw new Error('athlete.bin');
+        const { b64 } = await res.json() as { b64: string };
+        return Uint8Array.from(atob(b64), ch => ch.charCodeAt(0)).buffer;
+      }),
     ]);
     const n = meta.vertices, o = meta.offsets, { lo, hi } = meta.bounds;
     const q = new Uint16Array(bin, o.position, n * 3);
