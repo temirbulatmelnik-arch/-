@@ -1,9 +1,10 @@
 // Демонстрация упражнения на 3D-фигуре и подробная инструкция к нему.
-import { Hand, Maximize2, Minimize2, Wind, X } from 'lucide-react';
+import { Hand, PersonStanding, ScanEye, Wind, X } from 'lucide-react';
 import { useState } from 'react';
 import { GUIDES } from '../engine/guides';
 import { POSITION_LABEL, type BlockType, type Position } from '../engine/program';
-import { Figure, poseFor, useDemoMotion } from './Figure';
+import { ANATOMY_COLORS } from './anatomyColors';
+import { Figure, focusFor, poseFor, useDemoMotion } from './Figure';
 import type { FigureZoom } from './Figure3D';
 
 function stepTone(level: number, phase: string) {
@@ -19,13 +20,13 @@ export function ExerciseDemo({ type, position, initialZoom = 'body', autoRotate 
 
   return (
     <div className="relative overflow-hidden rounded-3xl bg-surface-2">
-      <Figure motion={motion} pose={poseFor(position)} zoom={zoom} autoRotate={autoRotate} className="aspect-square w-full" />
+      <Figure motion={motion} pose={poseFor(position)} zoom={zoom} focus={focusFor(type)} autoRotate={autoRotate} className="aspect-square w-full" />
       <button
         type="button"
         onClick={() => setZoom(zoom === 'body' ? 'pelvis' : 'body')}
         className="absolute top-3 right-3 flex items-center gap-1.5 rounded-xl bg-bg/80 px-2.5 py-1.5 text-[13px] font-medium backdrop-blur"
       >
-        {zoom === 'body' ? <><Maximize2 size={14} /> Крупно</> : <><Minimize2 size={14} /> Целиком</>}
+        {zoom === 'body' ? <><ScanEye size={14} /> Насквозь</> : <><PersonStanding size={14} /> Тело</>}
       </button>
       <span className="pointer-events-none absolute top-3 left-3 rounded-xl bg-bg/80 px-2.5 py-1.5 text-[12px] text-muted backdrop-blur">
         Поверните пальцем
@@ -82,12 +83,16 @@ export function GuideText({ type, position }: { type: BlockType; position?: Posi
   );
 }
 
-/** Легенда цветов 3D-фигуры */
+/** Легенда вида «насквозь» */
 export function FigureLegend() {
-  const items: [string, string][] = [['bg-breath', 'диафрагма и вдох'], ['bg-calm', 'тазовое дно в покое'], ['bg-squeeze', 'сжатие и сфинктер']];
+  const items: [string, string][] = [
+    [ANATOMY_COLORS.muscle, 'мышцы: тазовое дно, сфинктер, диафрагма'],
+    [ANATOMY_COLORS.active, 'мышца работает'],
+    [ANATOMY_COLORS.bone, 'кости'],
+  ];
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-muted">
-      {items.map(([c, t]) => <span key={t} className="flex items-center gap-1.5"><span className={`size-2.5 rounded-full ${c}`} />{t}</span>)}
+      {items.map(([c, t]) => <span key={t} className="flex items-center gap-1.5"><span className="size-2.5 rounded-full ring-1 ring-line" style={{ background: c }} />{t}</span>)}
     </div>
   );
 }

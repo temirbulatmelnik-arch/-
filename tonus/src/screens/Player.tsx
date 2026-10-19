@@ -1,8 +1,8 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { Check, CircleDot, Frown, Maximize2, Meh, Minimize2, Pause, PersonStanding, Play, SkipForward, Smile, Vibrate, VibrateOff, Volume2, VolumeX, X } from 'lucide-react';
+import { Check, CircleDot, Frown, Meh, Pause, PersonStanding, Play, ScanEye, SkipForward, Smile, Vibrate, VibrateOff, Volume2, VolumeX, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ExerciseDemo, FigureLegend, GuideText } from '../components/ExerciseDemo';
-import { Figure, poseFor } from '../components/Figure';
+import { Figure, focusFor, poseFor } from '../components/Figure';
 import type { FigureMotion, FigureZoom } from '../components/Figure3D';
 import { SphincterRing, phaseColor } from '../components/SphincterRing';
 import { IconButton, PrimaryButton, SecondaryButton, Switch } from '../components/ui';
@@ -137,12 +137,12 @@ export function Player({ level, onClose }: { level: Level; onClose: () => void }
         <div className="flex flex-1 flex-col items-center justify-center py-3">
           {settings.playerView === 'figure' ? (
             <div className="relative w-full max-w-[340px]">
-              <Figure motion={figureMotion} pose={poseFor(level.position)} zoom={zoom} className="aspect-square w-full overflow-hidden rounded-3xl bg-surface-2"
+              <Figure motion={figureMotion} pose={poseFor(level.position)} zoom={zoom} focus={focusFor(step.blockType)} className="aspect-square w-full overflow-hidden rounded-3xl bg-surface-2"
                 fallback={<SphincterRing level={lvl} phase={step.phase} progress={progress} />} />
               <Countdown value={quick ? step.rep ?? 0 : left} sub={quick ? `из ${step.reps}` : undefined} progress={progress} phase={step.phase} level={lvl} />
               <button type="button" onClick={() => setZoom(zoom === 'body' ? 'pelvis' : 'body')}
                 className="absolute top-3 right-3 flex items-center gap-1.5 rounded-xl bg-bg/80 px-2.5 py-1.5 text-[13px] font-medium backdrop-blur">
-                {zoom === 'body' ? <><Maximize2 size={14} /> Крупно</> : <><Minimize2 size={14} /> Целиком</>}
+                {zoom === 'body' ? <><ScanEye size={14} /> Насквозь</> : <><PersonStanding size={14} /> Тело</>}
               </button>
             </div>
           ) : (

@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "icons": "pwa-assets-generator",
-    "figure": "node tools/build-athlete.mjs"
+    "figure": "python tools/build-figure.py body anatomy"
   },
   "dependencies": {
     "@fontsource-variable/golos-text": "5.3.0",

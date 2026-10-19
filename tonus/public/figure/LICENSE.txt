@@ -1,0 +1,15 @@
+3D-модели «Тонуса»
+
+athlete.json, athlete.bin, athlete-color.jpg, athlete-normal.jpg — тело спортивного мужчины.
+Собрано из базовой сетки, морфов тела и скелета MakeHuman / MPFB (CC0, makehumancommunity.org):
+задано телосложение (рост 190 см, ~90 кг, мускулатура), добавлены рельеф мышц, кожа, стрижка и шорты.
+Лицензия результата: CC0.
+
+anatomy.json, anatomy.bin — анатомия для вида «насквозь» (кости таза, бёдра, позвоночник, рёбра,
+мышцы тазового дна, наружный сфинктер, мочевой пузырь, простата, диафрагма).
+Источник: Z-Anatomy — The open source atlas of anatomy — CC BY-SA 4.0 (https://github.com/LluisV/Z-Anatomy),
+основанный на BodyParts3D — The Database Center for Life Science — CC BY-SA 2.1 Japan.
+Изменения: выбраны отдельные структуры, упрощена сетка, модель масштабирована и подогнана к телу.
+Лицензия этих файлов: CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/).
+
+Сборка: tools/build-figure.py (Blender, модуль bpy).

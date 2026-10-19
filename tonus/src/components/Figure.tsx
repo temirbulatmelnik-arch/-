@@ -3,7 +3,7 @@ import { Component, lazy, Suspense, useEffect, useRef, useState, type ReactNode 
 import { demoTimeline } from '../engine/guides';
 import type { BlockType, Position } from '../engine/program';
 import { levelAt, locate, type Step } from '../engine/timeline';
-import type { FigureMotion, FigurePose, FigureZoom } from './Figure3D';
+import type { FigureFocus, FigureMotion, FigurePose, FigureZoom } from './Figure3D';
 
 const Figure3D = lazy(() => import('./Figure3D'));
 
@@ -15,10 +15,14 @@ class Boundary extends Component<{ fallback: ReactNode; children: ReactNode }, {
   render() { return this.state.failed ? this.props.fallback : this.props.children; }
 }
 
-export function Figure({ motion, pose, zoom, autoRotate, className = '', fallback }: {
+/** Дыхательные упражнения смотрим на всё туловище, остальные — на таз */
+export const focusFor = (t: BlockType): FigureFocus => (t === 'breath' || t === 'release' ? 'torso' : 'pelvis');
+
+export function Figure({ motion, pose, zoom, focus, autoRotate, className = '', fallback }: {
   motion: { current: FigureMotion };
   pose: FigurePose;
   zoom?: FigureZoom;
+  focus?: FigureFocus;
   autoRotate?: boolean;
   className?: string;
   fallback?: ReactNode;
@@ -28,7 +32,7 @@ export function Figure({ motion, pose, zoom, autoRotate, className = '', fallbac
   return (
     <Boundary fallback={spare}>
       <Suspense fallback={<div className={`${box} grid place-items-center`}><span className="size-8 animate-spin rounded-full border-2 border-line border-t-calm" /></div>}>
-        <Figure3D motion={motion} pose={pose} zoom={zoom} autoRotate={autoRotate} className={className} />
+        <Figure3D motion={motion} pose={pose} zoom={zoom} focus={focus} autoRotate={autoRotate} className={className} />
       </Suspense>
     </Boundary>
   );

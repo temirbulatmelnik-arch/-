@@ -40,6 +40,8 @@ const SOURCES: [string, string][] = [
   ['NHS: мышцы тазового дна (Berkshire)', 'https://www.berkshirehealthcare.nhs.uk/media/168314/pelvic_floor_muscles_leaflet.pdf'],
   ['Cochrane: биофидбэк и упражнения для сфинктера при недержании кала', 'https://cochranelibrary.com/cdsr/doi/10.1002/14651858.CD002111.pub3/information/ro'],
   ['Обзор программ тренировки тазового дна у мужчин', 'https://portfolio.jcu.edu.au/Publications/JCU174411'],
+  ['3D-анатомия: Z-Anatomy (CC BY-SA 4.0) на основе BodyParts3D, DBCLS (CC BY-SA 2.1 JP)', 'https://github.com/LluisV/Z-Anatomy'],
+  ['3D-модель тела: MakeHuman (CC0)', 'http://www.makehumancommunity.org'],
 ];
 
 const TYPES: BlockType[] = ['breath', 'slow', 'quick', 'lift', 'endurance', 'release'];
