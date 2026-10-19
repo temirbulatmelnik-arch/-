@@ -80,7 +80,7 @@ export function Today({ onStart, onSettings, onPlan }: { onStart: () => void; on
           </p>
           <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-gold/15 px-3 py-1 text-[14px] font-medium">
             <Flame size={16} className="text-gold" />
-            {days ? `${days} ${plural(days, 'день', 'дня', 'дней')} подряд` : 'Начните серию сегодня'}
+            {days ? `${days} ${plural(days, 'день', 'дня', 'дней')} подряд` : 'Начните серию'}
           </div>
         </div>
       </section>

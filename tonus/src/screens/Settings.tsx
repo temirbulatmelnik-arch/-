@@ -7,6 +7,10 @@ import { useStore, type Theme } from '../store/store';
 
 const THEMES: [Theme, string][] = [['system', 'Как в системе'], ['light', 'Светлая'], ['dark', 'Тёмная']];
 
+// Внутри чужой страницы (превью) браузер не даёт скачивать файлы
+const embedded = window.self !== window.top;
+const EMBEDDED_NOTE = 'В превью скачивание файлов недоступно. Откройте приложение по своему адресу или установите на телефон.';
+
 export function Settings() {
   const { settings, setSettings, history, levelId, importData, reset } = useStore();
   const file = useRef<HTMLInputElement>(null);
@@ -79,6 +83,7 @@ export function Settings() {
               <BellRing size={18} /> В календарь
             </SecondaryButton>
           </div>
+          {embedded && <p className="mt-2 text-[13px] text-muted">{EMBEDDED_NOTE}</p>}
         </div>
       </section>
 
@@ -103,6 +108,7 @@ export function Settings() {
             <SecondaryButton onClick={() => file.current?.click()} className="flex-1"><Upload size={18} /> Загрузить</SecondaryButton>
           </div>
           <input ref={file} type="file" accept="application/json,.json" className="hidden" onChange={e => onImport(e.target.files?.[0])} />
+          {embedded && <p className="text-[13px] text-muted">{EMBEDDED_NOTE}</p>}
           {msg && <p className="text-[14px]">{msg}</p>}
           {confirmReset ? (
             <div className="flex gap-2 pt-1">
