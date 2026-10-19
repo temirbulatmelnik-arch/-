@@ -1,0 +1,53 @@
+# Публикует «Тонус» на GitHub Pages: https://<владелец>.github.io/<репозиторий>/
+# Один раз включить: Settings → Pages → Build and deployment → Source: GitHub Actions.
+name: Тонус — публикация на GitHub Pages
+
+on:
+  push:
+    branches: [claude/plugin-marketplace-ecc-add-7184im]
+    paths: ['tonus/**', '.github/workflows/tonus-pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: tonus-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tonus
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tonus/package-lock.json
+      - id: pages
+        uses: actions/configure-pages@v5
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+        env:
+          # адрес сайта нужен для готового профиля iPhone (tonus.mobileconfig)
+          SITE_URL: ${{ steps.pages.outputs.base_url }}/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: tonus/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

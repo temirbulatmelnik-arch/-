@@ -1,10 +1,11 @@
 import { motion } from 'motion/react';
-import { ArrowUpRight, Clock, Flame, Lightbulb, Mic, MicOff, Play, Settings2, Vibrate, VibrateOff, Volume2, VolumeX } from 'lucide-react';
+import { ArrowUpRight, Clock, Flame, Lightbulb, Mic, MicOff, Play, Settings2, Smartphone, Vibrate, VibrateOff, Volume2, VolumeX, X } from 'lucide-react';
 import { useMemo } from 'react';
 import { Chip, IconButton, PrimaryButton, capitalize, plural } from '../components/ui';
 import { BLOCK_INFO, LEVELS, POSITION_SHORT, levelById, type Block } from '../engine/program';
 import { levelReadiness, streak, todayCount } from '../engine/stats';
 import { buildTimeline, formatDuration } from '../engine/timeline';
+import { INSTALL_URL, detectPlatform, isStandalone } from '../install/platform';
 import { useStore } from '../store/store';
 import { TIPS } from './tips';
 
@@ -53,6 +54,7 @@ export function Today({ onStart, onSettings, onPlan }: { onStart: () => void; on
   const next = LEVELS.find(l => l.id === levelId + 1);
   const tip = TIPS[Math.floor(Date.now() / 86_400_000) % TIPS.length];
   const goalMet = done >= settings.dailyGoal;
+  const showInstall = !settings.installHintHidden && detectPlatform() !== 'desktop' && !isStandalone();
 
   const quick = [
     { on: settings.sound, set: () => setSettings({ sound: !settings.sound }), icon: settings.sound ? Volume2 : VolumeX, label: 'Звук' },
@@ -84,6 +86,19 @@ export function Today({ onStart, onSettings, onPlan }: { onStart: () => void; on
           </div>
         </div>
       </section>
+
+      {showInstall && (
+        <section className="mt-3 flex items-center gap-3 rounded-3xl bg-breath/15 p-4">
+          <span className="grid size-10 shrink-0 place-items-center rounded-2xl bg-breath/20 text-breath"><Smartphone size={20} /></span>
+          <div className="min-w-0 flex-1">
+            <div className="text-[15px] font-semibold">Установите на экран «Домой»</div>
+            <div className="text-[13px] text-muted">Без App Store: откроется как приложение и будет работать без интернета.</div>
+          </div>
+          <a href={INSTALL_URL} target={INSTALL_URL.startsWith('http') ? '_blank' : undefined} rel="noreferrer"
+            className="rounded-xl bg-breath px-3 py-2 text-[14px] font-semibold text-on-accent">Как</a>
+          <button type="button" aria-label="Скрыть" onClick={() => setSettings({ installHintHidden: true })} className="-mr-1 p-1 text-faint"><X size={18} /></button>
+        </section>
+      )}
 
       {/* готовность к следующему уровню */}
       {ready.ready && next && (

@@ -1,8 +1,9 @@
-import { BellRing, Download, Minus, Mic, Plus, Timer, Trash2, Upload, Vibrate, Volume2 } from 'lucide-react';
+import { BellRing, Download, ExternalLink, Minus, Mic, Plus, Smartphone, Timer, Trash2, Upload, Vibrate, Volume2 } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { SecondaryButton, Switch } from '../components/ui';
 import { voiceSupported } from '../engine/cues';
 import { buildIcs, downloadFile } from '../engine/reminders';
+import { INSTALL_URL, isStandalone } from '../install/platform';
 import { useStore, type Theme } from '../store/store';
 
 const THEMES: [Theme, string][] = [['system', 'Как в системе'], ['light', 'Светлая'], ['dark', 'Тёмная']];
@@ -85,6 +86,18 @@ export function Settings() {
           </div>
           {embedded && <p className="mt-2 text-[13px] text-muted">{EMBEDDED_NOTE}</p>}
         </div>
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-[13px] font-medium tracking-wide text-muted uppercase">Установка</h3>
+        <a href={INSTALL_URL} target={INSTALL_URL.startsWith('http') ? '_blank' : undefined} rel="noreferrer" className="card flex items-center gap-3 px-4 py-3">
+          <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface-2 text-muted"><Smartphone size={18} /></span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[15px] font-medium">{isStandalone() ? 'Приложение установлено' : 'Установить на телефон'}</span>
+            <span className="block text-[13px] text-muted">iPhone и Android без магазина приложений, профиль для iPhone, QR-код</span>
+          </span>
+          <ExternalLink size={18} className="text-faint" />
+        </a>
       </section>
 
       <section>

@@ -14,6 +14,8 @@ export interface Settings {
   dailyGoal: number;
   reminders: string[];
   theme: Theme;
+  /** скрыть подсказку «Установите на телефон» на главном экране */
+  installHintHidden: boolean;
 }
 
 interface State {
@@ -38,6 +40,7 @@ const DEFAULT_SETTINGS: Settings = {
   dailyGoal: 3,
   reminders: ['08:30', '14:00', '21:00'],
   theme: 'system',
+  installHintHidden: false,
 };
 
 export const useStore = create<State>()(
