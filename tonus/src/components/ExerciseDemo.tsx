@@ -90,7 +90,7 @@ export function FigureLegend() {
     [ANATOMY_COLORS.muscle, 'мышцы: тазовое дно, сфинктеры, диафрагма'],
     [ANATOMY_COLORS.active, 'мышца работает'],
     [ANATOMY_COLORS.bone, 'кости'],
-    [ANATOMY_COLORS.penis, 'пенис и яички'],
+    [ANATOMY_COLORS.penis, 'пенис и мошонка'],
   ];
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-muted">

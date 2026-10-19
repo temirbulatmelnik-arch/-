@@ -2,8 +2,9 @@
 // и запечёнными текстурами кожи и рельефа, в положении сидя или стоя.
 // Вид «насквозь»: кожа становится полупрозрачной, внутри — настоящая анатомия Z-Anatomy / BodyParts3D
 // (CC BY-SA): кости таза, бёдра, позвоночник, рёбра, мышца, поднимающая задний проход, наружный сфинктер,
-// мочевой пузырь, простата, диафрагма, пенис (увеличен), яички; сфинктер уретры и мышцы у основания пениса
-// построены по поверхностям атласа. Анатомия прикреплена к костям скелета и движется вместе с позой.
+// мочевой пузырь, простата, диафрагма; сфинктер уретры и мышцы у основания пениса построены по поверхностям атласа.
+// Пенис (увеличен) и мошонка — кожа, натянутая поверх пещеристых тел и яичек атласа, головка своего оттенка;
+// плотные при передней подсказке, в остальных видах — полупрозрачный контур. Анатомия прикреплена к костям скелета и движется вместе с позой.
 // Вдох: живот и грудь расширяются, диафрагма сокращается и опускается, тазовое дно мягко опускается.
 // Сжатие: мышцы тазового дна поднимаются и подсвечиваются, сфинктер сужается. С передней подсказкой
 // сильнее работают мышцы у основания пениса и сфинктер уретры: пенис подтягивается, яички поднимаются.
@@ -41,7 +42,7 @@ interface AthleteMeta {
 }
 interface AnatomyGroup {
   name: string; bone: string; vertices: number; indices: number; lo: Vec3; hi: Vec3;
-  offsets: Record<'position' | 'normal' | 'index', number>;
+  offsets: Record<'position' | 'normal' | 'index', number> & { tint?: number; fade?: number };
   /** точка поворота группы (корень пениса) */
   pivot?: Vec3;
 }
@@ -111,6 +112,16 @@ function loadFigure(): Promise<Loaded> {
       ag.setAttribute('position', new THREE.BufferAttribute(dequant(new Uint16Array(abin, group.offsets.position, group.vertices * 3), group.lo, group.hi), 3));
       ag.setAttribute('normal', new THREE.BufferAttribute(int8ToFloat(new Int8Array(abin, group.offsets.normal, group.vertices * 3)), 3));
       ag.setIndex(new THREE.BufferAttribute(new Uint16Array(abin, group.offsets.index, group.indices), 1));
+      if (group.offsets.tint !== undefined) {
+        // оттенок по вершинам: 0 — кожа ствола, 1 — головка
+        const tint = new Uint8Array(abin, group.offsets.tint, group.vertices);
+        const a = new THREE.Color(ANATOMY_COLORS.penis), b = new THREE.Color(ANATOMY_COLORS.glans), c = new THREE.Color();
+        const col = new Float32Array(group.vertices * 3);
+        tint.forEach((t, i) => c.copy(a).lerp(b, t / 255).toArray(col, i * 3));
+        ag.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      }
+      // у тела кожа пениса и мошонки растворяется: 0 — под кожей тела, 1 — снаружи
+      if (group.offsets.fade !== undefined) ag.setAttribute('fade', new THREE.BufferAttribute(new Uint8Array(abin, group.offsets.fade, group.vertices), 1, true));
       // центр группы — точка, вокруг которой она сжимается и поднимается
       ag.computeBoundingBox();
       const center = ag.boundingBox!.getCenter(new THREE.Vector3());
@@ -372,6 +383,38 @@ function iris() {
 }
 const eyeGeometry = new THREE.SphereGeometry(1, 48, 32).rotateX(Math.PI / 2);
 
+/** Рельеф кожи без текстур: высота задаётся функцией координат, нормаль — по её производным (bump Микельсена).
+ *  fine — мелкая фактура кожи, rugae — поперечные складки мошонки */
+const SKIN_RELIEF = {
+  fine: '0.00003 * sin(p.x * 2600.0) * sin(p.y * 2300.0) * sin(p.z * 2800.0) + 0.00004 * sin(p.y * 520.0 + 2.0 * sin(p.x * 900.0))',
+  rugae: '0.00015 * sin(p.y * 1400.0 + 2.6 * sin(p.x * 330.0) + 1.8 * sin(p.z * 410.0)) * (0.55 + 0.45 * sin(p.x * 170.0 + p.z * 230.0)) + 0.00007 * sin(p.y * 2300.0 + 3.0 * sin(p.z * 500.0)) + 0.00004 * sin(p.x * 2900.0) * sin(p.z * 2700.0)',
+};
+
+/** Кожа пениса и мошонки: тёплая, матовая, с лёгким бархатным отливом */
+function genitalSkin(p: THREE.MeshPhysicalMaterialParameters, relief?: keyof typeof SKIN_RELIEF) {
+  const m = new THREE.MeshPhysicalMaterial({ roughness: 0.58, metalness: 0, sheen: 0.35, sheenRoughness: 0.5, sheenColor: new THREE.Color('#ffcab4'), clearcoat: 0.06, clearcoatRoughness: 0.5, envMapIntensity: 0.6, transparent: true, ...p });
+  if (!relief) return m;
+  m.onBeforeCompile = shader => {
+    shader.vertexShader = 'attribute float fade;\nvarying float vFade;\nvarying vec3 vObjPos;\n' + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvObjPos = position;\nvFade = fade;');
+    shader.fragmentShader = 'varying float vFade;\nvarying vec3 vObjPos;\n' + shader.fragmentShader.replace(
+      '#include <normal_fragment_maps>',
+      `#include <normal_fragment_maps>
+      diffuseColor.a *= vFade;
+      {
+        vec3 p = vObjPos;
+        float h = ${SKIN_RELIEF[relief]};
+        vec3 dpdx = dFdx(-vViewPosition), dpdy = dFdy(-vViewPosition);
+        vec3 r1 = cross(dpdy, normal), r2 = cross(normal, dpdx);
+        float det = dot(dpdx, r1);
+        vec3 grad = sign(det) * (dFdx(h) * r1 + dFdy(h) * r2);
+        normal = normalize(abs(det) * normal - grad);
+      }`,
+    );
+  };
+  m.customProgramCacheKey = () => `skin-${relief}`;
+  return m;
+}
+
 /** Кожа насквозь: прозрачна в центре, плотнее по краям силуэта — как на рентгене */
 function xrayMaterial(base: THREE.MeshPhysicalMaterial) {
   base.transparent = true;
@@ -421,8 +464,10 @@ function Athlete({ inst, data, motion, theme, xray, focus, layout, pose, follow 
       urethral: muscle(),
       bulbo: Object.assign(muscle(), { side: THREE.DoubleSide }),
       ischio: Object.assign(muscle(), { side: THREE.DoubleSide }),
-      penis: new THREE.MeshPhysicalMaterial({ color: ANATOMY_COLORS.penis, roughness: 0.48, sheen: 0.5, sheenColor: new THREE.Color('#ffc2b0'), clearcoat: 0.15 }),
-      testes: new THREE.MeshPhysicalMaterial({ color: ANATOMY_COLORS.testes, roughness: 0.4, sheen: 0.4, sheenColor: new THREE.Color('#fff0e8'), clearcoat: 0.3 }),
+      penis: genitalSkin({ vertexColors: true }, 'fine'),
+      scrotum: genitalSkin({ color: ANATOMY_COLORS.scrotum, roughness: 0.7 }, 'rugae'),
+      penisGhost: xrayMaterial(genitalSkin({ vertexColors: true })),
+      scrotumGhost: xrayMaterial(genitalSkin({ color: ANATOMY_COLORS.scrotum })),
       bladder: new THREE.MeshPhysicalMaterial({ color: ANATOMY_COLORS.bladder, roughness: 0.3, transparent: true, opacity: 0.8, clearcoat: 0.6 }),
       prostate: new THREE.MeshStandardMaterial({ color: ANATOMY_COLORS.prostate, roughness: 0.5 }),
     };
@@ -435,13 +480,11 @@ function Athlete({ inst, data, motion, theme, xray, focus, layout, pose, follow 
     mats.bone.transparent = see;
     mats.bone.opacity = see ? 0.5 : 1;
     mats.bone.depthWrite = !see;
-    for (const m of [mats.penis, mats.testes]) {
-      m.transparent = focus !== 'front';
-      m.opacity = focus === 'front' ? 1 : 0.35;
-      m.depthWrite = focus === 'front';
-    }
-    for (const m of [mats.bone, mats.penis, mats.testes]) m.needsUpdate = true;
-  }, [mats, focus]);
+    mats.bone.needsUpdate = true;
+    const a = inst.anatomy, solid = focus === 'front';
+    if (a.penis) a.penis.material = solid ? mats.penis : mats.penisGhost;
+    if (a.scrotum) a.scrotum.material = solid ? mats.scrotum : mats.scrotumGhost;
+  }, [inst, mats, focus, xray]);
   useEffect(() => {
     const a = inst.anatomy;
     const set = (name: string, mat: THREE.Material) => { if (a[name]) { a[name].material = mat; a[name].visible = xray; a[name].renderOrder = 1; } };
@@ -455,8 +498,10 @@ function Athlete({ inst, data, motion, theme, xray, focus, layout, pose, follow 
     set('urethral_sphincter', mats.urethral);
     set('bulbospongiosus', mats.bulbo);
     set('ischiocavernosus', mats.ischio);
-    set('penis', mats.penis);
-    set('testes', mats.testes);
+    set('penis', focus === 'front' ? mats.penis : mats.penisGhost);
+    set('scrotum', focus === 'front' ? mats.scrotum : mats.scrotumGhost);
+    // кожа пениса и мошонки рисуется после костей и мышц, как и кожа тела
+    for (const n of ['penis', 'scrotum']) if (a[n]) a[n].renderOrder = 19;
   }, [inst, mats, xray]);
 
   const eyeMats = useMemo(() => ({
@@ -513,7 +558,11 @@ function Athlete({ inst, data, motion, theme, xray, focus, layout, pose, follow 
       pv.rotation.x = -0.22 * fa;
       pv.scale.setScalar(1 - 0.09 * fa);
     }
-    if (a.testes) a.testes.position.copy(a.testes.userData.base).add(new THREE.Vector3(0, 0.014 * fa - 0.003 * bFloor, 0.003 * fa));
+    if (a.scrotum) {
+      // мошонка подтягивается вверх и чуть сжимается вместе с яичками
+      a.scrotum.position.copy(a.scrotum.userData.base).add(new THREE.Vector3(0, 0.012 * fa - 0.003 * bFloor, 0.003 * fa));
+      a.scrotum.scale.set(1 - 0.03 * fa, 1 - 0.1 * fa, 1 - 0.03 * fa);
+    }
     if (a.urethral_sphincter) {
       const k = 1 - 0.22 * fa;
       a.urethral_sphincter.scale.set(k, 1 + 0.1 * fa, k);
@@ -547,7 +596,7 @@ function Athlete({ inst, data, motion, theme, xray, focus, layout, pose, follow 
       {xray && focus !== 'front' && inst.anatomy.levator && createPortal(<Label position={[0.1, 0.045, 0.03]} color={theme.ink}>мышцы тазового дна</Label>, inst.anatomy.levator)}
       {xray && inst.anatomy.sphincter && createPortal(<Label position={focus === 'front' ? [0.02, -0.02, -0.06] : [-0.075, -0.05, -0.02]} color={theme.ink}>анальный сфинктер</Label>, inst.anatomy.sphincter)}
       {xray && focus === 'front' && inst.anatomy.urethral_sphincter && createPortal(<Label position={[0.02, 0.03, -0.02]} color={theme.ink}>сфинктер уретры</Label>, inst.anatomy.urethral_sphincter)}
-      {xray && focus === 'front' && inst.anatomy.bulbospongiosus && createPortal(<Label position={[0.02, -0.045, 0.05]} color={theme.ink}>мышцы у основания пениса</Label>, inst.anatomy.bulbospongiosus)}
+      {xray && focus === 'front' && inst.anatomy.bulbospongiosus && createPortal(<Label position={[0, -0.07, -0.035]} color={theme.ink}>мышцы у основания пениса</Label>, inst.anatomy.bulbospongiosus)}
       {xray && inst.anatomy.diaphragm && createPortal(<Label position={[0.17, 0.02, 0]} color={theme.ink}>диафрагма</Label>, inst.anatomy.diaphragm)}
     </group>
   );
