@@ -26,7 +26,8 @@ export default defineConfig({
   base: './',
   define: { __APP_VERSION__: JSON.stringify(pkg.version) },
   build: {
-    rollupOptions: { input: { main: 'index.html', install: 'install.html' } },
+    // одностраничное превью (VITE_NO_SW=1) собирается без страницы установки — она живёт на сайте
+    rollupOptions: { input: process.env.VITE_NO_SW ? { main: 'index.html' } : { main: 'index.html', install: 'install.html' } },
   },
   plugins: [
     webClipProfile(),
