@@ -7,7 +7,7 @@ import type { FigureFocus, FigureMotion, FigurePose, FigureZoom } from './Figure
 
 const Figure3D = lazy(() => import('./Figure3D'));
 
-export const poseFor = (p: Position): FigurePose => (p === 'any' ? 'sitting' : p);
+export const poseFor = (p: Position): FigurePose => p;
 
 class Boundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
   state = { failed: false };

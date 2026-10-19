@@ -4,7 +4,7 @@ import { SecondaryButton, Switch } from '../components/ui';
 import { voiceSupported } from '../engine/cues';
 import { buildIcs, downloadFile } from '../engine/reminders';
 import { INSTALL_URL, isStandalone } from '../install/platform';
-import { useStore, type Theme } from '../store/store';
+import { MAX_GOAL, useStore, type Theme } from '../store/store';
 
 const THEMES: [Theme, string][] = [['system', 'Как в системе'], ['light', 'Светлая'], ['dark', 'Тёмная']];
 
@@ -13,7 +13,7 @@ const embedded = window.self !== window.top;
 const EMBEDDED_NOTE = 'В превью скачивание файлов недоступно. Откройте приложение по своему адресу или установите на телефон.';
 
 export function Settings() {
-  const { settings, setSettings, history, levelId, importData, reset } = useStore();
+  const { settings, setSettings, history, levelId, levelSince, intensive, checks, importData, reset } = useStore();
   const file = useRef<HTMLInputElement>(null);
   const [msg, setMsg] = useState('');
   const [confirmReset, setConfirmReset] = useState(false);
@@ -21,7 +21,7 @@ export function Settings() {
   const setTime = (i: number, v: string) => setSettings({ reminders: settings.reminders.map((t, k) => (k === i ? v : t)) });
 
   const exportData = () => {
-    downloadFile(`tonus-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify({ app: 'tonus', version: 1, levelId, settings, history }, null, 2), 'application/json');
+    downloadFile(`tonus-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify({ app: 'tonus', version: 3, levelId, levelSince, intensive, settings, history, checks }, null, 2), 'application/json');
   };
 
   const onImport = async (f: File | undefined) => {
@@ -51,12 +51,12 @@ export function Settings() {
         <div className="card flex items-center justify-between px-4 py-3">
           <div>
             <div className="text-[15px] font-medium">Тренировок в день</div>
-            <div className="text-[13px] text-muted">Рекомендуется 3</div>
+            <div className="text-[13px] text-muted">Одна основная, остальные лёгкие. Рекомендуется 2</div>
           </div>
           <div className="flex items-center gap-3">
             <button type="button" aria-label="Меньше" onClick={() => setSettings({ dailyGoal: Math.max(1, settings.dailyGoal - 1) })} className="grid size-9 place-items-center rounded-xl bg-surface-2"><Minus size={18} /></button>
             <span className="w-5 text-center text-[20px] font-semibold">{settings.dailyGoal}</span>
-            <button type="button" aria-label="Больше" onClick={() => setSettings({ dailyGoal: Math.min(5, settings.dailyGoal + 1) })} className="grid size-9 place-items-center rounded-xl bg-surface-2"><Plus size={18} /></button>
+            <button type="button" aria-label="Больше" onClick={() => setSettings({ dailyGoal: Math.min(MAX_GOAL, settings.dailyGoal + 1) })} className="grid size-9 place-items-center rounded-xl bg-surface-2"><Plus size={18} /></button>
           </div>
         </div>
       </section>

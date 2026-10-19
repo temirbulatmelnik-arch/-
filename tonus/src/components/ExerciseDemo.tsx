@@ -1,7 +1,7 @@
 // Демонстрация упражнения на 3D-фигуре и подробная инструкция к нему.
 import { Hand, PersonStanding, ScanEye, Wind, X } from 'lucide-react';
 import { useState } from 'react';
-import { GUIDES } from '../engine/guides';
+import { GUIDES, type Guide } from '../engine/guides';
 import { POSITION_LABEL, type BlockType, type Position } from '../engine/program';
 import { ANATOMY_COLORS } from './anatomyColors';
 import { Figure, focusFor, poseFor, useDemoMotion } from './Figure';
@@ -46,8 +46,8 @@ export function ExerciseDemo({ type, position, initialZoom = 'body', autoRotate 
   );
 }
 
-export function GuideText({ type, position }: { type: BlockType; position?: Position }) {
-  const g = GUIDES[type];
+export function GuideText({ type, guide, position }: { type: BlockType; guide?: Guide; position?: Position }) {
+  const g = guide ?? GUIDES[type];
   return (
     <div className="space-y-4 text-[15px] leading-relaxed">
       <p className="text-muted">{g.goal}</p>

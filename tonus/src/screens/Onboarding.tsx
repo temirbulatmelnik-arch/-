@@ -51,9 +51,9 @@ const SLIDES: Slide[] = [
     title: 'Тонус',
     body: (
       <>
-        <p className="text-[17px] leading-relaxed text-muted">Тренер мышц тазового дна и анального сфинктера. Три короткие тренировки в день — и мышцы становятся сильнее и послушнее.</p>
+        <p className="text-[17px] leading-relaxed text-muted">Тренер мышц тазового дна и анального сфинктера. Одна основная тренировка в день, лёгкие — по желанию. Через 4–8 недель — лучше контроль, через 3–6 месяцев — сила.</p>
         <ul className="mt-6 space-y-3 text-left text-[15px]">
-          <li className="flex items-center gap-3"><Clock size={20} className="shrink-0 text-calm" /> 3–10 минут, 8 уровней сложности</li>
+          <li className="flex items-center gap-3"><Clock size={20} className="shrink-0 text-calm" /> 3–12 минут в день, 8 уровней и поддержка</li>
           <li className="flex items-center gap-3"><Volume2 size={20} className="shrink-0 text-calm" /> Подсказки звуком, голосом и вибрацией</li>
           <li className="flex items-center gap-3"><Lock size={20} className="shrink-0 text-calm" /> Без регистрации, данные только на телефоне</li>
         </ul>
@@ -67,6 +67,7 @@ const SLIDES: Slide[] = [
       <p className="text-[16px] leading-relaxed text-muted">
         Представьте, что сдерживаете газы. Сожмите кольцо вокруг заднего прохода и подтяните его <b className="text-ink">вверх и внутрь</b>.
         Ягодицы, бёдра и живот расслаблены, дыхание свободное. Потом <b className="text-ink">полностью отпустите</b>.
+        Перед первой тренировкой приложение попросит проверить технику у зеркала.
       </p>
     ),
     visual: <div className="mx-auto w-full max-w-xs"><PelvisDiagram /></div>,
@@ -79,6 +80,7 @@ const SLIDES: Slide[] = [
         <li className="flex gap-3"><AlertTriangle size={20} className="mt-0.5 shrink-0 text-gold" /> Упражнения не должны вызывать боль. Если больно — остановитесь.</li>
         <li className="flex gap-3"><AlertTriangle size={20} className="mt-0.5 shrink-0 text-gold" /> При трещине, остром геморрое, после операций на прямой кишке или простате — сначала к врачу.</li>
         <li className="flex gap-3"><AlertTriangle size={20} className="mt-0.5 shrink-0 text-gold" /> Кровь в стуле, боль, изменение стула — повод обследоваться, а не тренироваться.</li>
+        <li className="flex gap-3"><AlertTriangle size={20} className="mt-0.5 shrink-0 text-gold" /> Боль при семяизвержении, в промежности или яичках после тренировок, мышца «не отпускается» — только расслабление и к специалисту.</li>
         <li className="flex gap-3"><AlertTriangle size={20} className="mt-0.5 shrink-0 text-gold" /> Расслабление так же важно, как сжатие. Поэтому в каждой тренировке есть блок расслабления.</li>
       </ul>
     ),

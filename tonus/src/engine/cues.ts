@@ -35,6 +35,7 @@ const SOUNDS: Record<Exclude<Cue, 'none'> | 'tick' | 'done', () => void> = {
   relax: () => tone([523, 392], 0.18, 0.02, 0.14),
   breath: () => tone([440], 0.5, 0, 0.07, 'triangle'),
   prep: () => tone([660, 990], 0.22, 0.06, 0.1, 'triangle'),
+  action: () => tone([392, 392], 0.09, 0.05, 0.2, 'triangle'),
   tick: () => tone([1200], 0.04, 0, 0.06),
   done: () => tone([523, 659, 784, 1047], 0.16, 0.03, 0.16, 'triangle'),
 };
@@ -44,6 +45,7 @@ const VIBES: Record<Exclude<Cue, 'none'> | 'done', number[]> = {
   relax: [30, 60, 30],
   breath: [20],
   prep: [40, 80, 40],
+  action: [50, 40, 50],
   done: [120, 80, 120, 80, 240],
 };
 

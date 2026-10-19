@@ -26,6 +26,7 @@ export function useWorkout(tl: Timeline, cues: CueSettings) {
   const counted = useRef(new Set<number>());
   const lastIndex = useRef(-1);
   const lastTick = useRef(-1);
+  const said = useRef(new Set<number>());
   const pausedRef = useRef(false);
   const doneRef = useRef(false);
   const raf = useRef(0);
@@ -60,6 +61,10 @@ export function useWorkout(tl: Timeline, cues: CueSettings) {
       }
       playCue(step.cue, c);
       if (step.speak) speak(step.speak, c);
+    }
+    if (step.say && loc.offset >= step.say[0] && !said.current.has(loc.index)) {
+      said.current.add(loc.index);
+      speak(step.say[1], c);
     }
     if (step.tick) {
       const left = Math.ceil(step.duration - loc.offset);

@@ -1,9 +1,9 @@
 // Превращает уровень программы в плоскую ленту шагов с длительностями.
 // Плеер только «прокручивает» эту ленту по времени, поэтому вся логика тренировки здесь и тестируется.
-import { BLOCK_INFO, POSITION_LABEL, type Block, type BlockType, type Level } from './program';
+import { BLOCK_INFO, KNACK_TASKS, POSITION_LABEL, blockTitle, type Block, type BlockType, type Level } from './program';
 
 export type Phase = 'prep' | 'squeeze' | 'hold' | 'relax' | 'inhale' | 'exhale';
-export type Cue = 'prep' | 'squeeze' | 'relax' | 'breath' | 'none';
+export type Cue = 'prep' | 'squeeze' | 'relax' | 'breath' | 'action' | 'none';
 
 export interface Step {
   phase: Phase;
@@ -21,6 +21,10 @@ export interface Step {
   reps?: number;
   cue: Cue;
   speak?: string;
+  /** фраза посреди шага: [через сколько секунд, текст] */
+  say?: [number, string];
+  /** отдых перед упражнением */
+  pause?: boolean;
   /** обратный отсчёт тиками в последние секунды */
   tick?: boolean;
   /** шаг — рабочее сокращение (для статистики) */
@@ -55,16 +59,20 @@ function blockSteps(b: Block, block: number): Step[] {
     }
     case 'slow':
       for (let i = 1; i <= b.reps; i++) {
-        out.push({ ...base, phase: 'hold', label: 'Сожмите и держите', hint: 'Вверх и внутрь. Дышите спокойно', duration: b.hold, level: 1, ease: 0.8, rep: i, reps: b.reps, cue: 'squeeze', speak: 'Сжать', tick: b.hold >= 5, contraction: true });
-        out.push({ ...base, phase: 'relax', label: 'Расслабьте полностью', hint: 'Отпустите до конца', duration: b.rest, level: 0, ease: 1.6, rep: i, reps: b.reps, cue: 'relax', speak: 'Расслабить' });
+        // каждое третье удержание голос напоминает дышать: задержка дыхания и натуживание — частые ошибки
+        const say: [number, string] | undefined = b.hold >= 6 && i % 3 === 1 ? [b.hold / 2, 'Дышите, не тужьтесь'] : undefined;
+        out.push({ ...base, phase: 'hold', label: 'Максимум и держите', hint: 'Вверх и внутрь в полную силу. Дышите, не тужьтесь', duration: b.hold, level: 1, ease: 0.8, rep: i, reps: b.reps, cue: 'squeeze', speak: i === 1 ? 'Сожмите на максимум и держите' : 'Сжать', say, tick: b.hold >= 5, contraction: true });
+        out.push({ ...base, phase: 'relax', label: 'Отпустите полностью', hint: 'Промежность возвращается на место, напряжение уходит до конца', duration: b.rest, level: 0, ease: 1.6, rep: i, reps: b.reps, cue: 'relax', speak: 'Отпустите полностью' });
       }
       break;
-    case 'quick':
+    case 'quick': {
+      const front = b.cue === 'front';
       for (let i = 1; i <= b.reps; i++) {
-        out.push({ ...base, phase: 'squeeze', label: 'Сжать!', duration: b.on, level: 1, ease: 0.22, rep: i, reps: b.reps, cue: 'squeeze', contraction: true });
-        out.push({ ...base, phase: 'relax', label: 'Отпустить', duration: b.off, level: 0, ease: 0.5, rep: i, reps: b.reps, cue: 'relax' });
+        out.push({ ...base, phase: 'squeeze', label: 'Сжать!', hint: front ? 'Укоротите пенис, подтяните яички' : 'Резко, в полную силу', duration: b.on, level: 1, ease: 0.22, rep: i, reps: b.reps, cue: 'squeeze', contraction: true });
+        out.push({ ...base, phase: 'relax', label: 'Отпустить', hint: 'Полностью', duration: b.off, level: 0, ease: 0.5, rep: i, reps: b.reps, cue: 'relax' });
       }
       break;
+    }
     case 'lift': {
       const up = [
         { level: 0.33, label: 'Этаж 1 — треть силы', speak: 'Первый этаж' },
@@ -79,16 +87,31 @@ function blockSteps(b: Block, block: number): Step[] {
       for (let i = 1; i <= b.reps; i++) {
         up.forEach((u, k) => out.push({ ...base, phase: 'hold', label: u.label, hint: 'Добавляйте силу ступенькой', duration: b.floor, level: u.level, ease: 0.7, rep: i, reps: b.reps, cue: 'squeeze', speak: u.speak, contraction: k === 0 }));
         down.forEach(d => out.push({ ...base, phase: d.level ? 'hold' : 'relax', label: d.label, hint: 'Плавно, без провала', duration: Math.max(2, b.floor - 1), level: d.level, ease: 0.9, rep: i, reps: b.reps, cue: 'relax', speak: d.speak }));
-        out.push({ ...base, phase: 'relax', label: 'Отдых', hint: 'Полное расслабление', duration: b.rest, level: 0, ease: 1, rep: i, reps: b.reps, cue: 'none' });
+        out.push({ ...base, phase: 'relax', label: 'Отпустите полностью', hint: 'Полное расслабление', duration: b.rest, level: 0, ease: 1, rep: i, reps: b.reps, cue: 'none', speak: 'Отпустите полностью' });
       }
       break;
     }
     case 'endurance':
       for (let i = 1; i <= b.reps; i++) {
         out.push({ ...base, phase: 'hold', label: 'Держите вполсилы', hint: 'Не задерживайте дыхание', duration: b.hold, level: b.intensity, ease: 1.2, rep: i, reps: b.reps, cue: 'squeeze', speak: 'Сжать вполсилы и держать', tick: true, contraction: true });
-        out.push({ ...base, phase: 'relax', label: 'Расслабьте полностью', hint: 'Отдых не короче удержания', duration: b.rest, level: 0, ease: 2, rep: i, reps: b.reps, cue: 'relax', speak: 'Расслабить' });
+        out.push({ ...base, phase: 'relax', label: 'Отпустите полностью', hint: 'Отдых не короче удержания', duration: b.rest, level: 0, ease: 2, rep: i, reps: b.reps, cue: 'relax', speak: 'Отпустите полностью' });
       }
       break;
+    case 'knack': {
+      // сжатие за секунду до усилия, само усилие под сжатием, затем полное расслабление
+      const reps = b.tasks.length * b.reps;
+      let n = 0;
+      for (const task of b.tasks) {
+        const k = KNACK_TASKS[task];
+        for (let i = 1; i <= b.reps; i++) {
+          n++;
+          out.push({ ...base, phase: 'hold', label: 'Сожмите заранее', hint: `Сначала сфинктер, потом ${k.title}`, duration: 1.5, level: 1, ease: 0.3, rep: n, reps, cue: 'squeeze', speak: 'Сжать', contraction: true });
+          out.push({ ...base, phase: 'hold', label: k.action, hint: k.hint, duration: k.duration, level: 1, ease: 0.2, rep: n, reps, cue: 'action', speak: k.speak });
+          out.push({ ...base, phase: 'relax', label: 'Отпустите полностью', duration: b.rest, level: 0, ease: 1.2, rep: n, reps, cue: 'relax' });
+        }
+      }
+      break;
+    }
   }
   return out;
 }
@@ -98,12 +121,18 @@ export function buildTimeline(level: Level, { blocksOnly = false } = {}): Timeli
   const steps: Step[] = [];
   level.blocks.forEach((b, i) => {
     const info = BLOCK_INFO[b.type];
+    const title = blockTitle(b);
+    if (!blocksOnly && b.pause) steps.push({
+      phase: 'relax', block: i, blockType: b.type, pause: true,
+      label: 'Отдых', hint: `Отпустите полностью и восстановитесь. Дальше: ${title.toLowerCase()}`,
+      duration: b.pause, level: 0, ease: 1.5, cue: 'relax', speak: 'Отдых', tick: true,
+    });
     if (!blocksOnly) steps.push({
       phase: 'prep', block: i, blockType: b.type,
-      label: info.title,
+      label: title,
       hint: i === 0 ? `${POSITION_LABEL[level.position]}. ${info.how}` : info.how,
       duration: i === 0 ? PREP_FIRST : PREP, level: 0, ease: 1, cue: 'prep',
-      speak: i === 0 ? `${info.title}. ${POSITION_LABEL[level.position]}` : info.title,
+      speak: i === 0 ? `${title}. ${POSITION_LABEL[level.position]}` : title,
     });
     steps.push(...blockSteps(b, i));
   });
@@ -148,8 +177,10 @@ export function levelAt(tl: Timeline, index: number, offset: number): number {
   return from + (step.level - from) * smooth(p);
 }
 
-/** Начало следующего блока — для кнопки «пропустить» */
+/** Начало следующего блока — для кнопки «пропустить». Из паузы перед блоком — к самому блоку */
 export function nextBlockStart(tl: Timeline, t: number): number {
+  const { index, done } = locate(tl, t);
+  if (!done && tl.steps[index].pause) return tl.starts[index + 1];
   const b = tl.blocks.find(b => b.start > t + 0.001);
   return b ? b.start : tl.total;
 }

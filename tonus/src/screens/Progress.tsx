@@ -1,8 +1,9 @@
-import { AlertTriangle, Frown, Meh, Smile } from 'lucide-react';
+import { AlertTriangle, Check, Frown, Meh, Smile, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { ScreenHeader, capitalize, plural } from '../components/ui';
 import { levelById } from '../engine/program';
-import { addDays, bestStreak, countByDay, dayKey, streak, totals, type SessionRecord } from '../engine/stats';
+import { SESSION_TITLE } from '../engine/program';
+import { addDays, bestStreak, countByDay, dayKey, kindOf, streak, totals, type CheckRecord, type SessionRecord } from '../engine/stats';
 import { formatDuration } from '../engine/timeline';
 import { useStore } from '../store/store';
 
@@ -111,7 +112,7 @@ function WeekBars({ days, goal }: { days: Map<string, number>; goal: number }) {
 }
 
 const RATING_ICON = { easy: Smile, ok: Meh, hard: Frown } as const;
-const RATING_LABEL = { easy: 'легко', ok: 'нормально', hard: 'тяжело' } as const;
+const RATING_LABEL = { easy: 'с запасом', ok: 'на пределе', hard: 'ослабевало' } as const;
 
 function SessionRow({ s }: { s: SessionRecord }) {
   const d = new Date(s.at);
@@ -123,7 +124,7 @@ function SessionRow({ s }: { s: SessionRecord }) {
           {d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}, {d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
         </div>
         <div className="text-[13px] text-muted">
-          Ур. {s.levelId} «{levelById(s.levelId).name}» · {formatDuration(s.duration)} · {s.contractions} сокр.{!s.completed && ' · частично'}
+          {kindOf(s) !== 'main' && `${SESSION_TITLE[kindOf(s)]} · `}Ур. {s.levelId} «{levelById(s.levelId).name}» · {formatDuration(s.duration)} · {s.contractions} сокр.{!s.completed && ' · частично'}
         </div>
       </div>
       {s.discomfort && <AlertTriangle size={18} className="text-gold" aria-label="дискомфорт" />}
@@ -132,8 +133,74 @@ function SessionRow({ s }: { s: SessionRecord }) {
   );
 }
 
+const fmtShort = (iso: string) => new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+
+/** Один показатель самотеста во времени: одна линия, одна шкала от нуля, подпись у последней точки */
+function TestChart({ points, unit }: { points: { at: string; v: number }[]; unit: string }) {
+  const [sel, setSel] = useState(points.length - 1);
+  const W = 320, H = 110, PX = 16, PT = 18, PB = 8;
+  const max = Math.max(1, ...points.map(p => p.v));
+  const top = Math.ceil((max * 1.15) / 5) * 5;
+  const x = (i: number) => (points.length === 1 ? W / 2 : PX + (i * (W - 2 * PX)) / (points.length - 1));
+  const y = (v: number) => PT + (1 - v / top) * (H - PT - PB);
+  const path = points.map((p, i) => `${i ? 'L' : 'M'}${x(i)},${y(p.v)}`).join(' ');
+  const cur = points[Math.min(sel, points.length - 1)];
+  const last = points[points.length - 1];
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full overflow-visible" role="img" aria-label={`${points.length} результатов, последний ${last.v} ${unit}`}>
+        <line x1={0} x2={W} y1={y(0)} y2={y(0)} stroke="var(--line)" strokeWidth="1" />
+        <line x1={0} x2={W} y1={y(top / 2)} y2={y(top / 2)} stroke="var(--line)" strokeWidth="1" opacity="0.6" />
+        <text x={0} y={y(top / 2) - 4} className="fill-[var(--faint)] text-[10px]">{top / 2}</text>
+        <path d={path} fill="none" stroke="var(--calm)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        {points.map((p, i) => (
+          <g key={p.at} onClick={() => setSel(i)} className="cursor-pointer">
+            <circle cx={x(i)} cy={y(p.v)} r={14} fill="transparent" />
+            <circle cx={x(i)} cy={y(p.v)} r={i === sel ? 5.5 : 4} fill="var(--calm)" stroke="var(--surface)" strokeWidth="2" />
+          </g>
+        ))}
+        <text x={x(points.length - 1)} y={y(last.v) - 10} textAnchor={points.length > 1 ? 'end' : 'middle'} className="fill-[var(--ink)] text-[12px] font-semibold">{last.v} {unit}</text>
+      </svg>
+      <div className="mt-1 flex justify-between text-[11px] text-muted">
+        <span>{fmtShort(points[0].at)}</span>
+        {points.length > 1 && <span>{fmtShort(last.at)}</span>}
+      </div>
+      <p className="mt-1 text-[13px]">{fmtShort(cur.at)}: <b>{cur.v} {unit}</b></p>
+    </div>
+  );
+}
+
+function Checks({ checks }: { checks: CheckRecord[] }) {
+  const holds = checks.filter(c => c.hold !== undefined).map(c => ({ at: c.at, v: c.hold! }));
+  const quick = checks.filter(c => c.quick !== undefined).map(c => ({ at: c.at, v: c.quick! }));
+  const Mark = ({ ok }: { ok: boolean }) => (ok ? <Check size={16} className="text-calm" aria-label="да" /> : <X size={16} className="text-squeeze" aria-label="нет" />);
+  if (!checks.length) return <p className="text-[14px] text-muted">Пройдите контроль на главном экране: проверка техники и самотест силы. Здесь появится динамика.</p>;
+  return (
+    <div className="space-y-5">
+      {holds.length > 0 && <div><h3 className="mb-2 text-[14px] font-medium">Удержание в полную силу, с</h3><TestChart points={holds} unit="с" /></div>}
+      {quick.length > 0 && <div><h3 className="mb-2 text-[14px] font-medium">Чётких быстрых сокращений подряд</h3><TestChart points={quick} unit="" /></div>}
+      <table className="w-full text-left text-[13px]">
+        <thead className="text-muted">
+          <tr><th className="py-1 font-medium">Дата</th><th className="font-medium">Техника</th><th className="font-medium">Отпускает</th><th className="text-right font-medium">Удерж.</th><th className="text-right font-medium">Быстрые</th></tr>
+        </thead>
+        <tbody className="divide-y divide-line">
+          {[...checks].reverse().slice(0, 8).map(c => (
+            <tr key={c.id}>
+              <td className="py-1.5">{fmtShort(c.at)}</td>
+              <td><Mark ok={c.technique} /></td>
+              <td><Mark ok={c.relaxes} /></td>
+              <td className="text-right tabular-nums">{c.hold !== undefined ? `${c.hold} с` : '—'}</td>
+              <td className="text-right tabular-nums">{c.quick ?? '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function Progress() {
-  const { history, settings } = useStore();
+  const { history, settings, checks } = useStore();
   const days = useMemo(() => countByDay(history), [history]);
   const t = totals(history);
   const cur = streak(history);
@@ -172,6 +239,11 @@ export function Progress() {
         <section className="card p-5">
           <h2 className="mb-4 text-[16px] font-semibold">Последние {WEEKS} недель</h2>
           <Heatmap days={days} goal={settings.dailyGoal} />
+        </section>
+
+        <section className="card p-5">
+          <h2 className="mb-4 text-[16px] font-semibold">Самотесты и техника</h2>
+          <Checks checks={checks} />
         </section>
 
         <section className="card px-5 pt-4 pb-1">

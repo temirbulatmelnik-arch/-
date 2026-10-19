@@ -7,8 +7,8 @@ import type { FigureMotion, FigureZoom } from '../components/Figure3D';
 import { SphincterRing, phaseColor } from '../components/SphincterRing';
 import { IconButton, PrimaryButton, SecondaryButton, Switch } from '../components/ui';
 import { speak } from '../engine/cues';
-import { GUIDES } from '../engine/guides';
-import { BLOCK_INFO, type BlockType, type Level } from '../engine/program';
+import { guideFor } from '../engine/guides';
+import { BLOCK_INFO, SESSION_TITLE, blockTitle, type Block, type Level, type SessionKind } from '../engine/program';
 import { todayCount, type Rating } from '../engine/stats';
 import { buildTimeline, formatDuration, levelAt, type Phase } from '../engine/timeline';
 import { useWorkout, type WorkoutState } from '../engine/useWorkout';
@@ -24,7 +24,7 @@ const clock = (sec: number) => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
 
-export function Player({ level, onClose }: { level: Level; onClose: () => void }) {
+export function Player({ level, kind, onClose }: { level: Level; kind: SessionKind; onClose: () => void }) {
   const tl = useMemo(() => buildTimeline(level), [level]);
   const settings = useStore(s => s.settings);
   const setSettings = useStore(s => s.setSettings);
@@ -42,7 +42,7 @@ export function Player({ level, onClose }: { level: Level; onClose: () => void }
   const progress = Math.min(1, state.offset / step.duration);
   const left = Math.max(0, Math.ceil(step.duration - state.offset));
   const blockNo = step.block + 1;
-  const quick = step.blockType === 'quick' && step.phase !== 'prep';
+  const quick = step.blockType === 'quick' && step.phase !== 'prep' && !step.pause;
   const audible = settings.sound || settings.voice;
   figureMotion.current = { level: lvl, phase: step.phase };
 
@@ -52,7 +52,7 @@ export function Player({ level, onClose }: { level: Level; onClose: () => void }
     shownIntros.current.add(step.block);
     pause();
     setIntro(step.block);
-    speak(GUIDES[step.blockType].voice, settings);
+    speak(guideFor(level.blocks[step.block]).voice, settings);
   }, [state.index]);
 
   const startBlock = () => {
@@ -71,7 +71,7 @@ export function Player({ level, onClose }: { level: Level; onClose: () => void }
     if (savedId.current) return savedId.current;
     const id = `${Date.now()}`;
     addSession({
-      id, at: new Date().toISOString(), levelId: level.id,
+      id, at: new Date().toISOString(), levelId: level.id, kind,
       duration: Math.round(state.worked), planned: Math.round(tl.total), completed,
       contractions: state.contractions,
     });
@@ -84,7 +84,7 @@ export function Player({ level, onClose }: { level: Level; onClose: () => void }
     if (state.done) setDoneId(save());
   }, [state.done]);
 
-  if (state.done) return doneId ? <Summary state={state} level={level} completed={completed} saveId={doneId} onClose={onClose} /> : null;
+  if (state.done) return doneId ? <Summary state={state} level={level} kind={kind} completed={completed} saveId={doneId} onClose={onClose} /> : null;
 
   const exit = () => {
     if (state.worked >= 20) save();
@@ -98,7 +98,7 @@ export function Player({ level, onClose }: { level: Level; onClose: () => void }
         <div className="flex items-center gap-2 pt-3">
           <IconButton label="Завершить" onClick={() => { pause(); setConfirmExit(true); }} className="bg-surface-2"><X size={20} /></IconButton>
           <div className="min-w-0 flex-1 text-center">
-            <div className="truncate text-[15px] font-semibold">{BLOCK_INFO[step.blockType].title}</div>
+            <div className="truncate text-[15px] font-semibold">{blockTitle(level.blocks[step.block])}</div>
             <div className="text-[13px] text-muted tabular-nums">Блок {blockNo} из {tl.blocks.length} · {clock(tl.total - state.t)}</div>
           </div>
           <IconButton label={audible ? 'Выключить звук и голос' : 'Включить звук и голос'} onClick={() => setSettings({ sound: !audible, voice: !audible })} className="bg-surface-2">
@@ -197,7 +197,7 @@ export function Player({ level, onClose }: { level: Level; onClose: () => void }
         {intro !== null && !confirmExit && (
           <BlockIntro
             key={intro}
-            type={tl.blocks[intro].type}
+            block={level.blocks[intro]}
             index={intro}
             count={tl.blocks.length}
             level={level}
@@ -245,9 +245,11 @@ function Countdown({ value, sub, progress, phase, level }: { value: number; sub?
 }
 
 /** Подробное объяснение перед упражнением: 3D-демонстрация, шаги, дыхание, ошибки */
-function BlockIntro({ type, index, count, level, onStart, onSkip, onExit }: {
-  type: BlockType; index: number; count: number; level: Level; onStart: () => void; onSkip: () => void; onExit: () => void;
+function BlockIntro({ block, index, count, level, onStart, onSkip, onExit }: {
+  block: Block; index: number; count: number; level: Level; onStart: () => void; onSkip: () => void; onExit: () => void;
 }) {
+  const type = block.type;
+  const title = blockTitle(block);
   const [left, setLeft] = useState(INTRO_AUTOSTART);
   const [auto, setAuto] = useState(true);
   const startRef = useRef(onStart);
@@ -266,7 +268,7 @@ function BlockIntro({ type, index, count, level, onStart, onSkip, onExit }: {
     <motion.div
       className="pt-safe fixed inset-0 z-50 flex flex-col bg-bg"
       initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}
-      role="dialog" aria-modal="true" aria-label={BLOCK_INFO[type].title}
+      role="dialog" aria-modal="true" aria-label={title}
     >
       <div className="mx-auto w-full max-w-md flex-1 overflow-y-auto px-5 pb-4">
         <div className="flex items-center gap-2 pt-3">
@@ -274,11 +276,11 @@ function BlockIntro({ type, index, count, level, onStart, onSkip, onExit }: {
           <div className="flex-1 text-center text-[13px] font-medium tracking-wide text-muted uppercase">Упражнение {index + 1} из {count}</div>
           <div className="size-11" />
         </div>
-        <h1 className="mt-3 text-[28px] leading-tight font-semibold tracking-tight">{BLOCK_INFO[type].title}</h1>
+        <h1 className="mt-3 text-[28px] leading-tight font-semibold tracking-tight">{title}</h1>
         <p className="mb-4 text-[15px] text-muted">{BLOCK_INFO[type].short}</p>
         <ExerciseDemo type={type} position={level.position} />
         <div className="mt-2"><FigureLegend /></div>
-        <div className="mt-5"><GuideText type={type} position={level.position} /></div>
+        <div className="mt-5"><GuideText type={type} guide={guideFor(block)} position={level.position} /></div>
       </div>
       <div className="pb-safe border-t border-line bg-bg/95 backdrop-blur">
         <div className="mx-auto w-full max-w-md px-5 pt-3 pb-4">
@@ -295,13 +297,14 @@ function BlockIntro({ type, index, count, level, onStart, onSkip, onExit }: {
   );
 }
 
-const RATINGS: { id: Rating; label: string; icon: typeof Smile }[] = [
-  { id: 'easy', label: 'Легко', icon: Smile },
-  { id: 'ok', label: 'Нормально', icon: Meh },
-  { id: 'hard', label: 'Тяжело', icon: Frown },
+/** Оценка основной тренировки по силе и запасу: переход на уровень — после трёх «с запасом» подряд */
+export const RATINGS: { id: Rating; label: string; hint: string; icon: typeof Smile }[] = [
+  { id: 'easy', label: 'С запасом', hint: 'мог бы ещё 1–2', icon: Smile },
+  { id: 'ok', label: 'На пределе', hint: 'всё в полную силу', icon: Meh },
+  { id: 'hard', label: 'Ослабевало', hint: 'не держал до конца', icon: Frown },
 ];
 
-function Summary({ state, level, completed, saveId, onClose }: { state: WorkoutState; level: Level; completed: boolean; saveId: string; onClose: () => void }) {
+function Summary({ state, level, kind, completed, saveId, onClose }: { state: WorkoutState; level: Level; kind: SessionKind; completed: boolean; saveId: string; onClose: () => void }) {
   const history = useStore(s => s.history);
   const goal = useStore(s => s.settings.dailyGoal);
   const rateSession = useStore(s => s.rateSession);
@@ -310,7 +313,7 @@ function Summary({ state, level, completed, saveId, onClose }: { state: WorkoutS
   const today = todayCount(history);
 
   const finish = () => {
-    if (rating || discomfort) rateSession(saveId, rating ?? 'ok', discomfort);
+    if (rating || discomfort) rateSession(saveId, rating ?? undefined, discomfort);
     onClose();
   };
 
@@ -326,7 +329,7 @@ function Summary({ state, level, completed, saveId, onClose }: { state: WorkoutS
           <Check size={48} strokeWidth={3} />
         </motion.div>
         <h1 className="mt-5 text-center text-[28px] font-semibold">{completed ? 'Готово!' : 'Выполнено частично'}</h1>
-        <p className="mt-1 text-center text-[15px] text-muted">Уровень {level.id} «{level.name}» · сегодня {today} из {goal}</p>
+        <p className="mt-1 text-center text-[15px] text-muted">{SESSION_TITLE[kind]} · уровень {level.id} «{level.name}» · сегодня {today} из {goal}</p>
         {!completed && (
           <p className="mt-3 rounded-2xl bg-surface-2 p-3 text-center text-[14px] text-muted">
             В дневную цель идут тренировки, выполненные хотя бы на {COMPLETE_SHARE * 100} %. Эта сохранена в журнале.
@@ -346,23 +349,28 @@ function Summary({ state, level, completed, saveId, onClose }: { state: WorkoutS
           ))}
         </div>
 
-        <h2 className="mt-8 text-[17px] font-semibold">Как прошло?</h2>
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          {RATINGS.map(r => (
-            <motion.button
-              key={r.id}
-              type="button"
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setRating(r.id)}
-              aria-pressed={rating === r.id}
-              className={`flex flex-col items-center gap-1.5 rounded-2xl border px-2 py-3 text-[14px] font-medium transition ${rating === r.id ? 'border-calm bg-calm/15' : 'border-line bg-surface'}`}
-            >
-              <r.icon size={26} className={rating === r.id ? 'text-calm' : 'text-muted'} />
-              {r.label}
-            </motion.button>
-          ))}
-        </div>
-        <p className="mt-2 text-[13px] text-muted">Оценка помогает понять, когда переходить на следующий уровень.</p>
+        {kind === 'main' && (
+          <>
+            <h2 className="mt-8 text-[17px] font-semibold">Все удержания — в полную силу?</h2>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              {RATINGS.map(r => (
+                <motion.button
+                  key={r.id}
+                  type="button"
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setRating(r.id)}
+                  aria-pressed={rating === r.id}
+                  className={`flex flex-col items-center gap-1 rounded-2xl border px-2 py-3 text-[14px] font-medium transition ${rating === r.id ? 'border-calm bg-calm/15' : 'border-line bg-surface'}`}
+                >
+                  <r.icon size={26} className={rating === r.id ? 'text-calm' : 'text-muted'} />
+                  {r.label}
+                  <span className="text-[11px] font-normal text-muted">{r.hint}</span>
+                </motion.button>
+              ))}
+            </div>
+            <p className="mt-2 text-[13px] text-muted">Следующий уровень приложение предложит после трёх тренировок подряд «с запасом» — но не раньше чем через 2 недели.</p>
+          </>
+        )}
 
         <div className="card mt-4 px-4">
           <Switch checked={discomfort} onChange={setDiscomfort} label="Был дискомфорт или боль" />
@@ -371,8 +379,9 @@ function Summary({ state, level, completed, saveId, onClose }: { state: WorkoutS
           {discomfort && (
             <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
               <div className="mt-3 rounded-2xl bg-gold/15 p-4 text-[14px] leading-relaxed">
-                Упражнения не должны вызывать боль. Сделайте перерыв на 1–2 дня, затем вернитесь на уровень ниже и больше времени уделяйте
-                расслаблению. Если боль повторяется, есть кровь, трещина или обострение геморроя — покажитесь проктологу.
+                Упражнения не должны вызывать боль. 1–2 дня делайте только расслабление — кнопка появится на главном экране, затем вернитесь
+                на уровень ниже. Если боль повторяется, болит при семяизвержении, в промежности или яичках, мышца «не отпускается», есть кровь,
+                трещина или обострение геморроя — покажитесь специалисту.
               </div>
             </motion.div>
           )}

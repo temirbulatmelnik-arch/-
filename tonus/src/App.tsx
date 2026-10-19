@@ -3,7 +3,9 @@ import { BarChart3, BookOpen, House, Layers } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Sheet } from './components/ui';
 import { unlockAudio } from './engine/cues';
-import { levelById } from './engine/program';
+import { dayPlan } from './engine/plan';
+import { sessionLevel, type SessionKind } from './engine/program';
+import { Check } from './screens/Check';
 import { Learn } from './screens/Learn';
 import { Onboarding } from './screens/Onboarding';
 import { Plan } from './screens/Plan';
@@ -47,25 +49,27 @@ export default function App() {
   useTheme();
   const onboarded = useStore(s => s.onboarded);
   const finishOnboarding = useStore(s => s.finishOnboarding);
-  const levelId = useStore(s => s.levelId);
+  const { levelId, levelSince, intensive, checks } = useStore();
   const [tab, setTab] = useState<Tab>('today');
-  const [playing, setPlaying] = useState(false);
+  const [playing, setPlaying] = useState<SessionKind | null>(null);
+  const [checking, setChecking] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => window.scrollTo({ top: 0 }), [tab]);
 
   if (!onboarded) return <Onboarding onDone={finishOnboarding} />;
 
-  const start = () => {
+  const start = (kind: SessionKind) => {
     unlockAudio();
-    setPlaying(true);
+    setPlaying(kind);
   };
+  const level = dayPlan({ levelId, levelSince, intensive, checks }).level;
 
   return (
     <div className="pt-safe mx-auto min-h-dvh w-full max-w-md pb-28">
       <AnimatePresence mode="wait">
         <motion.main key={tab} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
-          {tab === 'today' && <Today onStart={start} onSettings={() => setSettingsOpen(true)} onPlan={() => setTab('plan')} />}
+          {tab === 'today' && <Today onStart={start} onCheck={() => setChecking(true)} onSettings={() => setSettingsOpen(true)} onPlan={() => setTab('plan')} />}
           {tab === 'plan' && <Plan />}
           {tab === 'learn' && <Learn />}
           {tab === 'progress' && <Progress />}
@@ -95,7 +99,12 @@ export default function App() {
       <AnimatePresence>
         {playing && (
           <motion.div key="player" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-40">
-            <Player level={levelById(levelId)} onClose={() => setPlaying(false)} />
+            <Player level={sessionLevel(level, playing)} kind={playing} onClose={() => setPlaying(null)} />
+          </motion.div>
+        )}
+        {checking && (
+          <motion.div key="check" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-40">
+            <Check onClose={() => setChecking(false)} />
           </motion.div>
         )}
       </AnimatePresence>
