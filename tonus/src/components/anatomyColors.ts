@@ -7,5 +7,6 @@ export const ANATOMY_COLORS = {
   prostate: '#c58a68',
   penis: '#b47962',
   glans: '#c26e68',
+  vein: '#7b6577',
   scrotum: '#a46c5a',
 };

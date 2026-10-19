@@ -766,24 +766,34 @@ ANATOMY = {
     'prostate': ('pelvis', ['Prostate']),
     'diaphragm': ('spine_02', ['Diaphragm']),
 }
-PENIS_PARTS = ['Corpus cavernosum of penis', 'Corpus spongiosum of penis', 'Glans penis']
 DECIMATE = {'pelvis_bones': 9000, 'femur_l': 1600, 'femur_r': 1600, 'spine': 7000, 'ribs': 9000, 'levator': 5000,
-            'sphincter': 600, 'bladder': 1400, 'prostate': 500, 'diaphragm': 6000, 'penis': 7000, 'scrotum': 4000,
+            'sphincter': 600, 'bladder': 1400, 'prostate': 500, 'diaphragm': 6000, 'penis': 40000, 'scrotum': 5000,
             'urethral_sphincter': 1200, 'bulbospongiosus': 1600, 'ischiocavernosus': 1600}
 
-# Пенис крупнее, чем в атласе: свисающая часть длиннее и толще, корень и ножки на месте.
+# Пенис строится ровным цилиндром вдоль изогнутой оси: выходит из лобка вперёд-вниз и свисает перед мошонкой.
+# Атласные пещеристые тела неровные и при растяжении становятся бугристыми, поэтому форму задаём сами.
+# Корень у симфиза — точка поворота для анимации.
 PENIS_ROOT = np.array([0.0, -0.072, 0.816])          # у нижнего края лобкового симфиза, координаты Z-Anatomy
-PENIS_AXIS = np.array([0.0, -0.03, -1.0]) / np.hypot(0.03, 1.0)   # свисающая часть висит почти отвесно
-PENIS_LENGTH = 1.7
-PENIS_GIRTH = 1.5
+PEN_LENGTH = 0.118       # от выхода из тела до кончика, м
+PEN_GLANS = 0.04         # длина головки
+PEN_BASE = 0.121         # обхват у основания, м — чуть толще
+PEN_MID = 0.114          # обхват ствола
+PEN_NECK = 0.108         # лёгкое сужение перед венцом
+PEN_CORONA = 0.113       # венец головки — почти как ствол
+PEN_INSIDE = 0.025       # насколько ствол уходит под кожу тела (там он растворяется)
+PEN_FLARE = 0.2          # у тела основание шире на 20 % и переходит в кожу лобка
+PEN_BEND = 0.045         # на каком отрезке от выхода из тела ось поворачивается вниз, м
 
 
-def enlarge_penis(p):
-    w = smooth(-0.06, -0.08, p[:, 1])               # 0 — корень и ножки, 1 — свисающая часть
-    d = p - PENIS_ROOT
-    t = d @ PENIS_AXIS
-    perp = d - np.outer(t, PENIS_AXIS)
-    return PENIS_ROOT + np.outer(t * (1 + w * (PENIS_LENGTH - 1)), PENIS_AXIS) + perp * (1 + w * (PENIS_GIRTH - 1))[:, None]
+# Подкожные вены ствола в координатах (u — от выхода из тела до венца, θ — угол от тыльной стороны, рад):
+# поверхностная дорсальная вена по средней линии и несколько ветвей. Лёгкие возвышения кожи, не более 1,1 мм.
+VEINS = [
+    (0.06, 0.94, lambda u: 0.10 * np.sin(5.0 * u + 0.4), 0.0021, 0.0011),
+    (0.30, 0.80, lambda u: 0.15 + (u - 0.30) * 2.4, 0.0016, 0.0008),
+    (0.48, 0.90, lambda u: -0.10 - (u - 0.48) * 2.2, 0.0015, 0.0007),
+    (0.12, 0.62, lambda u: 1.75 + 0.18 * np.sin(7.0 * u), 0.0015, 0.0006),
+    (0.25, 0.85, lambda u: -1.65 + 0.2 * np.sin(6.0 * u + 1.0), 0.0014, 0.0006),
+]
 
 
 def ellipsoid(c, r, nu=32, nv=20):
@@ -962,7 +972,6 @@ def build_anatomy(B, L):
 
     # снаружи ли точка относительно кожи тела: то, что уходит внутрь тела, у пениса и мошонки срезаем
     from mathutils.bvhtree import BVHTree
-    from mathutils.kdtree import KDTree
     VB = body.morph(meta['weight'])
     bvh = BVHTree.FromPolygons(VB.tolist(), body.tris.tolist())
     def depth(P):
@@ -970,6 +979,7 @@ def build_anatomy(B, L):
         out = np.zeros(len(P))
         for i, p in enumerate(P):
             loc, n, _, _ = bvh.find_nearest(Vector(p))
+            assert loc is not None, f'нет ближайшей точки кожи для {p}'
             out[i] = (Vector(p) - loc).dot(n)
         return out
     inner = np.array(B['pelvis']['head'])
@@ -980,16 +990,82 @@ def build_anatomy(B, L):
     fade = lambda P: smooth(-0.009, -0.001, sign * depth(P))
 
     root = place(PENIS_ROOT[None])[0]
-    axis = np.array([0.0, PENIS_AXIS[2], -PENIS_AXIS[1]])   # ось пениса в координатах тела
-    glans = place(enlarge_penis(world_mesh(['Glans penis'])[0]))
-    shaft = place(enlarge_penis(world_mesh(PENIS_PARTS[:2])[0]))
+    # Ось пениса — кривая: выходит из лобка вперёд-вниз, изгибается и свисает перед мошонкой.
+    # Точка выхода — где луч к корню (у симфиза) спереди и чуть снизу впервые встречает кожу тела.
+    ray = Vector((0.0, -0.35, 1.0)).normalized()
+    hit = bvh.ray_cast(Vector(root) + ray * 0.2, -ray)
+    S0 = np.array(hit[0])
+    log(f'выход пениса из тела {np.round(S0, 3)}, корень {np.round(root, 3)}')
+    unit = lambda v: np.asarray(v, dtype=float) / np.linalg.norm(v)
+    D0, D1 = unit([0.0, -0.55, 1.0]), unit([0.0, -1.0, 0.06])
+    SC = PEN_LENGTH - PEN_GLANS                                  # венец, м по оси от выхода из тела
+    pen = {}
 
-    def penis_skin():
-        pts, faces = world_mesh(PENIS_PARTS)
-        P, F = skin_over('penis', place(enlarge_penis(pts)), faces, voxel=0.0011, iterations=4, inflate=0.0013)
-        # ножки и корень внутри таза не нужны: оставляем свисающую часть и чуть уходящее под кожу основание
-        keep = ((P - root) @ axis > -0.01) & outside(P, -0.01)
-        return subset(P, F, keep)
+    def radius(ell):
+        c = np.interp(ell, [-PEN_INSIDE, 0.012, SC * 0.5, SC - 0.007, SC - 0.0025, SC + 0.002],
+                      [PEN_BASE, PEN_BASE, PEN_MID, PEN_NECK, PEN_NECK, PEN_CORONA]) / (2 * np.pi)
+        c = c * (1 + PEN_FLARE * (1 - smooth(-0.004, 0.022, ell)))   # у тела основание расширяется и сливается с кожей
+        tau = np.clip((ell - SC - 0.002) / (PEN_GLANS - 0.002), 0, 1)
+        dome = PEN_CORONA / (2 * np.pi) * (1 - 0.05 * tau) * np.clip(1 - tau ** 2.3, 0, 1) ** 0.42
+        return np.where(ell > SC + 0.002, dome, c)
+
+    def vein_field(ell, th):
+        """Высота кожи над подкожными венами, м"""
+        R = radius(ell)
+        out = np.zeros(len(ell))
+        for u0, u1, theta, width, height in VEINS:
+            u = np.linspace(u0, u1, 160)
+            amp = np.sin(np.pi * (u - u0) / (u1 - u0)) ** 0.5      # к концам вена уходит глубже
+            dist = np.hypot(ell[:, None] - u[None, :] * SC, R[:, None] * ((th[:, None] - theta(u)[None, :] + np.pi) % (2 * np.pi) - np.pi))
+            k = dist.argmin(axis=1)
+            out = np.maximum(out, height * amp[k] * np.exp(-(dist[np.arange(len(ell)), k] / width) ** 2))
+        return out * smooth(0.004, 0.016, ell) * (1 - smooth(SC - 0.006, SC - 0.001, ell))
+
+    def penis_skin(nth=112):
+        ell = np.concatenate([np.linspace(-PEN_INSIDE, 0, 16), np.linspace(0, SC, 100)[1:], np.linspace(SC, PEN_LENGTH * 0.997, 51)[1:]])
+        nt = len(ell)
+        # направление оси плавно поворачивается от «вперёд-вниз» к «вниз» на первых сантиметрах
+        k = smooth(0.004, PEN_BEND, ell)[:, None]
+        T = D0 * (1 - k) + D1 * k
+        T /= np.linalg.norm(T, axis=1, keepdims=True)
+        C = np.zeros((nt, 3))
+        i0 = np.searchsorted(ell, 0.0)
+        C[i0] = S0
+        for i in range(i0 + 1, nt):
+            C[i] = C[i - 1] + (T[i] + T[i - 1]) / 2 * (ell[i] - ell[i - 1])
+        for i in range(i0 - 1, -1, -1):
+            C[i] = C[i + 1] - (T[i] + T[i + 1]) / 2 * (ell[i + 1] - ell[i])
+        # кадры без закрутки: тыльная сторона у корня смотрит вверх, у свисающей части — вперёд
+        E1 = np.zeros((nt, 3))
+        up = np.array([0.0, 1.0, 0.0])
+        E1[0] = unit(up - T[0] * (up @ T[0]))
+        for i in range(1, nt):
+            E1[i] = unit(E1[i - 1] - T[i] * (E1[i - 1] @ T[i]))
+        E2 = np.cross(T, E1)
+        th = np.linspace(-np.pi, np.pi, nth, endpoint=False)
+        L_, TH = np.meshgrid(ell, th, indexing='ij')
+        L_, TH = L_.ravel(), TH.ravel()
+        r = radius(L_) + vein_field(L_, TH)
+        # губчатое тело — едва заметный валик по нижней стороне ствола; на кончике — щель наружного отверстия уретры
+        r += 0.0006 * np.exp(-((np.abs(TH) - np.pi) / 0.3) ** 2) * (L_ > 0) * (L_ < SC)
+        tau = np.clip((L_ - SC) / PEN_GLANS, 0, 1)
+        r -= 0.0011 * smooth(0.9, 1.0, tau) * np.exp(-(np.sin(TH) * r / 0.0011) ** 2)
+        ii = np.repeat(np.arange(nt), nth)
+        P = C[ii] + E1[ii] * (0.97 * r * np.cos(TH))[:, None] + E2[ii] * (1.03 * r * np.sin(TH))[:, None]
+        P = np.vstack([P, C[-1] + T[-1] * (PEN_LENGTH - ell[-1])])
+        tip = len(P) - 1
+        faces = [[i * nth + j, i * nth + (j + 1) % nth, (i + 1) * nth + (j + 1) % nth, (i + 1) * nth + j] for i in range(nt - 1) for j in range(nth)]
+        faces += [[(nt - 1) * nth + j, (nt - 1) * nth + (j + 1) % nth, tip] for j in range(nth)]
+        f = faces[(nt // 2) * nth]
+        if np.cross(P[f[1]] - P[f[0]], P[f[2]] - P[f[0]]) @ (P[f[0]] - C[nt // 2]) < 0:
+            faces = [f[::-1] for f in faces]
+        # параметры вершин — для оттенка головки, вен и растворения у тела (порядок вершин дальше сохраняется)
+        pen['ell'] = np.append(L_, PEN_LENGTH)
+        pen['th'] = np.append(TH, 0.0)
+        pen['front'] = np.append(r * np.cos(TH), 0.0)
+        pen['C'], pen['E1'], pen['ell_axis'] = C, E1, ell
+        assert np.isfinite(P).all(), 'пенис: NaN в вершинах'
+        return P, faces
 
     def scrotum():
         parts, centers = [], []
@@ -998,26 +1074,33 @@ def build_anatomy(B, L):
             c = (t.min(axis=0) + t.max(axis=0)) / 2
             centers.append(c)
             parts.append(ellipsoid(c, (t.max(axis=0) - t.min(axis=0)) / 2 + 0.0085))
-        # один мешок: середина между яичками и шейка к промежности
+        # один мешок: середина между яичками, а верх мешка сужается и переходит в нижнюю сторону основания пениса
         c = (centers[0] + centers[1]) / 2
         parts.append(ellipsoid(c + np.array([0, 0.002, 0]), np.array([0.014, 0.021, 0.017])))
-        parts.append(ellipsoid(c + np.array([0, 0.024, -0.006]), np.array([0.022, 0.02, 0.018])))
+        ell, C, E1 = pen['ell_axis'], pen['C'], pen['E1']
+        i = np.searchsorted(ell, 0.016)
+        base = C[i] - E1[i] * 0.75 * PEN_BASE / (2 * np.pi)       # нижняя сторона основания пениса
+        top = c + np.array([0, 0.018, 0])
+        for k in np.linspace(0, 1, 4):
+            parts.append(ellipsoid(top + (base - top) * k, np.array([0.021, 0.017, 0.016]) * (1 - 0.3 * k)))
         P, F = skin_over('scrotum', *merge(parts), voxel=0.0016, iterations=18, inflate=0.0)
         return subset(P, F, outside(P, -0.01))
 
-    def tree(P):
-        kd = KDTree(len(P))
-        for i, p in enumerate(P):
-            kd.insert(p, i)
-        kd.balance()
-        return kd
-    kg, ks = tree(glans), tree(shaft)
+    def pen_attr(P, key):
+        assert len(P) == len(pen['ell']), 'вершины пениса не должны прореживаться'
+        return pen[key]
+
     def glans_tint(P):
-        # 1 — головка, 0 — кожа ствола: по тому, к какой поверхности атласа точка ближе
-        d = np.array([ks.find(p)[2] - kg.find(p)[2] for p in P])
-        return np.clip(d / 0.002 + 0.5, 0, 1)
+        # 1 — головка, 0 — кожа ствола: ровное кольцо венца, с тыльной стороны чуть выше
+        return smooth(SC - 0.0015, SC + 0.003, pen_attr(P, 'ell') + 0.12 * pen['front'])
+
+    def penis_veins(P, T):
+        return P, vein_field(pen_attr(P, 'ell'), pen['th']) / max(h for *_, h in VEINS)
+
     TINT = {'penis': glans_tint}
-    FADE = {'penis': fade, 'scrotum': fade}
+    # основание пениса растворяется выше точки выхода из тела: передняя сторона цилиндра там ещё снаружи кожи
+    FADE = {'penis': lambda P: np.minimum(fade(P), smooth(-0.012, 0.002, pen_attr(P, 'ell'))), 'scrotum': fade}
+    POST = {'penis': penis_veins}
 
     groups, blob = [], bytearray()
     sources = [(g, bone, lambda names=names: world_mesh(names), False) for g, (bone, names) in ANATOMY.items()]
@@ -1048,14 +1131,21 @@ def build_anatomy(B, L):
         P = np.array([v.co[:] for v in bm.verts])
         T = np.array([[v.index for v in f.verts] for f in bm.faces], dtype=np.int64)
         bm.free()
+        attrs = {}
+        if gname in POST:
+            P, attrs['vein'] = POST[gname](P, T)
+        if gname in TINT:
+            attrs['tint'] = TINT[gname](P)
+        if gname in FADE:
+            attrs['fade'] = FADE[gname](P)
         Nn = vertex_normals(P, T)
         assert len(P) < 65536, gname
         lo, hi = P.min(axis=0), P.max(axis=0)
         span = np.maximum(hi - lo, 1e-6)
         parts = [np.round((P - lo) / span * 65535).astype(np.uint16), np.round(Nn * 127).astype(np.int8), T.astype(np.uint16).ravel()]
-        extra = [key for key, f in (('tint', TINT), ('fade', FADE)) if gname in f]
+        extra = list(attrs)
         for key in extra:
-            parts.append(np.round({'tint': TINT, 'fade': FADE}[key][gname](P) * 255).astype(np.uint8))
+            parts.append(np.round(np.clip(attrs[key], 0, 1) * 255).astype(np.uint8))
         offs = []
         for arr in parts:
             blob += b'\0' * ((-len(blob)) % 4)
@@ -1069,11 +1159,8 @@ def build_anatomy(B, L):
         if gname == 'penis':
             # точка поворота: корень пениса — вокруг неё он подтягивается при передней подсказке
             groups[-1]['pivot'] = [round(float(x), 5) for x in root]
-            ta = (P - root) @ axis
-            mid = np.abs(ta - ta.max() / 2) < 0.01
-            r = P[mid] - root - np.outer(ta[mid], axis)
-            r -= r.mean(axis=0)
-            log(f'пенис: от корня до кончика головки {ta.max() * 100:.1f} см, обхват ствола посередине {np.pi * 2 * np.median(np.linalg.norm(r, axis=1)) * 100:.1f} см')
+            log(f'пенис: снаружи {PEN_LENGTH * 100:.1f} см, обхват у основания {PEN_BASE * 100:.1f}, ствола {PEN_MID * 100:.1f}, '
+                f'венца {PEN_CORONA * 100:.1f} см; выход из тела {np.round(S0, 3)}, кончик {np.round(pen["C"][-1], 3)}')
         log(f'{gname}: {len(P)} вершин, {len(T)} треугольников, y {lo[1]:.3f}..{hi[1]:.3f}')
     with open(os.path.join(OUT, 'anatomy.bin'), 'wb') as f:
         f.write(blob)

@@ -3,8 +3,8 @@
 // Вид «насквозь»: кожа становится полупрозрачной, внутри — настоящая анатомия Z-Anatomy / BodyParts3D
 // (CC BY-SA): кости таза, бёдра, позвоночник, рёбра, мышца, поднимающая задний проход, наружный сфинктер,
 // мочевой пузырь, простата, диафрагма; сфинктер уретры и мышцы у основания пениса построены по поверхностям атласа.
-// Пенис (увеличен) и мошонка — кожа, натянутая поверх пещеристых тел и яичек атласа, головка своего оттенка;
-// плотные при передней подсказке, в остальных видах — полупрозрачный контур. Анатомия прикреплена к костям скелета и движется вместе с позой.
+// Пенис — ровный цилиндр по изогнутой оси: выходит из лобка, свисает перед мошонкой; головка своего оттенка,
+// под кожей — вены. Мошонка — мешочек вокруг яичек атласа, крепится снизу к основанию пениса. Плотные при передней подсказке, иначе — контур. Анатомия прикреплена к костям скелета и движется вместе с позой.
 // Вдох: живот и грудь расширяются, диафрагма сокращается и опускается, тазовое дно мягко опускается.
 // Сжатие: мышцы тазового дна поднимаются и подсвечиваются, сфинктер сужается. С передней подсказкой
 // сильнее работают мышцы у основания пениса и сфинктер уретры: пенис подтягивается, яички поднимаются.
@@ -42,7 +42,7 @@ interface AthleteMeta {
 }
 interface AnatomyGroup {
   name: string; bone: string; vertices: number; indices: number; lo: Vec3; hi: Vec3;
-  offsets: Record<'position' | 'normal' | 'index', number> & { tint?: number; fade?: number };
+  offsets: Record<'position' | 'normal' | 'index', number> & { tint?: number; fade?: number; vein?: number };
   /** точка поворота группы (корень пениса) */
   pivot?: Vec3;
 }
@@ -113,11 +113,12 @@ function loadFigure(): Promise<Loaded> {
       ag.setAttribute('normal', new THREE.BufferAttribute(int8ToFloat(new Int8Array(abin, group.offsets.normal, group.vertices * 3)), 3));
       ag.setIndex(new THREE.BufferAttribute(new Uint16Array(abin, group.offsets.index, group.indices), 1));
       if (group.offsets.tint !== undefined) {
-        // оттенок по вершинам: 0 — кожа ствола, 1 — головка
+        // оттенок по вершинам: кожа ствола → головка; над венами кожа чуть синеватая
         const tint = new Uint8Array(abin, group.offsets.tint, group.vertices);
-        const a = new THREE.Color(ANATOMY_COLORS.penis), b = new THREE.Color(ANATOMY_COLORS.glans), c = new THREE.Color();
+        const vein = group.offsets.vein !== undefined ? new Uint8Array(abin, group.offsets.vein, group.vertices) : null;
+        const a = new THREE.Color(ANATOMY_COLORS.penis), b = new THREE.Color(ANATOMY_COLORS.glans), v = new THREE.Color(ANATOMY_COLORS.vein), c = new THREE.Color();
         const col = new Float32Array(group.vertices * 3);
-        tint.forEach((t, i) => c.copy(a).lerp(b, t / 255).toArray(col, i * 3));
+        tint.forEach((t, i) => c.copy(a).lerp(b, t / 255).lerp(v, vein ? 0.55 * (vein[i] / 255) : 0).toArray(col, i * 3));
         ag.setAttribute('color', new THREE.BufferAttribute(col, 3));
       }
       // у тела кожа пениса и мошонки растворяется: 0 — под кожей тела, 1 — снаружи
@@ -384,23 +385,22 @@ function iris() {
 const eyeGeometry = new THREE.SphereGeometry(1, 48, 32).rotateX(Math.PI / 2);
 
 /** Рельеф кожи без текстур: высота задаётся функцией координат, нормаль — по её производным (bump Микельсена).
- *  fine — мелкая фактура кожи, rugae — поперечные складки мошонки */
+ *  rugae — поперечные складки мошонки */
 const SKIN_RELIEF = {
-  fine: '0.00003 * sin(p.x * 2600.0) * sin(p.y * 2300.0) * sin(p.z * 2800.0) + 0.00004 * sin(p.y * 520.0 + 2.0 * sin(p.x * 900.0))',
   rugae: '0.00015 * sin(p.y * 1400.0 + 2.6 * sin(p.x * 330.0) + 1.8 * sin(p.z * 410.0)) * (0.55 + 0.45 * sin(p.x * 170.0 + p.z * 230.0)) + 0.00007 * sin(p.y * 2300.0 + 3.0 * sin(p.z * 500.0)) + 0.00004 * sin(p.x * 2900.0) * sin(p.z * 2700.0)',
 };
 
 /** Кожа пениса и мошонки: тёплая, матовая, с лёгким бархатным отливом */
 function genitalSkin(p: THREE.MeshPhysicalMaterialParameters, relief?: keyof typeof SKIN_RELIEF) {
-  const m = new THREE.MeshPhysicalMaterial({ roughness: 0.58, metalness: 0, sheen: 0.35, sheenRoughness: 0.5, sheenColor: new THREE.Color('#ffcab4'), clearcoat: 0.06, clearcoatRoughness: 0.5, envMapIntensity: 0.6, transparent: true, ...p });
-  if (!relief) return m;
+  // двусторонняя: у тела кожа срезана, и в срезе не должно быть просвета
+  const m = new THREE.MeshPhysicalMaterial({ roughness: 0.58, metalness: 0, sheen: 0.35, sheenRoughness: 0.5, sheenColor: new THREE.Color('#ffcab4'), clearcoat: 0.06, clearcoatRoughness: 0.5, envMapIntensity: 0.6, transparent: true, side: THREE.DoubleSide, ...p });
   m.onBeforeCompile = shader => {
     shader.vertexShader = 'attribute float fade;\nvarying float vFade;\nvarying vec3 vObjPos;\n' + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvObjPos = position;\nvFade = fade;');
     shader.fragmentShader = 'varying float vFade;\nvarying vec3 vObjPos;\n' + shader.fragmentShader.replace(
       '#include <normal_fragment_maps>',
       `#include <normal_fragment_maps>
       diffuseColor.a *= vFade;
-      {
+      ${relief ? `{
         vec3 p = vObjPos;
         float h = ${SKIN_RELIEF[relief]};
         vec3 dpdx = dFdx(-vViewPosition), dpdy = dFdy(-vViewPosition);
@@ -408,10 +408,10 @@ function genitalSkin(p: THREE.MeshPhysicalMaterialParameters, relief?: keyof typ
         float det = dot(dpdx, r1);
         vec3 grad = sign(det) * (dFdx(h) * r1 + dFdy(h) * r2);
         normal = normalize(abs(det) * normal - grad);
-      }`,
+      }` : ''}`,
     );
   };
-  m.customProgramCacheKey = () => `skin-${relief}`;
+  m.customProgramCacheKey = () => `skin-${relief ?? 'smooth'}`;
   return m;
 }
 
@@ -464,7 +464,7 @@ function Athlete({ inst, data, motion, theme, xray, focus, layout, pose, follow 
       urethral: muscle(),
       bulbo: Object.assign(muscle(), { side: THREE.DoubleSide }),
       ischio: Object.assign(muscle(), { side: THREE.DoubleSide }),
-      penis: genitalSkin({ vertexColors: true }, 'fine'),
+      penis: genitalSkin({ vertexColors: true }),
       scrotum: genitalSkin({ color: ANATOMY_COLORS.scrotum, roughness: 0.7 }, 'rugae'),
       penisGhost: xrayMaterial(genitalSkin({ vertexColors: true })),
       scrotumGhost: xrayMaterial(genitalSkin({ color: ANATOMY_COLORS.scrotum })),
