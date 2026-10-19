@@ -110,7 +110,7 @@ export const GUIDES: Record<BlockType, Guide> = {
 };
 
 /** Быстрые сокращения с передней подсказкой: у мужчин она сильнее включает сфинктер уретры */
-const QUICK_FRONT: Guide = {
+export const QUICK_FRONT: Guide = {
   goal: 'Тот же навык с другой подсказкой. «Укоротить пенис» включает сфинктер уретры и переднюю часть тазового дна, задний проход подтягивается вместе с ними. Две подсказки вместе тренируют всю петлю мышц.',
   steps: [
     'Представьте, что укорачиваете пенис — втягиваете его основание внутрь.',
@@ -134,11 +134,15 @@ const DEMO: Record<BlockType, Block> = {
   quick: { type: 'quick', reps: 3, on: 1, off: 1.5, cue: 'back' },
   lift: { type: 'lift', reps: 1, floor: 2, rest: 2 },
   endurance: { type: 'endurance', reps: 1, hold: 6, rest: 4, intensity: 0.5 },
-  knack: { type: 'knack', tasks: ['cough'], reps: 1, rest: 3 },
+  knack: { type: 'knack', tasks: ['cough', 'squat', 'load'], reps: 1, rest: 2.5 },
   release: { type: 'release', cycles: 1, inhale: 4, exhale: 6 },
 };
 
-export function demoTimeline(type: BlockType, position: Position = 'sitting'): Timeline {
-  const level: Level = { id: 0, name: '', subtitle: '', position, minSessions: Infinity, minDays: Infinity, blocks: [DEMO[type]], light: [] };
+/** front — быстрые с передней подсказкой; сидя «Knack» показывается только кашлем */
+export function demoTimeline(type: BlockType, position: Position = 'sitting', front = false): Timeline {
+  let block = DEMO[type];
+  if (block.type === 'quick' && front) block = { ...block, cue: 'front' };
+  if (block.type === 'knack' && position === 'sitting') block = { ...block, tasks: ['cough'] };
+  const level: Level = { id: 0, name: '', subtitle: '', position, minSessions: Infinity, minDays: Infinity, blocks: [block], light: [] };
   return buildTimeline(level, { blocksOnly: true });
 }

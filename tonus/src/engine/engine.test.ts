@@ -128,6 +128,14 @@ describe('лента шагов', () => {
     expect(front.hint).toContain('пенис');
   });
 
+  it('3D-фигуре: весь блок с передней подсказкой помечен, в «Knack» передаётся движение', () => {
+    expect(tl.steps.filter(s => s.block === 3).every(s => s.front)).toBe(true);
+    expect(tl.steps.filter(s => s.block === 2).some(s => s.front)).toBe(false);
+    const k = buildTimeline(levelById(7)).steps.filter(s => s.action);
+    expect([...new Set(k.map(s => s.action))]).toEqual(['cough', 'load']);
+    expect(k.every(s => s.cue === 'action' && s.level === 1)).toBe(true);
+  });
+
   it('находит шаг по времени', () => {
     expect(locate(tl, 0)).toEqual({ index: 0, offset: 0, done: false });
     const i = 5;

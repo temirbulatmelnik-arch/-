@@ -2,9 +2,12 @@
 // и запечёнными текстурами кожи и рельефа, в положении сидя или стоя.
 // Вид «насквозь»: кожа становится полупрозрачной, внутри — настоящая анатомия Z-Anatomy / BodyParts3D
 // (CC BY-SA): кости таза, бёдра, позвоночник, рёбра, мышца, поднимающая задний проход, наружный сфинктер,
-// мочевой пузырь, простата, диафрагма. Анатомия прикреплена к костям скелета и движется вместе с позой.
+// мочевой пузырь, простата, диафрагма, пенис (увеличен), яички; сфинктер уретры и мышцы у основания пениса
+// построены по поверхностям атласа. Анатомия прикреплена к костям скелета и движется вместе с позой.
 // Вдох: живот и грудь расширяются, диафрагма сокращается и опускается, тазовое дно мягко опускается.
-// Сжатие: мышцы тазового дна поднимаются и подсвечиваются, сфинктер сужается.
+// Сжатие: мышцы тазового дна поднимаются и подсвечиваются, сфинктер сужается. С передней подсказкой
+// сильнее работают мышцы у основания пениса и сфинктер уретры: пенис подтягивается, яички поднимаются.
+// В «Knack» фигура кашляет, приседает или прыгает, камера следует за тазом.
 // Модели собирает tools/build-figure.py (Blender).
 import { ContactShadows, Html, OrbitControls } from '@react-three/drei';
 import { Canvas, createPortal, useFrame, useThree } from '@react-three/fiber';
@@ -12,15 +15,17 @@ import { use, useEffect, useMemo, useRef, useState, type RefObject } from 'react
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
+import type { KnackTask } from '../engine/program';
 import type { Phase } from '../engine/timeline';
 import { ANATOMY_COLORS } from './anatomyColors';
 
-export interface FigureMotion { level: number; phase: Phase }
+/** level — сила сжатия, front — передняя подсказка, action — движение «Knack» и его ход 0…1 */
+export interface FigureMotion { level: number; phase: Phase; front?: boolean; action?: { task: KnackTask; p: number } }
 export type FigurePose = 'sitting' | 'standing';
 /** body — тело целиком; pelvis — вид насквозь */
 export type FigureZoom = 'body' | 'pelvis';
-/** на чём держать камеру в виде насквозь: таз (сжатия) или туловище целиком (дыхание) */
-export type FigureFocus = 'pelvis' | 'torso';
+/** на чём держать камеру в виде насквозь: таз (сжатия), туловище (дыхание), основание пениса (передняя подсказка) */
+export type FigureFocus = 'pelvis' | 'torso' | 'front';
 
 type Vec3 = [number, number, number];
 interface AthleteMeta {
@@ -37,6 +42,8 @@ interface AthleteMeta {
 interface AnatomyGroup {
   name: string; bone: string; vertices: number; indices: number; lo: Vec3; hi: Vec3;
   offsets: Record<'position' | 'normal' | 'index', number>;
+  /** точка поворота группы (корень пениса) */
+  pivot?: Vec3;
 }
 interface Loaded {
   meta: AthleteMeta;
@@ -137,16 +144,29 @@ function createInstance(data: Loaded) {
 
   // анатомия: каждая группа — дочерний объект своей кости, в положении покоя
   const anatomy: Record<string, THREE.Mesh> = {};
+  /** группы с точкой поворота: двигаем опору, а не саму группу */
+  const pivots: Record<string, THREE.Object3D> = {};
   for (const a of data.anatomy) {
     const m = new THREE.Mesh(a.geometry);
     m.name = a.group.name;
-    m.position.copy(a.center).sub(rest(meta, a.group.bone));
-    m.userData.base = m.position.clone();
     m.frustumCulled = false;
-    by[a.group.bone].add(m);
+    let parent: THREE.Object3D = by[a.group.bone];
+    let origin = rest(meta, a.group.bone);
+    if (a.group.pivot) {
+      const pv = new THREE.Object3D();
+      pv.position.set(...a.group.pivot).sub(origin);
+      pv.userData.base = pv.position.clone();
+      parent.add(pv);
+      pivots[a.group.name] = pv;
+      parent = pv;
+      origin = new THREE.Vector3(...a.group.pivot);
+    }
+    m.position.copy(a.center).sub(origin);
+    m.userData.base = m.position.clone();
+    parent.add(m);
     anatomy[a.group.name] = m;
   }
-  return { mesh, by, anatomy };
+  return { mesh, by, anatomy, pivots };
 }
 type Instance = ReturnType<typeof createInstance>;
 
@@ -158,16 +178,45 @@ function boneInMesh(inst: Instance, b: THREE.Object3D, offset = new THREE.Vector
 }
 
 /** Камера: направление взгляда и расстояние для каждого положения */
-// floor — взгляд на таз со стороны промежности, как в анатомических атласах: тазовое дно видно «воронкой»
-const VIEW: Record<FigurePose, { dir: Vec3; floor: Vec3; body: number; torso: number; pelvis: number }> = {
-  standing: { dir: [0.5, 0.18, 0.85], floor: [0.42, -0.32, 0.85], body: 3.6, torso: 1.55, pelvis: 0.95 },
-  sitting: { dir: [0.6, 0.28, 0.75], floor: [0.45, -0.1, 0.88], body: 3.1, torso: 1.45, pelvis: 0.95 },
+// floor — взгляд на таз со стороны промежности, как в анатомических атласах: тазовое дно видно «воронкой»;
+// front — сбоку-спереди на основание пениса, яички и мышцы под ними
+const VIEW: Record<FigurePose, { dir: Vec3; floor: Vec3; front: Vec3; body: number; torso: number; pelvis: number; frontDist: number }> = {
+  standing: { dir: [0.5, 0.18, 0.85], floor: [0.42, -0.32, 0.85], front: [0.8, -0.1, 0.6], body: 3.6, torso: 1.55, pelvis: 0.95, frontDist: 0.8 },
+  sitting: { dir: [0.6, 0.28, 0.75], floor: [0.45, -0.1, 0.88], front: [0.72, 0.3, 0.62], body: 3.1, torso: 1.45, pelvis: 0.95, frontDist: 0.8 },
 };
 
-/** Ставит кости в позу и возвращает, где оказалась фигура и куда смотреть камере.
+type Act = FigureMotion['action'];
+const ease = (x: number) => { const t = THREE.MathUtils.clamp(x, 0, 1); return t * t * (3 - 2 * t); };
+
+/** Насколько согнуться в момент p действия «Knack»: присед, наклон корпуса, прыжок, руки вперёд или вверх */
+function actionAmounts(act: Act) {
+  const out = { squat: 0, flex: 0, air: 0, reach: 0, swing: 0 };
+  if (!act) return out;
+  const p = act.p;
+  if (act.task === 'squat') {
+    out.squat = Math.sin(Math.PI * ease(p));
+    out.reach = out.squat;
+  } else if (act.task === 'cough') {
+    // резкий наклон, короткая задержка и медленный возврат
+    out.flex = p < 0.15 ? ease(p / 0.15) : p < 0.45 ? 1 : 1 - ease((p - 0.45) / 0.55);
+    out.squat = 0.12 * out.flex;
+  } else {
+    // прыжок: подсесть, оттолкнуться с махом рук, полёт, мягко приземлиться
+    out.squat = p < 0.3 ? 0.5 * ease(p / 0.3) : p < 0.42 ? 0.5 * (1 - ease((p - 0.3) / 0.12)) : p > 0.76 ? 0.4 * Math.sin(Math.PI * (p - 0.76) / 0.24) : 0;
+    out.air = p > 0.42 && p < 0.76 ? Math.sin(Math.PI * (p - 0.42) / 0.34) : 0;
+    out.swing = p > 0.3 && p < 0.8 ? Math.sin(Math.PI * (p - 0.3) / 0.5) : 0;
+    out.reach = p < 0.3 ? -0.6 * ease(p / 0.3) : 0;
+  }
+  return out;
+}
+
+const zero = new THREE.Vector3();
+const mixDir = (a: Vec3, b: Vec3, k: number): Vec3 => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
+
+/** Ставит кости в позу (и в момент действия «Knack», если оно идёт) и возвращает сдвиг фигуры.
  *  Позы задаются направлениями костей в системе тела (Y — к голове, Z — вперёд, X — влево),
- *  поэтому не зависят от исходной А-позы модели. */
-function applyPose(inst: Instance, meta: AthleteMeta, pose: FigurePose) {
+ *  поэтому не зависят от исходной А-позы модели. Стопы при этом остаются на месте. */
+function poseBones(inst: Instance, meta: AthleteMeta, pose: FigurePose, act?: Act): THREE.Vector3 {
   const { by } = inst;
   Object.values(by).forEach(b => b.quaternion.identity());
   const restDir = (a: string, b: string) => rest(meta, b).sub(rest(meta, a)).normalize();
@@ -190,21 +239,47 @@ function applyPose(inst: Instance, meta: AthleteMeta, pose: FigurePose) {
   const feetFlat = (dir: Vec3) => sides.forEach(([s]) => aim(`foot_${s}`, `ball_${s}`, dir));
   const ankleRest = rest(meta, 'foot_l');
   const footRest = restDir('foot_l', 'ball_l').toArray() as Vec3;
+  const a = actionAmounts(act);
+  const lean = (k: number) => k > 0 && aim('spine_01', 'spine_02', mixDir(restDir('spine_01', 'spine_02').toArray() as Vec3, [0, 0.86, 0.5], k));
 
-  const group = new THREE.Object3D();
+  const offset = new THREE.Vector3();
   if (pose === 'standing') {
-    arms([0.13, -1, 0.02], [0.1, -1, 0.16], [0.06, -1, 0.1]);
+    if (a.squat > 0) {
+      sides.forEach(([s, x]) => {
+        aim(`thigh_${s}`, `calf_${s}`, mixDir(restDir(`thigh_${s}`, `calf_${s}`).toArray() as Vec3, [0.16 * x, -0.42, 0.9], a.squat));
+        aim(`calf_${s}`, `foot_${s}`, mixDir(restDir(`calf_${s}`, `foot_${s}`).toArray() as Vec3, [0.03 * x, -0.9, -0.42], a.squat));
+      });
+      feetFlat(footRest);
+    }
+    lean(Math.max(0.55 * a.squat, a.flex));
+    const up: Vec3 = a.swing ? mixDir([0.13, -1, 0.02], [0.25, 0.75, 0.6], a.swing) : a.reach > 0 ? mixDir([0.13, -1, 0.02], [0.14, -0.2, 0.97], a.reach) : mixDir([0.13, -1, 0.02], [0.2, -0.8, -0.55], -a.reach);
+    const fore: Vec3 = a.swing ? mixDir([0.1, -1, 0.16], [0.2, 0.8, 0.5], a.swing) : a.reach > 0 ? mixDir([0.1, -1, 0.16], [0.06, -0.05, 1], a.reach) : [0.1, -1, 0.16];
+    arms(up, fore, a.swing || a.reach > 0 ? fore : [0.06, -1, 0.1]);
   } else {
     sides.forEach(([s, x]) => {
       aim(`thigh_${s}`, `calf_${s}`, [0.12 * x, -0.04, 1]);
       aim(`calf_${s}`, `foot_${s}`, [0.03 * x, -1, 0.06]);
     });
     feetFlat(footRest);
+    // сидя «Knack» — только наклон корпуса, как при кашле
+    lean(0.6 * Math.max(a.flex, a.squat));
     arms([0.2, -0.9, 0.38], [0.08, -0.45, 0.9], [0.02, -0.5, 0.86]);
-    // таз опускается так, чтобы лодыжки оказались на прежней высоте над полом
-    inst.mesh.updateMatrixWorld(true);
-    group.position.y = ankleRest.y - boneInMesh(inst, by.foot_l).y;
   }
+  if (pose === 'sitting' || a.squat > 0) {
+    // таз опускается так, чтобы лодыжки остались на прежней высоте, а стоя — и на прежнем месте
+    inst.mesh.updateMatrixWorld(true);
+    const foot = boneInMesh(inst, by.foot_l);
+    offset.y = ankleRest.y - foot.y;
+    if (pose === 'standing') offset.z = ankleRest.z - foot.z;
+  }
+  offset.y += 0.13 * a.air;
+  return offset;
+}
+
+function applyPose(inst: Instance, meta: AthleteMeta, pose: FigurePose) {
+  const { by } = inst;
+  const group = new THREE.Object3D();
+  group.position.copy(poseBones(inst, meta, pose));
   group.updateMatrix();
   inst.mesh.updateMatrixWorld(true);
 
@@ -219,12 +294,18 @@ function applyPose(inst: Instance, meta: AthleteMeta, pose: FigurePose) {
   const torso = floor.clone().lerp(dia, 0.42);
   const pelvis = floor.clone().lerp(dia, 0.06);
   const fdir = new THREE.Vector3(...v.floor).normalize();
+  // основание пениса: между луковицей и корнем, чуть ниже — чтобы в кадр попали и яички
+  const bulb = inst.anatomy.bulbospongiosus ? world(inst.anatomy.bulbospongiosus) : floor;
+  const root = inst.pivots.penis ? world(inst.pivots.penis) : floor;
+  const front = bulb.clone().lerp(root, 0.55).add(new THREE.Vector3(0, -0.03, 0));
+  const frdir = new THREE.Vector3(...v.front).normalize();
   return {
     position: group.position.toArray() as Vec3,
     camera: {
       body: { target: center.toArray() as Vec3, pos: center.clone().addScaledVector(dir, v.body).toArray() as Vec3 },
       torso: { target: torso.toArray() as Vec3, pos: torso.clone().addScaledVector(dir, v.torso).toArray() as Vec3 },
       pelvis: { target: pelvis.toArray() as Vec3, pos: pelvis.clone().addScaledVector(fdir, v.pelvis).toArray() as Vec3 },
+      front: { target: front.toArray() as Vec3, pos: front.clone().addScaledVector(frdir, v.frontDist).toArray() as Vec3 },
     },
   };
 }
@@ -315,8 +396,9 @@ function Label({ position, children, color }: { position: Vec3; children: string
   );
 }
 
-function Athlete({ inst, data, motion, theme, xray, focus, layout }: {
-  inst: Instance; data: Loaded; motion: RefObject<FigureMotion>; theme: Theme; xray: boolean; focus: FigureFocus; layout: ReturnType<typeof applyPose>;
+function Athlete({ inst, data, motion, theme, xray, focus, layout, pose, follow }: {
+  inst: Instance; data: Loaded; motion: RefObject<FigureMotion>; theme: Theme; xray: boolean; focus: FigureFocus;
+  layout: ReturnType<typeof applyPose>; pose: FigurePose; follow: RefObject<THREE.Vector3>;
 }) {
   const { meta } = data;
   const skin = useMemo(() => {
@@ -336,18 +418,29 @@ function Athlete({ inst, data, motion, theme, xray, focus, layout }: {
       levator: muscle(),
       sphincter: muscle(),
       diaphragm: muscle(),
+      urethral: muscle(),
+      bulbo: Object.assign(muscle(), { side: THREE.DoubleSide }),
+      ischio: Object.assign(muscle(), { side: THREE.DoubleSide }),
+      penis: new THREE.MeshPhysicalMaterial({ color: ANATOMY_COLORS.penis, roughness: 0.48, sheen: 0.5, sheenColor: new THREE.Color('#ffc2b0'), clearcoat: 0.15 }),
+      testes: new THREE.MeshPhysicalMaterial({ color: ANATOMY_COLORS.testes, roughness: 0.4, sheen: 0.4, sheenColor: new THREE.Color('#fff0e8'), clearcoat: 0.3 }),
       bladder: new THREE.MeshPhysicalMaterial({ color: ANATOMY_COLORS.bladder, roughness: 0.3, transparent: true, opacity: 0.8, clearcoat: 0.6 }),
       prostate: new THREE.MeshStandardMaterial({ color: ANATOMY_COLORS.prostate, roughness: 0.5 }),
     };
   }, []);
   useEffect(() => () => Object.values(mats).forEach(x => x.dispose()), [mats]);
-  // при взгляде на таз кости полупрозрачные: мышцы тазового дна лежат внутри тазового кольца
+  // при взгляде на таз кости полупрозрачные: мышцы тазового дна лежат внутри тазового кольца;
+  // пенис и яички плотные только при передней подсказке, иначе не заслоняют тазовое дно
   useEffect(() => {
-    const see = focus === 'pelvis';
+    const see = focus !== 'torso';
     mats.bone.transparent = see;
     mats.bone.opacity = see ? 0.5 : 1;
     mats.bone.depthWrite = !see;
-    mats.bone.needsUpdate = true;
+    for (const m of [mats.penis, mats.testes]) {
+      m.transparent = focus !== 'front';
+      m.opacity = focus === 'front' ? 1 : 0.35;
+      m.depthWrite = focus === 'front';
+    }
+    for (const m of [mats.bone, mats.penis, mats.testes]) m.needsUpdate = true;
   }, [mats, focus]);
   useEffect(() => {
     const a = inst.anatomy;
@@ -359,6 +452,11 @@ function Athlete({ inst, data, motion, theme, xray, focus, layout }: {
     set('diaphragm', mats.diaphragm);
     set('bladder', mats.bladder);
     set('prostate', mats.prostate);
+    set('urethral_sphincter', mats.urethral);
+    set('bulbospongiosus', mats.bulbo);
+    set('ischiocavernosus', mats.ischio);
+    set('penis', mats.penis);
+    set('testes', mats.testes);
   }, [inst, mats, xray]);
 
   const eyeMats = useMemo(() => ({
@@ -369,11 +467,24 @@ function Athlete({ inst, data, motion, theme, xray, focus, layout }: {
   const muscleColor = useMemo(() => new THREE.Color(ANATOMY_COLORS.muscle), []);
   const activeColor = useMemo(() => new THREE.Color(ANATOMY_COLORS.active), []);
 
+  const groupRef = useRef<THREE.Group>(null);
+  const acting = useRef(false);
+
   useFrame(state => {
     const mo = motion.current;
     if (!mo) return;
+    // «Knack»: поза меняется каждый кадр, пока идёт действие; камера следует за тазом
+    if (mo.action || acting.current) {
+      const off = poseBones(inst, meta, pose, mo.action);
+      groupRef.current?.position.copy(off);
+      follow.current.copy(off).sub(new THREE.Vector3(...layout.position));
+      acting.current = !!mo.action;
+    }
     const t = state.clock.elapsedTime;
     const sq = Math.max(0, mo.level);
+    // передняя подсказка сильнее включает мышцы у основания пениса, задняя — сфинктер и тазовое дно
+    const fa = sq * (mo.front ? 1 : 0.45);
+    const ba = sq * (mo.front ? 0.6 : 1);
     const breathing = mo.phase === 'inhale' || mo.phase === 'exhale';
     // вдох: в дыхательных упражнениях — по ленте, иначе спокойное фоновое дыхание (раз в 5 с)
     const b = breathing ? THREE.MathUtils.clamp(-mo.level / 0.25, 0, 1) : 0.35 * (0.5 - 0.5 * Math.cos((2 * Math.PI * t) / 5));
@@ -395,12 +506,25 @@ function Athlete({ inst, data, motion, theme, xray, focus, layout }: {
       const o = a[nm];
       if (o) o.position.copy(o.userData.base).add(new THREE.Vector3(0, 0.005 * sq - 0.004 * bFloor, 0));
     }
+    // пенис подтягивается к телу и слегка укорачивается, яички поднимаются
+    const pv = inst.pivots.penis;
+    if (pv) {
+      pv.position.copy(pv.userData.base).add(new THREE.Vector3(0, 0.007 * fa, -0.006 * fa));
+      pv.rotation.x = -0.22 * fa;
+      pv.scale.setScalar(1 - 0.09 * fa);
+    }
+    if (a.testes) a.testes.position.copy(a.testes.userData.base).add(new THREE.Vector3(0, 0.014 * fa - 0.003 * bFloor, 0.003 * fa));
+    if (a.urethral_sphincter) {
+      const k = 1 - 0.22 * fa;
+      a.urethral_sphincter.scale.set(k, 1 + 0.1 * fa, k);
+    }
+    for (const nm of ['bulbospongiosus', 'ischiocavernosus']) a[nm]?.scale.setScalar(1 - 0.05 * fa);
     if (dia) {
       dia.position.copy(dia.userData.base).add(new THREE.Vector3(0, -0.024 * b, 0));
       dia.scale.set(1 + 0.02 * b, 1 - 0.22 * b, 1 + 0.02 * b);
     }
     // работающая мышца подсвечивается
-    for (const [m, k] of [[mats.levator, sq], [mats.sphincter, sq], [mats.diaphragm, breathing && mo.phase === 'inhale' ? b : 0]] as const) {
+    for (const [m, k] of [[mats.levator, ba], [mats.sphincter, ba], [mats.urethral, fa], [mats.bulbo, fa], [mats.ischio, fa], [mats.diaphragm, breathing && mo.phase === 'inhale' ? b : 0]] as const) {
       m.emissiveIntensity = 0.55 * k;
       m.color.copy(tmp.copy(muscleColor).lerp(activeColor, 0.35 * k));
     }
@@ -409,7 +533,7 @@ function Athlete({ inst, data, motion, theme, xray, focus, layout }: {
   const headRest = rest(meta, 'head');
 
   return (
-    <group position={layout.position}>
+    <group ref={groupRef} position={layout.position}>
       <primitive object={inst.mesh} />
       {createPortal(
         <>
@@ -420,8 +544,10 @@ function Athlete({ inst, data, motion, theme, xray, focus, layout }: {
         inst.by.head,
       )}
       {/* подписи — от центра своей группы */}
-      {xray && inst.anatomy.levator && createPortal(<Label position={[0.1, 0.045, 0.03]} color={theme.ink}>мышцы тазового дна</Label>, inst.anatomy.levator)}
-      {xray && inst.anatomy.sphincter && createPortal(<Label position={[-0.075, -0.05, -0.02]} color={theme.ink}>сфинктер</Label>, inst.anatomy.sphincter)}
+      {xray && focus !== 'front' && inst.anatomy.levator && createPortal(<Label position={[0.1, 0.045, 0.03]} color={theme.ink}>мышцы тазового дна</Label>, inst.anatomy.levator)}
+      {xray && inst.anatomy.sphincter && createPortal(<Label position={focus === 'front' ? [0.02, -0.02, -0.06] : [-0.075, -0.05, -0.02]} color={theme.ink}>анальный сфинктер</Label>, inst.anatomy.sphincter)}
+      {xray && focus === 'front' && inst.anatomy.urethral_sphincter && createPortal(<Label position={[0.02, 0.03, -0.02]} color={theme.ink}>сфинктер уретры</Label>, inst.anatomy.urethral_sphincter)}
+      {xray && focus === 'front' && inst.anatomy.bulbospongiosus && createPortal(<Label position={[0.02, -0.045, 0.05]} color={theme.ink}>мышцы у основания пениса</Label>, inst.anatomy.bulbospongiosus)}
       {xray && inst.anatomy.diaphragm && createPortal(<Label position={[0.17, 0.02, 0]} color={theme.ink}>диафрагма</Label>, inst.anatomy.diaphragm)}
     </group>
   );
@@ -457,15 +583,17 @@ function Environment() {
   return null;
 }
 
-/** Плавный перелёт камеры при смене положения или масштаба */
-function CameraRig({ view, controls }: { view: { pos: Vec3; target: Vec3 }; controls: RefObject<OrbitControlsImpl | null> }) {
+/** Плавный перелёт камеры при смене положения или масштаба; follow — сдвиг фигуры в «Knack», камера идёт за ним */
+function CameraRig({ view, controls, follow, track }: { view: { pos: Vec3; target: Vec3 }; controls: RefObject<OrbitControlsImpl | null>; follow: RefObject<THREE.Vector3>; track: boolean }) {
   const { camera } = useThree();
   const anim = useRef({ k: 1, fromPos: new THREE.Vector3(), fromTarget: new THREE.Vector3(), toPos: new THREE.Vector3(), toTarget: new THREE.Vector3() });
+  const applied = useRef(new THREE.Vector3());
+  const d = useMemo(() => new THREE.Vector3(), []);
 
   useEffect(() => {
     const a = anim.current;
-    a.fromPos.copy(camera.position);
-    a.fromTarget.copy(controls.current?.target ?? new THREE.Vector3(...view.target));
+    a.fromPos.copy(camera.position).sub(applied.current);
+    a.fromTarget.copy(controls.current?.target ?? new THREE.Vector3(...view.target)).sub(applied.current);
     a.toPos.set(...view.pos);
     a.toTarget.set(...view.target);
     a.k = 0;
@@ -473,12 +601,23 @@ function CameraRig({ view, controls }: { view: { pos: Vec3; target: Vec3 }; cont
 
   useFrame((_, dt) => {
     const a = anim.current;
-    if (a.k >= 1 || !controls.current) return;
-    a.k = Math.min(1, a.k + dt / 0.9);
-    const e = a.k * a.k * (3 - 2 * a.k);
-    camera.position.lerpVectors(a.fromPos, a.toPos, e);
-    controls.current.target.lerpVectors(a.fromTarget, a.toTarget, e);
-    controls.current.update();
+    const c = controls.current;
+    if (!c) return;
+    if (a.k < 1) {
+      a.k = Math.min(1, a.k + dt / 0.9);
+      const e = a.k * a.k * (3 - 2 * a.k);
+      camera.position.lerpVectors(a.fromPos, a.toPos, e).add(applied.current);
+      c.target.lerpVectors(a.fromTarget, a.toTarget, e).add(applied.current);
+      c.update();
+    }
+    // на всё тело смотрим неподвижно — так видно присед и прыжок; вблизи камера держит таз в кадре
+    d.copy(track ? follow.current : zero).sub(applied.current);
+    if (d.lengthSq() > 1e-10) {
+      camera.position.add(d);
+      c.target.add(d);
+      applied.current.add(d);
+      c.update();
+    }
   });
   return null;
 }
@@ -495,6 +634,7 @@ export default function Figure3D({ motion, pose, zoom = 'body', focus = 'torso',
   const inst = useMemo(() => createInstance(data), [data]);
   const layout = useMemo(() => applyPose(inst, data.meta, pose), [inst, data, pose]);
   const view = layout.camera[zoom === 'body' ? 'body' : focus];
+  const follow = useRef(new THREE.Vector3());
   const theme = useTheme();
   const controls = useRef<OrbitControlsImpl>(null);
   // начальная точка камеры; дальше камеру ведёт CameraRig, чтобы смена вида шла плавно
@@ -518,7 +658,7 @@ export default function Figure3D({ motion, pose, zoom = 'body', focus = 'torso',
           shadow-camera-left={-1.3} shadow-camera-right={1.3} shadow-camera-top={2.2} shadow-camera-bottom={-0.5} />
         <directionalLight position={[-3, 2.4, 1.2]} intensity={0.6} color="#dbe6ff" />
         <directionalLight position={[0.5, 2.8, -3.5]} intensity={1.3} color="#ffffff" />
-        <Athlete inst={inst} data={data} motion={motion} theme={theme} xray={zoom === 'pelvis'} focus={focus} layout={layout} />
+        <Athlete inst={inst} data={data} motion={motion} theme={theme} xray={zoom === 'pelvis'} focus={focus} layout={layout} pose={pose} follow={follow} />
         <Props pose={pose} theme={theme} seat={seat} xray={zoom === 'pelvis'} />
         <ContactShadows key={pose} position={[0, 0.001, 0]} scale={3.4} blur={2.4} opacity={theme.dark ? 0.55 : 0.32} far={1.8} resolution={512} frames={1} />
         <OrbitControls
@@ -534,7 +674,7 @@ export default function Figure3D({ motion, pose, zoom = 'body', focus = 'torso',
           autoRotate={autoRotate && !reduced}
           autoRotateSpeed={0.6}
         />
-        <CameraRig view={view} controls={controls} />
+        <CameraRig view={view} controls={controls} follow={follow} track={zoom !== 'body'} />
       </Canvas>
     </div>
   );

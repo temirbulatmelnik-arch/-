@@ -1,6 +1,6 @@
 // Превращает уровень программы в плоскую ленту шагов с длительностями.
 // Плеер только «прокручивает» эту ленту по времени, поэтому вся логика тренировки здесь и тестируется.
-import { BLOCK_INFO, KNACK_TASKS, POSITION_LABEL, blockTitle, type Block, type BlockType, type Level } from './program';
+import { BLOCK_INFO, KNACK_TASKS, POSITION_LABEL, blockTitle, type Block, type BlockType, type KnackTask, type Level } from './program';
 
 export type Phase = 'prep' | 'squeeze' | 'hold' | 'relax' | 'inhale' | 'exhale';
 export type Cue = 'prep' | 'squeeze' | 'relax' | 'breath' | 'action' | 'none';
@@ -25,6 +25,10 @@ export interface Step {
   say?: [number, string];
   /** отдых перед упражнением */
   pause?: boolean;
+  /** блок с передней подсказкой: 3D-фигура смотрит на основание пениса */
+  front?: boolean;
+  /** движение «Knack», которое показывает 3D-фигура */
+  action?: KnackTask;
   /** обратный отсчёт тиками в последние секунды */
   tick?: boolean;
   /** шаг — рабочее сокращение (для статистики) */
@@ -106,7 +110,7 @@ function blockSteps(b: Block, block: number): Step[] {
         for (let i = 1; i <= b.reps; i++) {
           n++;
           out.push({ ...base, phase: 'hold', label: 'Сожмите заранее', hint: `Сначала сфинктер, потом ${k.title}`, duration: 1.5, level: 1, ease: 0.3, rep: n, reps, cue: 'squeeze', speak: 'Сжать', contraction: true });
-          out.push({ ...base, phase: 'hold', label: k.action, hint: k.hint, duration: k.duration, level: 1, ease: 0.2, rep: n, reps, cue: 'action', speak: k.speak });
+          out.push({ ...base, phase: 'hold', label: k.action, hint: k.hint, duration: k.duration, level: 1, ease: 0.2, rep: n, reps, cue: 'action', speak: k.speak, action: task });
           out.push({ ...base, phase: 'relax', label: 'Отпустите полностью', duration: b.rest, level: 0, ease: 1.2, rep: n, reps, cue: 'relax' });
         }
       }
@@ -135,6 +139,7 @@ export function buildTimeline(level: Level, { blocksOnly = false } = {}): Timeli
       speak: i === 0 ? `${title}. ${POSITION_LABEL[level.position]}` : title,
     });
     steps.push(...blockSteps(b, i));
+    if (b.type === 'quick' && b.cue === 'front') for (const s of steps) if (s.block === i) s.front = true;
   });
 
   const starts: number[] = [];

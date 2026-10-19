@@ -12,15 +12,16 @@ function stepTone(level: number, phase: string) {
   return level > 0 ? 'bg-squeeze' : 'bg-calm';
 }
 
-export function ExerciseDemo({ type, position, initialZoom = 'body', autoRotate = true }: {
-  type: BlockType; position: Position; initialZoom?: FigureZoom; autoRotate?: boolean;
+/** front — быстрые с передней подсказкой: сразу вид насквозь на основание пениса */
+export function ExerciseDemo({ type, position, front = false, initialZoom = front ? 'pelvis' : 'body', autoRotate = !front }: {
+  type: BlockType; position: Position; front?: boolean; initialZoom?: FigureZoom; autoRotate?: boolean;
 }) {
-  const { motion, step, progress } = useDemoMotion(type, position);
+  const { motion, step, progress } = useDemoMotion(type, position, front);
   const [zoom, setZoom] = useState<FigureZoom>(initialZoom);
 
   return (
     <div className="relative overflow-hidden rounded-3xl bg-surface-2">
-      <Figure motion={motion} pose={poseFor(position)} zoom={zoom} focus={focusFor(type)} autoRotate={autoRotate} className="aspect-square w-full" />
+      <Figure key={front ? 'front' : 'back'} motion={motion} pose={poseFor(position)} zoom={zoom} focus={focusFor(type, front)} autoRotate={autoRotate} className="aspect-square w-full" />
       <button
         type="button"
         onClick={() => setZoom(zoom === 'body' ? 'pelvis' : 'body')}
@@ -86,9 +87,10 @@ export function GuideText({ type, guide, position }: { type: BlockType; guide?: 
 /** Легенда вида «насквозь» */
 export function FigureLegend() {
   const items: [string, string][] = [
-    [ANATOMY_COLORS.muscle, 'мышцы: тазовое дно, сфинктер, диафрагма'],
+    [ANATOMY_COLORS.muscle, 'мышцы: тазовое дно, сфинктеры, диафрагма'],
     [ANATOMY_COLORS.active, 'мышца работает'],
     [ANATOMY_COLORS.bone, 'кости'],
+    [ANATOMY_COLORS.penis, 'пенис и яички'],
   ];
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-muted">

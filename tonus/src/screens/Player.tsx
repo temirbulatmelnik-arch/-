@@ -44,7 +44,7 @@ export function Player({ level, kind, onClose }: { level: Level; kind: SessionKi
   const blockNo = step.block + 1;
   const quick = step.blockType === 'quick' && step.phase !== 'prep' && !step.pause;
   const audible = settings.sound || settings.voice;
-  figureMotion.current = { level: lvl, phase: step.phase };
+  figureMotion.current = { level: lvl, phase: step.phase, front: step.front, action: step.action && { task: step.action, p: progress } };
 
   // перед каждым упражнением — пауза и подробное объяснение с 3D-демонстрацией
   useEffect(() => {
@@ -137,7 +137,7 @@ export function Player({ level, kind, onClose }: { level: Level; kind: SessionKi
         <div className="flex flex-1 flex-col items-center justify-center py-3">
           {settings.playerView === 'figure' ? (
             <div className="relative w-full max-w-[340px]">
-              <Figure motion={figureMotion} pose={poseFor(level.position)} zoom={zoom} focus={focusFor(step.blockType)} className="aspect-square w-full overflow-hidden rounded-3xl bg-surface-2"
+              <Figure motion={figureMotion} pose={poseFor(level.position)} zoom={zoom} focus={focusFor(step.blockType, step.front)} className="aspect-square w-full overflow-hidden rounded-3xl bg-surface-2"
                 fallback={<SphincterRing level={lvl} phase={step.phase} progress={progress} />} />
               <Countdown value={quick ? step.rep ?? 0 : left} sub={quick ? `из ${step.reps}` : undefined} progress={progress} phase={step.phase} level={lvl} />
               <button type="button" onClick={() => setZoom(zoom === 'body' ? 'pelvis' : 'body')}
@@ -278,7 +278,7 @@ function BlockIntro({ block, index, count, level, onStart, onSkip, onExit }: {
         </div>
         <h1 className="mt-3 text-[28px] leading-tight font-semibold tracking-tight">{title}</h1>
         <p className="mb-4 text-[15px] text-muted">{BLOCK_INFO[type].short}</p>
-        <ExerciseDemo type={type} position={level.position} />
+        <ExerciseDemo type={type} position={level.position} front={block.type === 'quick' && block.cue === 'front'} />
         <div className="mt-2"><FigureLegend /></div>
         <div className="mt-5"><GuideText type={type} guide={guideFor(block)} position={level.position} /></div>
       </div>

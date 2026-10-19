@@ -15,8 +15,8 @@ class Boundary extends Component<{ fallback: ReactNode; children: ReactNode }, {
   render() { return this.state.failed ? this.props.fallback : this.props.children; }
 }
 
-/** Дыхательные упражнения смотрим на всё туловище, остальные — на таз */
-export const focusFor = (t: BlockType): FigureFocus => (t === 'breath' || t === 'release' ? 'torso' : 'pelvis');
+/** Дыхательные упражнения смотрим на всё туловище, переднюю подсказку — на основание пениса, остальные — на таз */
+export const focusFor = (t: BlockType, front = false): FigureFocus => (front ? 'front' : t === 'breath' || t === 'release' ? 'torso' : 'pelvis');
 
 export function Figure({ motion, pose, zoom, focus, autoRotate, className = '', fallback }: {
   motion: { current: FigureMotion };
@@ -39,20 +39,20 @@ export function Figure({ motion, pose, zoom, focus, autoRotate, className = '', 
 }
 
 /** Демонстрация упражнения по кругу: отдаёт движение для фигуры и текущий шаг для подписи */
-export function useDemoMotion(type: BlockType, position: Position) {
+export function useDemoMotion(type: BlockType, position: Position, front = false) {
   const motion = useRef<FigureMotion>({ level: 0, phase: 'relax' });
   const [step, setStep] = useState<Step | null>(null);
   const [progress, setProgress] = useState(0);
 
   useEffect(() => {
-    const tl = demoTimeline(type, position);
+    const tl = demoTimeline(type, position, front);
     const t0 = performance.now();
     let last = -1, raf = 0, lastP = -1;
     const frame = () => {
       const t = ((performance.now() - t0) / 1000) % tl.total;
       const loc = locate(tl, t);
       const s = tl.steps[loc.index];
-      motion.current = { level: levelAt(tl, loc.index, loc.offset), phase: s.phase };
+      motion.current = { level: levelAt(tl, loc.index, loc.offset), phase: s.phase, front: s.front, action: s.action && { task: s.action, p: loc.offset / s.duration } };
       if (loc.index !== last) { last = loc.index; setStep(s); }
       const p = Math.round((loc.offset / s.duration) * 20) / 20;
       if (p !== lastP) { lastP = p; setProgress(p); }
@@ -60,7 +60,7 @@ export function useDemoMotion(type: BlockType, position: Position) {
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
-  }, [type, position]);
+  }, [type, position, front]);
 
   return { motion, step, progress };
 }

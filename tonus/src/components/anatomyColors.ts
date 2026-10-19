@@ -5,4 +5,6 @@ export const ANATOMY_COLORS = {
   active: '#ff5a4d',
   bladder: '#d8c27f',
   prostate: '#c58a68',
+  penis: '#c98577',
+  testes: '#dbb4a2',
 };

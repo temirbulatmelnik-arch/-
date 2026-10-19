@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { AlertTriangle, Ban, BookOpen, CalendarClock, Check, ChevronDown, CircleDot, ExternalLink, HeartPulse, PersonStanding, ShieldCheck, Sparkles, X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { ExerciseDemo, FigureLegend, GuideText } from '../components/ExerciseDemo';
+import { QUICK_FRONT } from '../engine/guides';
 import { PelvisDiagram } from '../components/PelvisDiagram';
 import { BLOCK_INFO, type BlockType, type Position } from '../engine/program';
 import { ScreenHeader } from '../components/ui';
@@ -51,25 +52,36 @@ const SOURCES: [string, string][] = [
   ['3D-модель тела: MakeHuman (CC0)', 'http://www.makehumancommunity.org'],
 ];
 
-const TYPES: BlockType[] = ['breath', 'slow', 'quick', 'endurance', 'knack', 'lift', 'release'];
+/** упражнения в 3D; у быстрых — две подсказки, сзади и спереди */
+const TYPES: { type: BlockType; front?: boolean; title: string }[] = [
+  { type: 'breath', title: BLOCK_INFO.breath.title },
+  { type: 'slow', title: BLOCK_INFO.slow.title },
+  { type: 'quick', title: BLOCK_INFO.quick.title },
+  { type: 'quick', front: true, title: 'Быстрые: спереди' },
+  { type: 'endurance', title: BLOCK_INFO.endurance.title },
+  { type: 'knack', title: BLOCK_INFO.knack.title },
+  { type: 'lift', title: BLOCK_INFO.lift.title },
+  { type: 'release', title: BLOCK_INFO.release.title },
+];
 const POSITIONS: [Position, string][] = [['sitting', 'Сидя'], ['standing', 'Стоя']];
 
 function Exercises3D() {
-  const [type, setType] = useState<BlockType>('slow');
+  const [sel, setSel] = useState(1);
+  const { type, front, title } = TYPES[sel];
   const [position, setPosition] = useState<Position>('sitting');
   const chip = (on: boolean) => `shrink-0 rounded-full px-3 py-1.5 text-[14px] font-medium transition ${on ? 'bg-ink text-bg' : 'bg-surface-2 text-muted'}`;
   return (
     <div>
       <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 pb-3">
-        {TYPES.map(t => <button key={t} type="button" onClick={() => setType(t)} aria-pressed={t === type} className={chip(t === type)}>{BLOCK_INFO[t].title}</button>)}
+        {TYPES.map((t, i) => <button key={t.title} type="button" onClick={() => setSel(i)} aria-pressed={i === sel} className={chip(i === sel)}>{t.title}</button>)}
       </div>
       <div className="mb-3 flex gap-2">
         {POSITIONS.map(([p, label]) => <button key={p} type="button" onClick={() => setPosition(p)} aria-pressed={p === position} className={chip(p === position)}>{label}</button>)}
       </div>
-      <ExerciseDemo type={type} position={position} />
+      <ExerciseDemo key={title} type={type} position={position} front={front} />
       <div className="mt-2"><FigureLegend /></div>
-      <h3 className="mt-5 mb-2 text-[18px] font-semibold">{BLOCK_INFO[type].title}</h3>
-      <GuideText type={type} />
+      <h3 className="mt-5 mb-2 text-[18px] font-semibold">{title}</h3>
+      <GuideText type={type} guide={front ? QUICK_FRONT : undefined} />
     </div>
   );
 }
