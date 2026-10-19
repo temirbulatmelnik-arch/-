@@ -4,7 +4,8 @@
 // (CC BY-SA): кости таза, бёдра, позвоночник, рёбра, мышца, поднимающая задний проход, наружный сфинктер,
 // мочевой пузырь, простата, диафрагма; сфинктер уретры и мышцы у основания пениса построены по поверхностям атласа.
 // Пенис — ровный цилиндр по изогнутой оси: выходит из лобка, свисает перед мошонкой; головка своего оттенка,
-// под кожей — вены. Мошонка — мешочек вокруг яичек атласа, крепится снизу к основанию пениса. Плотные при передней подсказке, иначе — контур. Анатомия прикреплена к костям скелета и движется вместе с позой.
+// под кожей — вены. Мошонка — мешочек вокруг яичек атласа, крепится снизу к основанию пениса.
+// При передней подсказке кожа полупрозрачная — внутри видны яички и мышцы у основания, иначе — контур. Анатомия прикреплена к костям скелета и движется вместе с позой.
 // Вдох: живот и грудь расширяются, диафрагма сокращается и опускается, тазовое дно мягко опускается.
 // Сжатие: мышцы тазового дна поднимаются и подсвечиваются, сфинктер сужается. С передней подсказкой
 // сильнее работают мышцы у основания пениса и сфинктер уретры: пенис подтягивается, яички поднимаются.
@@ -464,8 +465,10 @@ function Athlete({ inst, data, motion, theme, xray, focus, layout, pose, follow 
       urethral: muscle(),
       bulbo: Object.assign(muscle(), { side: THREE.DoubleSide }),
       ischio: Object.assign(muscle(), { side: THREE.DoubleSide }),
-      penis: genitalSkin({ vertexColors: true }),
-      scrotum: genitalSkin({ color: ANATOMY_COLORS.scrotum, roughness: 0.7 }, 'rugae'),
+      // полупрозрачная кожа: видна только лицевая сторона, чтобы слои не накладывались
+      penis: genitalSkin({ vertexColors: true, opacity: 0.6, depthWrite: false, side: THREE.FrontSide }),
+      scrotum: genitalSkin({ color: ANATOMY_COLORS.scrotum, roughness: 0.7, opacity: 0.5, depthWrite: false, side: THREE.FrontSide }, 'rugae'),
+      testes: new THREE.MeshPhysicalMaterial({ color: ANATOMY_COLORS.testes, roughness: 0.4, sheen: 0.4, sheenColor: new THREE.Color('#fff0e8'), clearcoat: 0.3 }),
       penisGhost: xrayMaterial(genitalSkin({ vertexColors: true })),
       scrotumGhost: xrayMaterial(genitalSkin({ color: ANATOMY_COLORS.scrotum })),
       bladder: new THREE.MeshPhysicalMaterial({ color: ANATOMY_COLORS.bladder, roughness: 0.3, transparent: true, opacity: 0.8, clearcoat: 0.6 }),
@@ -474,7 +477,7 @@ function Athlete({ inst, data, motion, theme, xray, focus, layout, pose, follow 
   }, []);
   useEffect(() => () => Object.values(mats).forEach(x => x.dispose()), [mats]);
   // при взгляде на таз кости полупрозрачные: мышцы тазового дна лежат внутри тазового кольца;
-  // пенис и яички плотные только при передней подсказке, иначе не заслоняют тазовое дно
+  // при передней подсказке кожа пениса и мошонки полупрозрачная, иначе — контур: не заслоняет тазовое дно
   useEffect(() => {
     const see = focus !== 'torso';
     mats.bone.transparent = see;
@@ -498,6 +501,7 @@ function Athlete({ inst, data, motion, theme, xray, focus, layout, pose, follow 
     set('urethral_sphincter', mats.urethral);
     set('bulbospongiosus', mats.bulbo);
     set('ischiocavernosus', mats.ischio);
+    set('testes', mats.testes);
     set('penis', focus === 'front' ? mats.penis : mats.penisGhost);
     set('scrotum', focus === 'front' ? mats.scrotum : mats.scrotumGhost);
     // кожа пениса и мошонки рисуется после костей и мышц, как и кожа тела
@@ -563,6 +567,7 @@ function Athlete({ inst, data, motion, theme, xray, focus, layout, pose, follow 
       a.scrotum.position.copy(a.scrotum.userData.base).add(new THREE.Vector3(0, 0.012 * fa - 0.003 * bFloor, 0.003 * fa));
       a.scrotum.scale.set(1 - 0.03 * fa, 1 - 0.1 * fa, 1 - 0.03 * fa);
     }
+    if (a.testes) a.testes.position.copy(a.testes.userData.base).add(new THREE.Vector3(0, 0.012 * fa - 0.003 * bFloor, 0.003 * fa));
     if (a.urethral_sphincter) {
       const k = 1 - 0.22 * fa;
       a.urethral_sphincter.scale.set(k, 1 + 0.1 * fa, k);

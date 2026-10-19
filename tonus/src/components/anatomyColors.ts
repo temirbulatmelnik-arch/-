@@ -9,4 +9,5 @@ export const ANATOMY_COLORS = {
   glans: '#c26e68',
   vein: '#7b6577',
   scrotum: '#a46c5a',
+  testes: '#e0b8a8',
 };

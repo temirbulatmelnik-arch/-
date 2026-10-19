@@ -765,9 +765,10 @@ ANATOMY = {
     'bladder': ('pelvis', ['Urinary bladder']),
     'prostate': ('pelvis', ['Prostate']),
     'diaphragm': ('spine_02', ['Diaphragm']),
+    'testes': ('pelvis', ['Testis.l', 'Testis.r', 'Epididymis.l', 'Epididymis.r']),
 }
 DECIMATE = {'pelvis_bones': 9000, 'femur_l': 1600, 'femur_r': 1600, 'spine': 7000, 'ribs': 9000, 'levator': 5000,
-            'sphincter': 600, 'bladder': 1400, 'prostate': 500, 'diaphragm': 6000, 'penis': 40000, 'scrotum': 5000,
+            'sphincter': 600, 'bladder': 1400, 'prostate': 500, 'diaphragm': 6000, 'penis': 40000, 'scrotum': 5000, 'testes': 2000,
             'urethral_sphincter': 1200, 'bulbospongiosus': 1600, 'ischiocavernosus': 1600}
 
 # Пенис строится ровным цилиндром вдоль изогнутой оси: выходит из лобка вперёд-вниз и свисает перед мошонкой.

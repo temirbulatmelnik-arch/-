@@ -6,7 +6,7 @@ athlete.json, athlete.bin, athlete-color.jpg, athlete-normal.jpg — тело с
 Лицензия результата: CC0.
 
 anatomy.json, anatomy.bin — анатомия для вида «насквозь» (кости таза, бёдра, позвоночник, рёбра,
-мышцы тазового дна, наружный анальный сфинктер, мочевой пузырь, простата, диафрагма, пенис и мошонка,
+мышцы тазового дна, наружный анальный сфинктер, мочевой пузырь, простата, диафрагма, пенис и мошонка, яички,
 сфинктер уретры, луковично-губчатая и седалищно-пещеристая мышцы).
 Источник: Z-Anatomy — The open source atlas of anatomy — CC BY-SA 4.0 (https://github.com/LluisV/Z-Anatomy),
 основанный на BodyParts3D — The Database Center for Life Science — CC BY-SA 2.1 Japan.
