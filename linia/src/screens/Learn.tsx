@@ -82,7 +82,7 @@ export function Learn() {
             <div className="font-display mt-3 text-[23px] leading-tight">{r.goal}</div>
             <p className="mt-2 text-[14px] leading-snug">{r.real}</p>
             <p className="mt-2 text-[13px] text-gold">{r.when}</p>
-            <p className="mt-2 text-[13px] leading-snug text-muted"><span className="overline mr-1 text-warn">Не будет</span>{r.not}</p>
+            <p className="mt-2 text-[13px] leading-snug text-muted"><span className="eyebrow mr-1 text-warn">Не будет</span>{r.not}</p>
           </div>
         ))}
       </div>
@@ -120,7 +120,7 @@ export function Learn() {
           <ul className="mt-2 space-y-1 text-[14px] leading-snug text-muted">{JAW_FLAGS.map(f => <li key={f.id}>— {f.text}</li>)}</ul>
         </div>
         <div className="rounded-[22px] bg-warn/8 p-5">
-          <div className="overline mb-2 text-warn">Остановите занятие</div>
+          <div className="eyebrow mb-2 text-warn">Остановите занятие</div>
           <ul className="space-y-1 text-[14px] leading-snug">{[...STOP_SIGNS.posture, ...STOP_SIGNS.face].map(s => <li key={s}>— {s}</li>)}</ul>
         </div>
       </div>

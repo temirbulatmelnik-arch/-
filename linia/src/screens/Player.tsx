@@ -261,7 +261,7 @@ function ItemIntro({ item, stage, index, count, onStart, onSkip, onExit }: {
       <div className="mx-auto w-full max-w-md flex-1 overflow-y-auto px-5 pb-4">
         <div className="flex items-center gap-2 pt-3">
           <IconButton label="Завершить занятие" onClick={onExit} className="hairline bg-surface"><X size={19} /></IconButton>
-          <div className="overline flex-1 text-center text-gold">Упражнение {index + 1} из {count}</div>
+          <div className="eyebrow flex-1 text-center text-gold">Упражнение {index + 1} из {count}</div>
           <div className="size-11" />
         </div>
         <h1 className="font-display mt-3 text-[38px] leading-[1.02]">{title}</h1>

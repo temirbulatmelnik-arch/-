@@ -99,7 +99,7 @@ function Photos({ block }: { block: BlockId }) {
         {pair.map((p, i) => (
           <button key={p.id} type="button" onClick={() => setOpen(p)} className="card overflow-hidden text-left">
             <img src={p.thumb} alt="" className="aspect-[3/4] w-full object-cover" />
-            <div className="px-3.5 py-2.5"><div className="overline text-gold">{i ? 'Сейчас' : 'Начало'}</div><div className="text-[13px] text-muted">{short(p.at)}</div></div>
+            <div className="px-3.5 py-2.5"><div className="eyebrow text-gold">{i ? 'Сейчас' : 'Начало'}</div><div className="text-[13px] text-muted">{short(p.at)}</div></div>
           </button>
         ))}
       </div>

@@ -18,7 +18,7 @@ function Shell({ title, overline, onClose, children, footer }: { title: string; 
     <div className="pt-safe fixed inset-0 z-40 flex flex-col bg-bg">
       <div className="mx-auto flex w-full max-w-md items-center gap-2 px-5 pt-3">
         <IconButton label="Закрыть" onClick={onClose} className="hairline bg-surface"><X size={19} /></IconButton>
-        <div className="overline flex-1 text-center text-gold">{overline}</div>
+        <div className="eyebrow flex-1 text-center text-gold">{overline}</div>
         <div className="size-11" />
       </div>
       <div className="mx-auto w-full max-w-md flex-1 overflow-y-auto px-5 pb-6">

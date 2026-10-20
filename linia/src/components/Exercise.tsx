@@ -65,7 +65,7 @@ export function GuideText({ ex, withPose = true }: { ex: ExerciseId; withPose?: 
   return (
     <div className="space-y-5 text-[15px] leading-relaxed">
       <p className="text-muted">{g.goal}</p>
-      {withPose && <p className="hairline rounded-2xl bg-surface px-4 py-2.5 text-[14px]"><span className="overline mr-2 text-gold">Положение</span>{POSE_LABEL[e.pose].toLowerCase()}</p>}
+      {withPose && <p className="hairline rounded-2xl bg-surface px-4 py-2.5 text-[14px]"><span className="eyebrow mr-2 text-gold">Положение</span>{POSE_LABEL[e.pose].toLowerCase()}</p>}
       <div>
         <h4 className="font-display mb-2.5 text-[22px]">Как выполнять</h4>
         <ol className="space-y-2.5">
@@ -89,7 +89,7 @@ export function GuideText({ ex, withPose = true }: { ex: ExerciseId; withPose?: 
         <h4 className="font-display mb-2.5 text-[22px]">Мышцы</h4>
         <MuscleList muscles={e.muscles} />
       </div>
-      {e.evidence && <p className="rounded-2xl bg-surface-2 px-4 py-3 text-[13px] leading-snug text-muted"><span className="overline mr-1.5 text-gold">Основание</span> {e.evidence}</p>}
+      {e.evidence && <p className="rounded-2xl bg-surface-2 px-4 py-3 text-[13px] leading-snug text-muted"><span className="eyebrow mr-1.5 text-gold">Основание</span> {e.evidence}</p>}
     </div>
   );
 }

@@ -99,7 +99,7 @@ export function ScreenHeader({ title, overline, subtitle, action }: { title: str
   return (
     <header className="flex items-start justify-between gap-3 px-6 pt-7 pb-5">
       <div>
-        {overline && <div className="overline mb-2 text-gold">{overline}</div>}
+        {overline && <div className="eyebrow mb-2 text-gold">{overline}</div>}
         <h1 className="font-display text-[40px] leading-[1.02]">{title}</h1>
         {subtitle && <p className="mt-2 text-[15px] text-muted">{subtitle}</p>}
       </div>

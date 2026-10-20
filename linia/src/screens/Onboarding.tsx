@@ -109,7 +109,7 @@ export function Onboarding() {
           <p className="text-[15px] text-muted">Вы тренируетесь — поэтому по умолчанию второй уровень. Если упражнения для шеи и языка совсем новые, начните с первого.</p>
           {(['face', 'posture'] as const).map(b => (
             <div key={b}>
-              <div className="overline mb-2 text-gold">{BLOCKS[b].title}</div>
+              <div className="eyebrow mb-2 text-gold">{BLOCKS[b].title}</div>
               <div className="grid grid-cols-2 gap-2">
                 {LEVELS[b].slice(0, 2).map(l => (
                   <button key={l.id} type="button" onClick={() => setStart({ ...start, [b]: l.id })} aria-pressed={start[b] === l.id}

@@ -26,7 +26,7 @@ function Hero({ block, first, onClose }: { block: BlockId; first: ExerciseId; on
     <div className={`text-card relative overflow-hidden rounded-b-[40px] pb-6 ${block === 'face' ? 'bg-face' : 'bg-posture'}`}>
       <div className="pt-safe relative z-10 flex items-center justify-between px-4 pt-3">
         <IconButton label="Назад" onClick={onClose} className="bg-white/45 backdrop-blur-md dark:bg-white/10"><ArrowLeft size={20} /></IconButton>
-        <span className="overline opacity-60">{block === 'face' ? 'Блок I' : 'Блок II'}</span>
+        <span className="eyebrow opacity-60">{block === 'face' ? 'Блок I' : 'Блок II'}</span>
         <span className="size-11" />
       </div>
       <div className="relative -mt-6 h-[340px]">
@@ -68,7 +68,7 @@ function Today({ block, actions, onExercise }: { block: BlockId; actions: Action
     <div className="card mx-4 overflow-hidden">
       <div className="px-5 pt-5">
         <div className="flex items-center justify-between">
-          <div className="overline text-gold">Сегодня</div>
+          <div className="eyebrow text-gold">Сегодня</div>
           <Chip tone="gold"><Timer size={13} /> {minutes(b.timeline.total)}</Chip>
         </div>
         <h3 className="font-display mt-2 text-[30px] leading-tight">{done ? 'Занятие выполнено' : `Занятие · уровень ${b.plan.training.id}`}</h3>
@@ -225,7 +225,7 @@ function LevelDetails({ level, current, onChoose }: { level: Level; current: num
           </div>
         ))}
       </div>
-      <p className="mt-4 rounded-2xl bg-surface-2 px-4 py-3 text-[14px] leading-snug"><span className="overline mr-1.5 text-gold">Переход</span> {level.criteria}</p>
+      <p className="mt-4 rounded-2xl bg-surface-2 px-4 py-3 text-[14px] leading-snug"><span className="eyebrow mr-1.5 text-gold">Переход</span> {level.criteria}</p>
       {level.id !== current && (
         <div className="mt-5">
           <SecondaryButton className="w-full" onClick={onChoose}>Перейти на этот уровень</SecondaryButton>
@@ -323,7 +323,7 @@ function Honest({ block }: { block: BlockId }) {
             <div className="font-display text-[22px] leading-tight">{r.goal}</div>
             <p className="mt-2 text-[14.5px] leading-snug">{r.real}</p>
             <div className="mt-3 flex flex-wrap gap-2"><Chip tone="gold">{r.when}</Chip></div>
-            <p className="mt-3 text-[13px] leading-snug text-muted"><span className="overline mr-1.5 text-warn">Не будет</span>{r.not}</p>
+            <p className="mt-3 text-[13px] leading-snug text-muted"><span className="eyebrow mr-1.5 text-warn">Не будет</span>{r.not}</p>
           </div>
         ))}
       </div>
@@ -341,7 +341,7 @@ function Honest({ block }: { block: BlockId }) {
         </>
       )}
       <div className="mx-4 mt-4 rounded-[22px] bg-warn/8 p-5">
-        <div className="overline mb-2 text-warn">Когда остановиться</div>
+        <div className="eyebrow mb-2 text-warn">Когда остановиться</div>
         <ul className="space-y-1.5 text-[14px] leading-snug">{STOP_SIGNS[block].map(s => <li key={s}>— {s}</li>)}</ul>
       </div>
     </>

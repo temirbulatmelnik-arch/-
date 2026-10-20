@@ -99,8 +99,8 @@ button:disabled { cursor: default; }
 .pt-safe { padding-top: max(env(safe-area-inset-top), 0px); }
 .pb-safe { padding-bottom: max(env(safe-area-inset-bottom), 0px); }
 
-.font-display { font-family: var(--font-serif); font-weight: 500; letter-spacing: -0.01em; }
-.overline { font-size: 11px; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase; }
+.font-display { font-family: var(--font-serif); font-weight: 500; letter-spacing: -0.01em; font-variant-numeric: lining-nums; }
+.eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase; }
 
 .card {
   background: var(--surface);

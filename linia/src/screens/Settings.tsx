@@ -17,7 +17,7 @@ const embedded = window.self !== window.top;
 const EMBEDDED_NOTE = 'В превью скачивание файлов недоступно. Откройте приложение по своему адресу или установите на телефон.';
 
 const Section = ({ title, children }: { title: string; children: ReactNode }) => (
-  <section><h3 className="overline mb-2 text-gold">{title}</h3>{children}</section>
+  <section><h3 className="eyebrow mb-2 text-gold">{title}</h3>{children}</section>
 );
 
 export function Settings() {

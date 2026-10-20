@@ -28,8 +28,9 @@ export function doseText(item: Item, stage = 0): string {
   if (item.failure) return `${sets} × до потери техники, до ${hold} с`;
   if (item.tempo) {
     const top = hold ?? item.tempo[1];
-    return `${pre}${reps}${side}${top >= 2 ? ` · пауза ${top} с` : ''}`;
+    const count = sets > 1 ? `${reps}` : `${reps} ${plural(reps, 'повтор', 'повтора', 'повторов')}`;
+    return `${pre}${count}${side}${top >= 2 ? ` · пауза ${top} с` : ''}`;
   }
   if (hold) return `${pre}${reps} × ${hold} с${side}${item.alternate ? ', стороны по очереди' : ''}`;
-  return `${pre}${reps}${side}`;
+  return `${pre}${reps} ${plural(reps, 'повтор', 'повтора', 'повторов')}${side}`;
 }

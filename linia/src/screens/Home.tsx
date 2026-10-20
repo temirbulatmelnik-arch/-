@@ -33,7 +33,7 @@ export function BlockCard({ block, onOpen }: { block: BlockId; onOpen: () => voi
       {/* мягкий свет сверху и виньетка снизу */}
       <span className="pointer-events-none absolute inset-0 bg-[radial-gradient(80%_60%_at_15%_0%,rgba(255,255,255,0.35),transparent_70%)] dark:bg-[radial-gradient(80%_60%_at_15%_0%,rgba(255,255,255,0.08),transparent_70%)]" />
       <div className="relative flex h-full flex-col p-6">
-        <div className="overline opacity-60">Блок {ROMAN[block]}</div>
+        <div className="eyebrow opacity-60">Блок {ROMAN[block]}</div>
         <h2 className="font-display mt-2 text-[44px] leading-[0.92]">
           {rest.length ? <>{first}-<br />{rest.join('-')}</> : info.title}
         </h2>
@@ -72,7 +72,8 @@ function RitualRow({ done, title, hint, onToggle, action }: { done: boolean; tit
 }
 
 function Rituals({ actions }: { actions: Actions }) {
-  const habits = useStore(s => s.habits[dayKey(new Date())] ?? {});
+  const today = useStore(s => s.habits[dayKey(new Date())]);
+  const habits = today ?? {};
   const toggle = useStore(s => s.toggleHabit);
   const posture = useBlock('posture');
   const face = useBlock('face');
@@ -125,7 +126,7 @@ export function Home({ actions }: { actions: Actions }) {
     <div>
       <header className="flex items-start justify-between gap-3 px-6 pt-7">
         <div>
-          <div className="overline text-gold">{date}</div>
+          <div className="eyebrow text-gold">{date}</div>
           <h1 className="font-display mt-2.5 text-[46px] leading-[0.95]">{greeting(now)}</h1>
           <p className="mt-2.5 text-[15px] text-muted">{s > 0 ? `${s} ${plural(s, 'день', 'дня', 'дней')} подряд — линия держится` : 'Два ритуала: лицо и осанка'}</p>
         </div>
@@ -147,7 +148,7 @@ export function Home({ actions }: { actions: Actions }) {
       </div>
 
       <figure className="mx-6 mt-10 border-l border-gold/60 pl-5">
-        <div className="overline mb-2 text-gold">Совет дня</div>
+        <div className="eyebrow mb-2 text-gold">Совет дня</div>
         <blockquote className="font-display text-[22px] leading-snug italic">{tip}</blockquote>
       </figure>
 
