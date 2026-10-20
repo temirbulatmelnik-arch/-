@@ -1,0 +1,142 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Manrope Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Cormorant Garamond Variable", "Cormorant Garamond", Georgia, serif;
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-line: var(--line);
+  --color-gold: var(--gold);
+  --color-gold-2: var(--gold-2);
+  --color-rose: var(--rose);
+  --color-rose-soft: var(--rose-soft);
+  --color-pearl: var(--pearl);
+  --color-pearl-soft: var(--pearl-soft);
+  --color-work: var(--work);
+  --color-stretch: var(--stretch);
+  --color-warn: var(--warn);
+  --color-on-accent: var(--on-accent);
+}
+
+/* Фарфор и шампанское: тёплый светлый фон, золото, пудровая роза для лица, жемчужно-синий для осанки */
+:root {
+  --bg: #f7f2ed;
+  --surface: #fffcf9;
+  --surface-2: #f0e8e1;
+  --ink: #2b211c;
+  --muted: #7b6b61;
+  --faint: #ab9c92;
+  --line: #e6dbd2;
+  --gold: #a8854f;
+  --gold-2: #dcc497;
+  --rose: #b4766a;
+  --rose-soft: #f1ddd6;
+  --pearl: #627c92;
+  --pearl-soft: #dde6ec;
+  --work: #e07a54;
+  --stretch: #5d9fd3;
+  --warn: #c03d68;
+  --on-accent: #fffaf4;
+  --gold-grad: linear-gradient(135deg, #cfae74 0%, #b08a52 48%, #8f6c3b 100%);
+  --face-grad: radial-gradient(120% 90% at 85% 0%, #fbe7df 0%, #eec6b9 38%, #d29a8b 78%, #b97d70 100%);
+  --posture-grad: radial-gradient(120% 90% at 85% 0%, #eef3f6 0%, #cbd8e2 40%, #9fb3c5 80%, #8299ae 100%);
+  --card-ink: #2b211c;
+  --shadow: 0 1px 2px rgba(60, 40, 25, 0.05), 0 12px 32px -12px rgba(90, 60, 35, 0.18);
+  color-scheme: light;
+}
+
+.dark {
+  --bg: #110d0b;
+  --surface: #1a1512;
+  --surface-2: #241d19;
+  --ink: #f4ece4;
+  --muted: #b5a598;
+  --faint: #7c6d64;
+  --line: #312722;
+  --gold: #d7b77e;
+  --gold-2: #7d6339;
+  --rose: #e3a596;
+  --rose-soft: #3a2521;
+  --pearl: #a9bfd0;
+  --pearl-soft: #1d2830;
+  --work: #ff9a6e;
+  --stretch: #7cc0f2;
+  --warn: #ff6b97;
+  --on-accent: #1a120d;
+  --gold-grad: linear-gradient(135deg, #f0d8a6 0%, #d3b177 45%, #a7844b 100%);
+  --face-grad: radial-gradient(120% 90% at 85% 0%, #6a3a33 0%, #4a2723 40%, #2c1714 80%, #1d0f0d 100%);
+  --posture-grad: radial-gradient(120% 90% at 85% 0%, #3a4b59 0%, #26333e 42%, #172028 80%, #10161b 100%);
+  --card-ink: #f6ede6;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 16px 40px -16px rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  min-height: 100dvh;
+  font-feature-settings: "ss01", "cv11";
+}
+
+button { cursor: pointer; }
+button:disabled { cursor: default; }
+
+:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; border-radius: 10px; }
+
+.pt-safe { padding-top: max(env(safe-area-inset-top), 0px); }
+.pb-safe { padding-bottom: max(env(safe-area-inset-bottom), 0px); }
+
+.font-display { font-family: var(--font-serif); font-weight: 500; letter-spacing: -0.01em; }
+.overline { font-size: 11px; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 26px;
+  box-shadow: var(--shadow);
+}
+
+.hairline { border: 1px solid color-mix(in srgb, var(--gold) 35%, transparent); }
+
+.bg-gold-grad { background: var(--gold-grad); }
+.bg-face { background: var(--face-grad); }
+.bg-posture { background: var(--posture-grad); }
+.text-card { color: var(--card-ink); }
+
+/* лёгкий блик по золоту */
+.sheen { position: relative; overflow: hidden; }
+.sheen::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.28) 48%, transparent 66%);
+  transform: translateX(-120%);
+  animation: sheen 5.5s ease-in-out infinite;
+}
+@keyframes sheen { 0%, 62% { transform: translateX(-120%); } 82%, 100% { transform: translateX(120%); } }
+
+/* рисование линии в иллюстрациях */
+.draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 2.4s cubic-bezier(.6,.1,.2,1) forwards; }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+
+input[type="time"]::-webkit-calendar-picker-indicator { filter: var(--picker-filter, none); }
+.dark input[type="time"]::-webkit-calendar-picker-indicator { --picker-filter: invert(1); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  .draw { stroke-dashoffset: 0; }
+}
