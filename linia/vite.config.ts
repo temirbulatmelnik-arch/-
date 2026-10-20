@@ -21,6 +21,30 @@ function webClipProfile(): Plugin {
   };
 }
 
+// «Линия» лежит в подпапке сайта «Тонуса». Офлайн-кеш «Тонуса», выложенный до исключения /linia/, отдаёт на любой
+// адрес сайта свою страницу, а она грузит скрипт по относительному пути — внутри /linia/ это linia/assets/main-….js.
+// Под именами скриптов всех тех версий «Тонуса» лежит этот файл: снимает старый кеш «Тонуса» и открывает «Линию» заново.
+const OLD_TONUS_SCRIPTS = ['Bn3U8i1d', 'D9wJjs2o', 'CNKNB8rP', 'D1bQ82hG', 'WQUPf_4J', 'BizCc0Vw', 'DxNG8Fr-', 'iPeDBITD', 'N36OuWRg', 'Bp15hiCJ', 'BF5Lr51Z', 'ByGrbDwf', 'Ci2ruGCU', 'BfktcWq2'];
+const RESCUE = `(async () => {
+  try { if (sessionStorage.getItem('linia-rescue')) return; sessionStorage.setItem('linia-rescue', '1'); } catch {}
+  document.body.innerHTML = '<p style="font:17px system-ui;padding:32px;color:#7b6b61">Открываем «Линию»…</p>';
+  try {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(regs.filter(r => !new URL(r.scope).pathname.includes('/linia/')).map(r => r.unregister()));
+  } catch {}
+  location.reload();
+})();
+`;
+function tonusRescue(): Plugin {
+  return {
+    name: 'linia-tonus-rescue',
+    apply: 'build',
+    generateBundle() {
+      for (const h of OLD_TONUS_SCRIPTS) this.emitFile({ type: 'asset', fileName: `assets/main-${h}.js`, source: RESCUE });
+    },
+  };
+}
+
 // base: './' — приложение работает из любой папки (GitHub Pages, флешка, артефакт)
 export default defineConfig({
   base: './',
@@ -34,6 +58,7 @@ export default defineConfig({
   },
   plugins: [
     webClipProfile(),
+    tonusRescue(),
     react(),
     tailwindcss(),
     VitePWA({

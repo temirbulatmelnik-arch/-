@@ -33,7 +33,7 @@ const steps = (items: string[]) => `<ol class="space-y-2.5">${items.map((t, i) =
 
 const note = (html: string) => `<p class="rounded-2xl bg-surface-2 p-3 text-[14px] leading-snug text-muted">${html}</p>`;
 
-const HOME_SCREEN = card('На экран «Домой»', 'рекомендуем', `
+const HOME_SCREEN = card('На экран «Домой»', '', `
   <p class="text-muted">Три касания в Safari. Приложение откроется без адресной строки и будет работать без интернета.</p>
   ${steps([
     `Нажмите «Поделиться» ${SHARE_ICON} внизу экрана. В iOS 26 кнопка спрятана в меню «•••» рядом с адресом.`,
@@ -41,7 +41,7 @@ const HOME_SCREEN = card('На экран «Домой»', 'рекомендуе
     'Если есть переключатель «Открывать как веб-приложение» — оставьте включённым. Нажмите «Добавить».',
   ])}`);
 
-const PROFILE = card('Профилем конфигурации', 'один файл', `
+const PROFILE = card('Профилем конфигурации', 'как «Тонус»', `
   <p class="text-muted">Значок с иконкой и названием появится сам. Удобно, чтобы отправить приложение другому человеку.</p>
   <button type="button" data-profile class="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-gold-grad text-[16px] font-semibold text-on-accent">Скачать профиль</button>
   ${steps([
@@ -77,7 +77,7 @@ const IMPORTANT = card('Важно знать', '', `
 
 function sections(p: Platform): { main: string[]; other: string[] } {
   switch (p) {
-    case 'ios-safari': return { main: [HOME_SCREEN, PROFILE], other: [ANDROID] };
+    case 'ios-safari': return { main: [PROFILE, HOME_SCREEN], other: [ANDROID] };
     case 'ios-other': return { main: [OTHER_IOS_BROWSER], other: [HOME_SCREEN, PROFILE, ANDROID] };
     case 'android': return { main: [ANDROID], other: [HOME_SCREEN, PROFILE] };
     case 'desktop': return { main: [DESKTOP()], other: [HOME_SCREEN, PROFILE, ANDROID] };
@@ -143,5 +143,6 @@ window.addEventListener('beforeinstallprompt', e => {
   });
 });
 
+try { sessionStorage.removeItem('linia-rescue'); } catch { /* нет доступа к хранилищу */ }
 applyTheme();
 render();
