@@ -1,9 +1,10 @@
 import { AnimatePresence, motion } from 'motion/react';
 import { BookOpen, ChartSpline, Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { ExerciseDemo } from './components/Exercise';
 import { Sheet } from './components/ui';
 import { unlockAudio } from './engine/cues';
-import type { BlockId } from './engine/exercises';
+import { EXERCISES, type BlockId, type ExerciseId } from './engine/exercises';
 import type { SessionKind } from './engine/program';
 import type { CheckKind } from './engine/stats';
 import { Block } from './screens/Block';
@@ -67,6 +68,9 @@ export default function App() {
 
   useEffect(() => window.scrollTo({ top: 0 }), [tab, block]);
 
+  // служебный просмотр одного упражнения в 3D: #3d=nod_supine или #3d=nod_supine:skin
+  const debug = location.hash.match(/^#3d=(\w+)(:skin)?/);
+  if (debug && debug[1] in EXERCISES) return <div className="mx-auto max-w-md p-4"><ExerciseDemo ex={debug[1] as ExerciseId} initialXray={!debug[2]} autoRotate={false} /></div>;
   if (!onboarded) return <Onboarding />;
 
   const actions: Actions = {
