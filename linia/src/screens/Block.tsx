@@ -18,7 +18,7 @@ import { useBlock } from './useBlock';
 
 const KIND_ICON: Record<SessionKind, string> = { core: '◆', break: '1′', stretch: '∿', walk: '↗', screen: '▭', jaw: '◠' };
 
-function Hero({ block, first, onClose }: { block: BlockId; first: ExerciseId; onClose: () => void }) {
+function Hero({ block, first, live, onClose }: { block: BlockId; first: ExerciseId; live: boolean; onClose: () => void }) {
   const { motion: mo } = useDemoMotion(first);
   const info = BLOCKS[block];
   const e = EXERCISES[first];
@@ -29,8 +29,9 @@ function Hero({ block, first, onClose }: { block: BlockId; first: ExerciseId; on
         <span className="eyebrow opacity-60">{block === 'face' ? 'Блок I' : 'Блок II'}</span>
         <span className="size-11" />
       </div>
-      <div className="relative -mt-6 h-[340px]">
-        <Figure motion={mo} pose={e.pose} view={viewFor(first)} xray muscles={e.muscles} autoRotate className="h-full w-full" />
+      {/* 3D растворяется книзу; пока идёт занятие, сцена шапки не рисуется */}
+      <div className="relative -mt-6 h-[340px] [mask-image:linear-gradient(to_bottom,black_70%,transparent)]">
+        {live && <Figure motion={mo} pose={e.pose} view={viewFor(first)} xray muscles={e.muscles} autoRotate className="h-full w-full" />}
       </div>
       <div className="relative px-6">
         <h1 className="font-display text-[48px] leading-[0.95]">{info.title}</h1>
@@ -363,13 +364,13 @@ export function ExerciseSheet({ ex, onClose }: { ex: ExerciseId | null; onClose:
   );
 }
 
-export function Block({ block, actions, onClose }: { block: BlockId; actions: Actions; onClose: () => void }) {
+export function Block({ block, actions, covered = false, onClose }: { block: BlockId; actions: Actions; covered?: boolean; onClose: () => void }) {
   const b = useBlock(block);
   const [ex, setEx] = useState<ExerciseId | null>(null);
   const first = b.items[0]?.ex ?? (block === 'face' ? 'ctar_hold' : 'nod_supine');
   return (
     <div className="mx-auto min-h-dvh w-full max-w-md pb-16">
-      <Hero block={block} first={first} onClose={onClose} />
+      <Hero block={block} first={first} live={!covered} onClose={onClose} />
       <div className="mt-5"><Today block={block} actions={actions} onExercise={setEx} /></div>
       <Extras block={block} actions={actions} />
       <Path block={block} actions={actions} />

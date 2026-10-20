@@ -58,7 +58,8 @@ export default defineConfig({
           { src: 'maskable-icon-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
-      workbox: { globPatterns: ['**/*.{js,css,html,svg,png,jpg,woff2,bin,json}'] },
+      // «Линия» лежит в подпапке того же сайта (/linia/) — офлайн-кеш «Тонуса» её не перехватывает
+      workbox: { globPatterns: ['**/*.{js,css,html,svg,png,jpg,woff2,bin,json}'], navigateFallbackDenylist: [/\/linia\//] },
     }),
   ],
   test: { environment: 'node' },

@@ -548,9 +548,9 @@ function Athlete({ inst, data, motion, pose, view, xray, muscles, theme, layout 
     for (const [name, m] of Object.entries(mats)) {
       const kind = inst.anatomy[name].userData.kind as Kind;
       const role = roles[name];
-      m.opacity = kind === 'teeth' ? 0.62 : kind !== 'muscle' ? (view === 'face' ? 0.5 : 0.72) : role === 'work' ? 0.96 : role === 'stretch' ? 0.82 : role === 'also' ? 0.78 : role === 'quiet' ? 0.5 : anyRole ? 0.14 : 0.6;
+      m.opacity = kind === 'teeth' ? 0.62 : kind !== 'muscle' ? (view === 'face' ? 0.5 : 0.72) : role === 'work' ? 0.96 : role === 'stretch' ? 0.82 : role === 'also' ? 0.78 : role === 'quiet' ? 0.3 : anyRole ? 0.14 : 0.6;
       m.depthWrite = m.opacity > 0.9;
-      m.color.copy(m.userData.base).lerp(new THREE.Color(role ? COLORS[role] : m.userData.base), role === 'stretch' ? 0.8 : role ? 0.55 : 0);
+      m.color.copy(m.userData.base).lerp(new THREE.Color(role ? COLORS[role] : m.userData.base), role === 'stretch' ? 0.8 : role === 'quiet' ? 0.35 : role ? 0.55 : 0);
       m.needsUpdate = true;
     }
   }, [mats, roles, anyRole, view, inst]);

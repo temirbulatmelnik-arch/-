@@ -110,7 +110,7 @@ export default function App() {
       <AnimatePresence>
         {block && (
           <motion.div key="block" initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 24 }} transition={{ duration: 0.28 }} className="fixed inset-0 z-30 overflow-y-auto bg-bg">
-            <Block block={block} actions={actions} onClose={() => setBlock(null)} />
+            <Block block={block} actions={actions} covered={!!playing || !!checking || !!teching} onClose={() => setBlock(null)} />
           </motion.div>
         )}
       </AnimatePresence>
