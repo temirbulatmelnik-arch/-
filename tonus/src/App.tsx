@@ -35,7 +35,7 @@ function useTheme() {
       const system = host === 'dark' || host === 'light' ? host === 'dark' : mq.matches;
       const dark = theme === 'dark' || (theme === 'system' && system);
       root.classList.toggle('dark', dark);
-      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#0b1220' : '#f3f5fa');
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#0c0b0a' : '#f2eee7');
     };
     apply();
     mq.addEventListener('change', apply);
@@ -79,15 +79,15 @@ export default function App() {
         </motion.main>
       </AnimatePresence>
 
-      <nav className="pb-safe fixed inset-x-0 bottom-0 z-30 border-t border-line bg-bg/85 backdrop-blur-xl">
+      <nav className="pb-safe fixed inset-x-0 bottom-0 z-30 border-t border-line bg-bg/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-md">
           {TABS.map(t => {
             const active = t.id === tab;
             return (
               <button key={t.id} type="button" onClick={() => setTab(t.id)} aria-current={active ? 'page' : undefined}
-                className={`relative flex flex-1 flex-col items-center gap-1 pt-2.5 pb-2 text-[11px] font-medium transition-colors ${active ? 'text-ink' : 'text-faint'}`}>
-                {active && <motion.span layoutId="tab-dot" className="absolute top-0 h-0.5 w-8 rounded-full bg-calm" />}
-                <t.icon size={22} strokeWidth={active ? 2.4 : 2} />
+                className={`relative flex flex-1 flex-col items-center gap-1.5 pt-3 pb-2 text-[10px] font-medium tracking-[0.16em] uppercase transition-colors ${active ? 'text-ink' : 'text-faint'}`}>
+                {active && <motion.span layoutId="tab-dot" className="bg-gold-grad absolute top-0 h-[2px] w-10 rounded-full" />}
+                <t.icon size={21} strokeWidth={active ? 1.9 : 1.5} className={active ? 'text-gold' : ''} />
                 {t.label}
               </button>
             );

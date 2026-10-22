@@ -6,6 +6,7 @@ import type { Phase } from '../engine/timeline';
 
 const SIZE = 300;
 const C = SIZE / 2;
+const TICKS = Array.from({ length: 60 }, (_, k) => k);
 
 export function phaseColor(phase: Phase, level: number): string {
   if (phase === 'inhale' || phase === 'exhale' || level < 0) return 'var(--breath)';
@@ -34,10 +35,16 @@ export function SphincterRing({ level, phase, progress, children }: {
             <stop offset="1" style={{ stopColor: color }} stopOpacity="0" />
           </radialGradient>
         </defs>
+        {/* безель с минутной шкалой, как у часов */}
+        <circle cx={C} cy={C} r={arcR + 9} fill="none" stroke="var(--gold)" strokeOpacity="0.35" strokeWidth="0.8" />
+        {TICKS.map(k => (
+          <line key={k} x1={C} y1={C - arcR - 9} x2={C} y2={C - arcR - (k % 5 ? 4 : 1)} stroke="var(--gold)"
+            strokeWidth={k % 5 ? 0.7 : 1.3} opacity={k / 60 < progress ? 0.95 : 0.35} transform={`rotate(${k * 6} ${C} ${C})`} />
+        ))}
         {/* прогресс текущего шага */}
-        <circle cx={C} cy={C} r={arcR} fill="none" stroke="var(--line)" strokeWidth="4" />
+        <circle cx={C} cy={C} r={arcR} fill="none" stroke="var(--line)" strokeWidth="2" />
         <circle
-          cx={C} cy={C} r={arcR} fill="none" style={{ stroke: color }} strokeWidth="4" strokeLinecap="round"
+          cx={C} cy={C} r={arcR} fill="none" style={{ stroke: color }} strokeWidth="3" strokeLinecap="round"
           strokeDasharray={arcLen} strokeDashoffset={arcLen * (1 - progress)}
           transform={`rotate(-90 ${C} ${C})`}
         />
@@ -47,6 +54,7 @@ export function SphincterRing({ level, phase, progress, children }: {
         <circle cx={C} cy={C} r={96} fill="none" stroke="var(--line)" strokeWidth="2" strokeDasharray="3 7" opacity={squeeze > 0.05 ? 1 : 0} style={{ transition: 'opacity .4s' }} />
         {/* мышечное кольцо */}
         <circle cx={C} cy={C + lift} r={r} fill="none" style={{ stroke: color }} strokeWidth={width} opacity="0.95" />
+        <circle cx={C} cy={C + lift} r={r + width / 2 + 3} fill="none" stroke="var(--gold)" strokeWidth="1" opacity="0.55" />
         <circle cx={C} cy={C + lift} r={r - width / 2 - 6} fill="none" style={{ stroke: color }} strokeWidth="1.5" opacity="0.35" />
         {/* стрелки «вверх» при сжатии */}
         <g opacity={squeeze} transform={`translate(${C} ${C + lift - r - width / 2 - 18})`}>

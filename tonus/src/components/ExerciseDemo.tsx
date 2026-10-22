@@ -20,25 +20,25 @@ export function ExerciseDemo({ type, position, front = false, initialZoom = fron
   const [zoom, setZoom] = useState<FigureZoom>(initialZoom);
 
   return (
-    <div className="relative overflow-hidden rounded-3xl bg-surface-2">
+    <div className="stage hairline relative overflow-hidden rounded-[30px]">
       <Figure key={front ? 'front' : 'back'} motion={motion} pose={poseFor(position)} zoom={zoom} focus={focusFor(type, front)} autoRotate={autoRotate} className="aspect-square w-full" />
       <button
         type="button"
         onClick={() => setZoom(zoom === 'body' ? 'pelvis' : 'body')}
-        className="absolute top-3 right-3 flex items-center gap-1.5 rounded-xl bg-bg/80 px-2.5 py-1.5 text-[13px] font-medium backdrop-blur"
+        className="hairline absolute top-3 right-3 flex items-center gap-1.5 rounded-full bg-bg/75 px-3 py-1.5 text-[10.5px] font-medium tracking-[0.16em] uppercase backdrop-blur"
       >
-        {zoom === 'body' ? <><ScanEye size={14} /> Насквозь</> : <><PersonStanding size={14} /> Тело</>}
+        {zoom === 'body' ? <><ScanEye size={13} className="text-gold" /> Насквозь</> : <><PersonStanding size={13} className="text-gold" /> Тело</>}
       </button>
-      <span className="pointer-events-none absolute top-3 left-3 rounded-xl bg-bg/80 px-2.5 py-1.5 text-[12px] text-muted backdrop-blur">
+      <span className="pointer-events-none absolute top-3.5 left-4 text-[10px] tracking-[0.18em] text-muted uppercase">
         Поверните пальцем
       </span>
       {step && (
-        <div className="pointer-events-none absolute inset-x-3 bottom-3 rounded-2xl bg-bg/85 px-3 py-2 backdrop-blur">
-          <div className="flex items-center gap-2 text-[14px] font-semibold">
+        <div className="hairline pointer-events-none absolute inset-x-3 bottom-3 rounded-[20px] bg-bg/80 px-4 py-2.5 backdrop-blur">
+          <div className="font-display flex items-center gap-2 text-[17px]">
             <span className={`size-2.5 shrink-0 rounded-full ${stepTone(step.level, step.phase)}`} />
             {step.label}
           </div>
-          <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-surface-2">
+          <div className="mt-2 h-[2px] overflow-hidden rounded-full bg-line">
             <div className={`h-full rounded-full ${stepTone(step.level, step.phase)}`} style={{ width: `${progress * 100}%` }} />
           </div>
         </div>
@@ -52,31 +52,31 @@ export function GuideText({ type, guide, position }: { type: BlockType; guide?: 
   return (
     <div className="space-y-4 text-[15px] leading-relaxed">
       <p className="text-muted">{g.goal}</p>
-      {position && <p className="rounded-2xl bg-surface-2 px-3 py-2 text-[14px]"><b>Положение:</b> {POSITION_LABEL[position].toLowerCase()}.</p>}
+      {position && <p className="hairline rounded-2xl bg-surface px-4 py-2.5 text-[14px]"><span className="eyebrow mr-2 text-gold">Положение</span>{POSITION_LABEL[position].toLowerCase()}</p>}
       <div>
-        <h4 className="mb-2 text-[15px] font-semibold">Как выполнять</h4>
+        <h4 className="font-display mb-3 text-[22px]">Как выполнять</h4>
         <ol className="space-y-2">
           {g.steps.map((s, i) => (
             <li key={i} className="flex gap-3">
-              <span className="grid size-6 shrink-0 place-items-center rounded-full bg-surface-2 text-[13px] font-semibold">{i + 1}</span>
+              <span className="font-display grid size-7 shrink-0 place-items-center rounded-full border border-gold/45 text-[14px] text-gold">{i + 1}</span>
               <span>{s}</span>
             </li>
           ))}
         </ol>
       </div>
       <div className="flex gap-3">
-        <Wind size={18} className="mt-1 shrink-0 text-breath" />
+        <Wind size={18} strokeWidth={1.5} className="mt-1 shrink-0 text-breath" />
         <p><b>Дыхание.</b> {g.breath}</p>
       </div>
       <div className="flex gap-3">
-        <Hand size={18} className="mt-1 shrink-0 text-calm" />
+        <Hand size={18} strokeWidth={1.5} className="mt-1 shrink-0 text-calm" />
         <p><b>Что чувствовать.</b> {g.feel}</p>
       </div>
       <div>
-        <h4 className="mb-2 text-[15px] font-semibold">Ошибки</h4>
+        <h4 className="font-display mb-3 text-[22px]">Ошибки</h4>
         <ul className="space-y-1.5">
           {g.mistakes.map((s, i) => (
-            <li key={i} className="flex gap-2.5"><X size={18} className="mt-1 shrink-0 text-squeeze" strokeWidth={3} /><span>{s}</span></li>
+            <li key={i} className="flex gap-2.5"><X size={17} className="mt-1 shrink-0 text-squeeze" strokeWidth={2} /><span>{s}</span></li>
           ))}
         </ul>
       </div>

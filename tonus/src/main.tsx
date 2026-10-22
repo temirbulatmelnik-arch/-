@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import '@fontsource-variable/golos-text';
+import '@fontsource-variable/jost';
+import '@fontsource-variable/playfair-display';
 import './index.css';
 import App from './App';
 

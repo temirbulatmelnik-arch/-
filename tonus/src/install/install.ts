@@ -1,6 +1,7 @@
 // Страница установки «Тонуса» без магазина приложений: подсказывает способ под устройство,
 // собирает профиль Web Clip для iPhone прямо в браузере и показывает QR-код для компьютера.
-import '@fontsource-variable/golos-text';
+import '@fontsource-variable/jost';
+import '@fontsource-variable/playfair-display';
 import '../index.css';
 import { renderSVG } from 'uqr';
 import { detectPlatform, isStandalone, type Platform } from './platform';
@@ -16,21 +17,21 @@ function applyTheme() {
   document.documentElement.classList.toggle('dark', dark);
 }
 
-const SHARE_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="inline -mt-1 text-breath"><path d="M12 3v12"/><path d="m8 7 4-4 4 4"/><path d="M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1"/></svg>`;
+const SHARE_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="inline -mt-1 text-gold"><path d="M12 3v12"/><path d="m8 7 4-4 4 4"/><path d="M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1"/></svg>`;
 
 const card = (title: string, badge: string, body: string) => `
   <section class="card p-5">
     <div class="flex items-center justify-between gap-3">
-      <h2 class="text-[17px] font-semibold">${title}</h2>
-      ${badge ? `<span class="shrink-0 rounded-full bg-calm/15 px-2.5 py-1 text-[12px] font-medium whitespace-nowrap">${badge}</span>` : ''}
+      <h2 class="font-display text-[23px] leading-tight">${title}</h2>
+      ${badge ? `<span class="shrink-0 rounded-full border border-gold/50 px-2.5 py-1 text-[10px] font-medium tracking-[0.14em] text-gold uppercase whitespace-nowrap">${badge}</span>` : ''}
     </div>
     <div class="mt-3 space-y-3 text-[15px] leading-relaxed">${body}</div>
   </section>`;
 
 const steps = (items: string[]) => `<ol class="space-y-2.5">${items.map((t, i) => `
-  <li class="flex gap-3"><span class="grid size-6 shrink-0 place-items-center rounded-full bg-surface-2 text-[13px] font-semibold">${i + 1}</span><span>${t}</span></li>`).join('')}</ol>`;
+  <li class="flex gap-3"><span class="font-display grid size-7 shrink-0 place-items-center rounded-full border border-gold/45 text-[14px] text-gold">${i + 1}</span><span>${t}</span></li>`).join('')}</ol>`;
 
-const note = (html: string) => `<p class="rounded-2xl bg-surface-2 p-3 text-[14px] leading-snug text-muted">${html}</p>`;
+const note = (html: string) => `<p class="hairline rounded-2xl bg-surface p-4 text-[14px] leading-snug text-muted">${html}</p>`;
 
 const HOME_SCREEN = card('На экран «Домой»', 'рекомендуем', `
   <p class="text-muted">Три касания в Safari. Приложение откроется без адресной строки и будет работать без интернета.</p>
@@ -42,7 +43,7 @@ const HOME_SCREEN = card('На экран «Домой»', 'рекомендуе
 
 const PROFILE = card('Профилем конфигурации', 'один файл', `
   <p class="text-muted">Значок с иконкой и названием появится сам. Удобно, чтобы отправить приложение другому человеку.</p>
-  <button type="button" data-profile class="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-br from-calm to-breath text-[16px] font-semibold text-on-accent">Скачать профиль</button>
+  <button type="button" data-profile class="bg-gold-grad sheen text-on-accent flex h-13 w-full items-center justify-center gap-2 rounded-full py-3.5 text-[13px] font-medium tracking-[0.16em] uppercase shadow-lg shadow-gold/25">Скачать профиль</button>
   ${steps([
     'Safari спросит, разрешить ли загрузку профиля, — нажмите «Разрешить».',
     'Откройте «Настройки»: вверху появится «Профиль загружен». Нажмите «Установить» и введите код-пароль телефона.',
@@ -53,18 +54,18 @@ const PROFILE = card('Профилем конфигурации', 'один фа
 
 const OTHER_IOS_BROWSER = card('Откройте страницу в Safari', '', `
   <p>Профиль конфигурации iPhone принимает только из Safari. Скопируйте адрес и откройте его в Safari.</p>
-  <button type="button" data-copy class="flex h-12 w-full items-center justify-center rounded-2xl bg-surface-2 text-[15px] font-medium">Скопировать адрес</button>
+  <button type="button" data-copy class="hairline flex h-12 w-full items-center justify-center rounded-full bg-surface text-[13px] font-medium tracking-[0.12em] uppercase">Скопировать адрес</button>
   <p class="text-muted">Добавить на экран «Домой» можно и из этого браузера: меню «Поделиться» → «На экран „Домой“».</p>`);
 
 const ANDROID = card('Android', '', `
-  <button type="button" data-android hidden class="flex h-12 w-full items-center justify-center rounded-2xl bg-gradient-to-br from-calm to-breath text-[16px] font-semibold text-on-accent">Установить приложение</button>
+  <button type="button" data-android hidden class="bg-gold-grad sheen text-on-accent flex h-13 w-full items-center justify-center rounded-full py-3.5 text-[13px] font-medium tracking-[0.16em] uppercase shadow-lg shadow-gold/25">Установить приложение</button>
   ${steps(['Откройте страницу в Chrome.', 'Меню ⋮ → «Установить приложение» или «Добавить на главный экран».', 'Подтвердите установку — значок появится среди приложений.'])}`);
 
 const DESKTOP = () => card('Откройте на телефоне', '', `
-  <div class="mx-auto w-48 rounded-2xl bg-white p-3">${renderSVG(location.href, { blackColor: '#0f172a', whiteColor: '#ffffff', border: 1 })}</div>
+  <div class="mx-auto w-48 rounded-2xl bg-white p-3">${renderSVG(location.href, { blackColor: '#16130f', whiteColor: '#ffffff', border: 1 })}</div>
   <p class="text-center text-muted">Наведите камеру iPhone на код — откроется эта страница в Safari.</p>
   <p class="break-all text-center text-[13px] text-faint">${location.href}</p>
-  <button type="button" data-profile class="flex h-12 w-full items-center justify-center rounded-2xl bg-surface-2 text-[15px] font-medium">Скачать профиль для iPhone</button>
+  <button type="button" data-profile class="hairline flex h-12 w-full items-center justify-center rounded-full bg-surface text-[13px] font-medium tracking-[0.12em] uppercase">Скачать профиль для iPhone</button>
   <p class="text-[14px] text-muted">С Mac файл профиля можно передать на iPhone через AirDrop — установка начнётся сама.</p>`);
 
 const IMPORTANT = card('Важно знать', '', `
@@ -109,20 +110,21 @@ function render() {
   const root = document.getElementById('root')!;
   root.innerHTML = `
     <header class="flex items-center gap-4">
-      <img src="./pwa-192x192.png" alt="" width="64" height="64" class="size-16 rounded-[18px] shadow-lg shadow-calm/20" />
+      <img src="./pwa-192x192.png" alt="" width="64" height="64" class="size-16 rounded-[18px] shadow-xl shadow-black/25 ring-1 ring-gold/40" />
       <div>
-        <h1 class="text-[26px] leading-tight font-semibold tracking-tight">Установить «Тонус»</h1>
-        <p class="text-[15px] text-muted">Без App Store, прямо с сайта</p>
+        <div class="eyebrow text-gold">Без App Store</div>
+        <h1 class="font-display mt-1 text-[32px] leading-[1.05]">Установить «Тонус»</h1>
+        <p class="mt-1 text-[14px] text-muted">Прямо с сайта, за минуту</p>
       </div>
     </header>
-    ${installed ? `<p class="mt-6 rounded-3xl bg-calm/15 p-4 text-[15px]">Приложение уже установлено и открыто с экрана «Домой».</p>` : ''}
+    ${installed ? `<p class="hairline mt-6 rounded-3xl bg-surface p-4 text-[15px]">Приложение уже установлено и открыто с экрана «Домой».</p>` : ''}
     <div class="mt-6 space-y-3">${main.join('')}</div>
     <div class="mt-3">${IMPORTANT}</div>
     <details class="mt-3 card p-5">
-      <summary class="cursor-pointer text-[15px] font-semibold">Другие устройства</summary>
+      <summary class="font-display cursor-pointer text-[21px]">Другие устройства</summary>
       <div class="mt-4 space-y-3">${other.join('')}</div>
     </details>
-    <a href="./" class="mt-6 flex h-12 items-center justify-center rounded-2xl bg-ink text-[15px] font-semibold text-bg">Открыть приложение</a>`;
+    <a href="./" class="mt-6 flex h-13 items-center justify-center rounded-full bg-ink py-3.5 text-[13px] font-medium tracking-[0.16em] text-bg uppercase">Открыть приложение</a>`;
 
   root.querySelectorAll('[data-profile]').forEach(b => b.addEventListener('click', () => { void downloadProfile(); }));
   root.querySelector('[data-copy]')?.addEventListener('click', async e => {

@@ -96,16 +96,16 @@ export function Player({ level, kind, onClose }: { level: Level; kind: SessionKi
       <div className="mx-auto flex w-full max-w-md flex-1 flex-col px-5">
         {/* верх */}
         <div className="flex items-center gap-2 pt-3">
-          <IconButton label="Завершить" onClick={() => { pause(); setConfirmExit(true); }} className="bg-surface-2"><X size={20} /></IconButton>
+          <IconButton label="Завершить" onClick={() => { pause(); setConfirmExit(true); }} className="hairline bg-surface"><X size={19} strokeWidth={1.6} /></IconButton>
           <div className="min-w-0 flex-1 text-center">
-            <div className="truncate text-[15px] font-semibold">{blockTitle(level.blocks[step.block])}</div>
-            <div className="text-[13px] text-muted tabular-nums">Блок {blockNo} из {tl.blocks.length} · {clock(tl.total - state.t)}</div>
+            <div className="font-display truncate text-[19px] leading-tight">{blockTitle(level.blocks[step.block])}</div>
+            <div className="eyebrow mt-1 text-[10px] text-gold tabular-nums">Блок {blockNo} из {tl.blocks.length} · {clock(tl.total - state.t)}</div>
           </div>
-          <IconButton label={audible ? 'Выключить звук и голос' : 'Включить звук и голос'} onClick={() => setSettings({ sound: !audible, voice: !audible })} className="bg-surface-2">
-            {audible ? <Volume2 size={20} /> : <VolumeX size={20} className="text-muted" />}
+          <IconButton label={audible ? 'Выключить звук и голос' : 'Включить звук и голос'} onClick={() => setSettings({ sound: !audible, voice: !audible })} className="hairline bg-surface">
+            {audible ? <Volume2 size={19} strokeWidth={1.6} /> : <VolumeX size={19} strokeWidth={1.6} className="text-muted" />}
           </IconButton>
-          <IconButton label={settings.vibration ? 'Выключить вибрацию' : 'Включить вибрацию'} onClick={() => setSettings({ vibration: !settings.vibration })} className="bg-surface-2">
-            {settings.vibration ? <Vibrate size={20} /> : <VibrateOff size={20} className="text-muted" />}
+          <IconButton label={settings.vibration ? 'Выключить вибрацию' : 'Включить вибрацию'} onClick={() => setSettings({ vibration: !settings.vibration })} className="hairline bg-surface">
+            {settings.vibration ? <Vibrate size={19} strokeWidth={1.6} /> : <VibrateOff size={19} strokeWidth={1.6} className="text-muted" />}
           </IconButton>
         </div>
 
@@ -115,7 +115,7 @@ export function Player({ level, kind, onClose }: { level: Level; kind: SessionKi
             const p = Math.min(1, Math.max(0, (state.t - b.start) / (b.end - b.start)));
             const work = BLOCK_INFO[b.type].color === 'squeeze';
             return (
-              <div key={i} className="h-1.5 overflow-hidden rounded-full bg-surface-2" style={{ flexGrow: b.end - b.start }}>
+              <div key={i} className="h-[3px] overflow-hidden rounded-full bg-line" style={{ flexGrow: b.end - b.start }}>
                 <div className={`h-full rounded-full ${work ? 'bg-squeeze' : b.type === 'breath' ? 'bg-breath' : 'bg-calm'}`} style={{ width: `${p * 100}%` }} />
               </div>
             );
@@ -124,11 +124,11 @@ export function Player({ level, kind, onClose }: { level: Level; kind: SessionKi
 
         {/* вид: фигура или кольцо */}
         <div className="mt-3 flex justify-center">
-          <div className="inline-flex rounded-xl bg-surface-2 p-0.5 text-[13px] font-medium">
+          <div className="hairline inline-flex rounded-full bg-surface p-[3px] text-[11px] font-medium tracking-[0.16em] uppercase">
             {([['figure', 'Фигура', PersonStanding], ['ring', 'Кольцо', CircleDot]] as const).map(([id, label, Icon]) => (
               <button key={id} type="button" onClick={() => setSettings({ playerView: id })} aria-pressed={settings.playerView === id}
-                className={`flex items-center gap-1.5 rounded-[10px] px-3 py-1.5 transition ${settings.playerView === id ? 'bg-bg text-ink shadow-sm' : 'text-muted'}`}>
-                <Icon size={15} /> {label}
+                className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 transition ${settings.playerView === id ? 'bg-gold-grad text-on-accent shadow-sm' : 'text-muted'}`}>
+                <Icon size={14} strokeWidth={1.7} /> {label}
               </button>
             ))}
           </div>
@@ -137,23 +137,23 @@ export function Player({ level, kind, onClose }: { level: Level; kind: SessionKi
         <div className="flex flex-1 flex-col items-center justify-center py-3">
           {settings.playerView === 'figure' ? (
             <div className="relative w-full max-w-[340px]">
-              <Figure motion={figureMotion} pose={poseFor(level.position)} zoom={zoom} focus={focusFor(step.blockType, step.front)} className="aspect-square w-full overflow-hidden rounded-3xl bg-surface-2"
+              <Figure motion={figureMotion} pose={poseFor(level.position)} zoom={zoom} focus={focusFor(step.blockType, step.front)} className="stage hairline aspect-square w-full overflow-hidden rounded-[30px]"
                 fallback={<SphincterRing level={lvl} phase={step.phase} progress={progress} />} />
               <Countdown value={quick ? step.rep ?? 0 : left} sub={quick ? `из ${step.reps}` : undefined} progress={progress} phase={step.phase} level={lvl} />
               <button type="button" onClick={() => setZoom(zoom === 'body' ? 'pelvis' : 'body')}
-                className="absolute top-3 right-3 flex items-center gap-1.5 rounded-xl bg-bg/80 px-2.5 py-1.5 text-[13px] font-medium backdrop-blur">
-                {zoom === 'body' ? <><ScanEye size={14} /> Насквозь</> : <><PersonStanding size={14} /> Тело</>}
+                className="hairline absolute top-3 right-3 flex items-center gap-1.5 rounded-full bg-bg/75 px-3 py-1.5 text-[10.5px] font-medium tracking-[0.16em] uppercase backdrop-blur">
+                {zoom === 'body' ? <><ScanEye size={13} className="text-gold" /> Насквозь</> : <><PersonStanding size={13} className="text-gold" /> Тело</>}
               </button>
             </div>
           ) : (
             <SphincterRing level={lvl} phase={step.phase} progress={progress}>
               {quick ? (
                 <div className="text-center">
-                  <div className="text-[64px] leading-none font-semibold">{step.rep}</div>
-                  <div className="mt-1 text-[15px] text-muted">из {step.reps}</div>
+                  <div className="font-display text-[72px] leading-none">{step.rep}</div>
+                  <div className="eyebrow mt-2 text-muted">из {step.reps}</div>
                 </div>
               ) : (
-                <div className="text-[76px] leading-none font-semibold" aria-live="off">{left}</div>
+                <div className="font-display text-[88px] leading-none" aria-live="off">{left}</div>
               )}
             </SphincterRing>
           )}
@@ -168,10 +168,10 @@ export function Player({ level, kind, onClose }: { level: Level; kind: SessionKi
               className="mt-4 min-h-[104px] text-center"
               aria-live="polite"
             >
-              <div className="text-[26px] leading-tight font-semibold">{step.label}</div>
+              <div className="font-display text-[32px] leading-tight">{step.label}</div>
               {step.hint && <p className="mx-auto mt-2 max-w-[34ch] text-[15px] leading-snug text-muted">{step.hint}</p>}
               {step.reps && step.phase !== 'prep' && !quick && (
-                <div className="mt-3 text-[14px] font-medium text-faint">Повтор {step.rep} из {step.reps}</div>
+                <div className="eyebrow mt-3 text-gold">Повтор {step.rep} из {step.reps}</div>
               )}
             </motion.div>
           </AnimatePresence>
@@ -185,11 +185,11 @@ export function Player({ level, kind, onClose }: { level: Level; kind: SessionKi
             whileTap={{ scale: 0.94 }}
             onClick={state.paused ? resume : pause}
             aria-label={state.paused ? 'Продолжить' : 'Пауза'}
-            className="grid size-20 place-items-center rounded-full bg-ink text-bg shadow-xl"
+            className="sheen bg-gold-grad grid size-20 place-items-center rounded-full text-on-accent shadow-xl shadow-gold/30 ring-1 ring-gold/40 ring-offset-4 ring-offset-bg"
           >
-            {state.paused ? <Play size={34} className="translate-x-0.5" fill="currentColor" /> : <Pause size={32} fill="currentColor" />}
+            {state.paused ? <Play size={30} className="translate-x-0.5" fill="currentColor" strokeWidth={1.2} /> : <Pause size={28} fill="currentColor" strokeWidth={1.2} />}
           </motion.button>
-          <IconButton label="Следующий блок" onClick={skip} className="size-14 bg-surface-2"><SkipForward size={24} /></IconButton>
+          <IconButton label="Следующий блок" onClick={skip} className="hairline size-14 bg-surface"><SkipForward size={22} strokeWidth={1.6} /></IconButton>
         </div>
       </div>
 
@@ -210,9 +210,9 @@ export function Player({ level, kind, onClose }: { level: Level; kind: SessionKi
 
       <AnimatePresence>
         {confirmExit && (
-          <motion.div className="fixed inset-0 z-50 grid place-items-center bg-black/50 px-6" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+          <motion.div className="fixed inset-0 z-50 grid place-items-center bg-black/55 px-6 backdrop-blur-[3px]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <motion.div className="card w-full max-w-sm p-6 text-center" initial={{ scale: 0.95 }} animate={{ scale: 1 }}>
-              <h2 className="text-xl font-semibold">Завершить тренировку?</h2>
+              <h2 className="font-display text-[28px] leading-tight">Завершить тренировку?</h2>
               <p className="mt-2 text-[15px] text-muted">Выполненная часть сохранится в журнале. В дневную цель идут тренировки, выполненные хотя бы на {COMPLETE_SHARE * 100} %.</p>
               <div className="mt-5 grid gap-2">
                 <PrimaryButton onClick={() => { setConfirmExit(false); if (intro === null) resume(); }}>Продолжить</PrimaryButton>
@@ -230,15 +230,15 @@ export function Player({ level, kind, onClose }: { level: Level; kind: SessionKi
 function Countdown({ value, sub, progress, phase, level }: { value: number; sub?: string; progress: number; phase: Phase; level: number }) {
   const r = 30, len = 2 * Math.PI * r;
   return (
-    <div className="pointer-events-none absolute top-3 left-3 grid size-[76px] place-items-center rounded-full bg-bg/85 backdrop-blur">
+    <div className="hairline pointer-events-none absolute top-3 left-3 grid size-[78px] place-items-center rounded-full bg-bg/80 backdrop-blur">
       <svg viewBox="0 0 76 76" className="absolute inset-0 -rotate-90" aria-hidden>
-        <circle cx="38" cy="38" r={r} fill="none" stroke="var(--line)" strokeWidth="4" />
-        <circle cx="38" cy="38" r={r} fill="none" style={{ stroke: phaseColor(phase, level) }} strokeWidth="4" strokeLinecap="round"
+        <circle cx="38" cy="38" r={r} fill="none" stroke="var(--line)" strokeWidth="2" />
+        <circle cx="38" cy="38" r={r} fill="none" style={{ stroke: phaseColor(phase, level) }} strokeWidth="3" strokeLinecap="round"
           strokeDasharray={len} strokeDashoffset={len * (1 - progress)} />
       </svg>
       <div className="text-center leading-none">
-        <div className="text-[28px] font-semibold tabular-nums">{value}</div>
-        {sub && <div className="mt-0.5 text-[11px] text-muted">{sub}</div>}
+        <div className="font-display text-[30px]">{value}</div>
+        {sub && <div className="mt-0.5 text-[10px] tracking-[0.12em] text-muted uppercase">{sub}</div>}
       </div>
     </div>
   );
@@ -272,24 +272,24 @@ function BlockIntro({ block, index, count, level, onStart, onSkip, onExit }: {
     >
       <div className="mx-auto w-full max-w-md flex-1 overflow-y-auto px-5 pb-4">
         <div className="flex items-center gap-2 pt-3">
-          <IconButton label="Завершить тренировку" onClick={onExit} className="bg-surface-2"><X size={20} /></IconButton>
-          <div className="flex-1 text-center text-[13px] font-medium tracking-wide text-muted uppercase">Упражнение {index + 1} из {count}</div>
+          <IconButton label="Завершить тренировку" onClick={onExit} className="hairline bg-surface"><X size={19} strokeWidth={1.6} /></IconButton>
+          <div className="eyebrow flex-1 text-center text-gold">Упражнение {index + 1} из {count}</div>
           <div className="size-11" />
         </div>
-        <h1 className="mt-3 text-[28px] leading-tight font-semibold tracking-tight">{title}</h1>
-        <p className="mb-4 text-[15px] text-muted">{BLOCK_INFO[type].short}</p>
+        <motion.h1 initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1, duration: 0.5 }} className="font-display mt-4 text-[36px] leading-[1.04]">{title}</motion.h1>
+        <p className="mt-2 mb-5 text-[15px] text-muted">{BLOCK_INFO[type].short}</p>
         <ExerciseDemo type={type} position={level.position} front={block.type === 'quick' && block.cue === 'front'} />
         <div className="mt-2"><FigureLegend /></div>
         <div className="mt-5"><GuideText type={type} guide={guideFor(block)} position={level.position} /></div>
       </div>
-      <div className="pb-safe border-t border-line bg-bg/95 backdrop-blur">
+      <div className="pb-safe border-t border-gold/20 bg-bg/90 backdrop-blur-xl">
         <div className="mx-auto w-full max-w-md px-5 pt-3 pb-4">
           <PrimaryButton onClick={onStart}><Play size={20} fill="currentColor" /> Начать</PrimaryButton>
           <div className="mt-2 flex items-center justify-between text-[13px] text-muted">
             {auto ? (
               <button type="button" onClick={() => setAuto(false)} className="py-1">Начнётся через {left} с · <span className="underline underline-offset-2">не начинать</span></button>
             ) : <span>Начните, когда будете готовы</span>}
-            <button type="button" onClick={onSkip} className="py-1 font-medium">Пропустить</button>
+            <button type="button" onClick={onSkip} className="eyebrow py-1 text-ink">Пропустить</button>
           </div>
         </div>
       </div>
@@ -320,18 +320,27 @@ function Summary({ state, level, kind, completed, saveId, onClose }: { state: Wo
   return (
     <div className="pt-safe pb-safe fixed inset-0 z-40 overflow-y-auto bg-bg">
       <div className="mx-auto flex min-h-full w-full max-w-md flex-col px-5 py-8">
-        <motion.div
-          className="mx-auto grid size-24 place-items-center rounded-full bg-gradient-to-br from-calm to-breath text-on-accent shadow-lg shadow-calm/30"
-          initial={{ scale: 0.4, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ type: 'spring', stiffness: 260, damping: 18 }}
-        >
-          <Check size={48} strokeWidth={3} />
-        </motion.div>
-        <h1 className="mt-5 text-center text-[28px] font-semibold">{completed ? 'Готово!' : 'Выполнено частично'}</h1>
-        <p className="mt-1 text-center text-[15px] text-muted">{SESSION_TITLE[kind]} · уровень {level.id} «{level.name}» · сегодня {today} из {goal}</p>
+        <div className="relative mx-auto grid size-36 place-items-center">
+          {[0, 1].map(i => (
+            <motion.span key={i} className="absolute inset-0 rounded-full border border-gold/50"
+              initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: [0.7, 1 + i * 0.12], opacity: [0.9, 0] }}
+              transition={{ duration: 2.4, delay: 0.3 + i * 0.5, repeat: Infinity, repeatDelay: 0.6, ease: 'easeOut' }} />
+          ))}
+          <motion.div
+            className="sheen bg-gold-grad grid size-24 place-items-center rounded-full text-on-accent shadow-xl shadow-gold/30 ring-1 ring-gold/40 ring-offset-4 ring-offset-bg"
+            initial={{ scale: 0.4, opacity: 0, rotate: -40 }}
+            animate={{ scale: 1, opacity: 1, rotate: 0 }}
+            transition={{ type: 'spring', stiffness: 220, damping: 16 }}
+          >
+            <Check size={44} strokeWidth={2} />
+          </motion.div>
+        </div>
+        <div className="eyebrow mt-6 text-center text-gold">{SESSION_TITLE[kind]}</div>
+        <motion.h1 initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25, duration: 0.6 }}
+          className="font-display mt-2 text-center text-[44px] leading-[1.02]">{completed ? 'Великолепно' : 'Выполнено частично'}</motion.h1>
+        <p className="mt-2 text-center text-[15px] text-muted">Уровень {level.id} «{level.name}» · сегодня {today} из {goal}</p>
         {!completed && (
-          <p className="mt-3 rounded-2xl bg-surface-2 p-3 text-center text-[14px] text-muted">
+          <p className="hairline mt-4 rounded-2xl bg-surface p-3 text-center text-[14px] text-muted">
             В дневную цель идут тренировки, выполненные хотя бы на {COMPLETE_SHARE * 100} %. Эта сохранена в журнале.
           </p>
         )}
@@ -342,16 +351,16 @@ function Summary({ state, level, kind, completed, saveId, onClose }: { state: Wo
             ['Сокращений', String(state.contractions)],
             ['Под нагрузкой', formatDuration(state.tension)],
           ].map(([k, v]) => (
-            <div key={k} className="card px-3 py-4 text-center">
-              <div className="text-[20px] font-semibold">{v}</div>
-              <div className="mt-1 text-[12px] text-muted">{k}</div>
+            <div key={k} className="card px-2 py-4 text-center">
+              <div className="font-display text-[24px] leading-tight">{v}</div>
+              <div className="mt-1.5 text-[9.5px] tracking-[0.16em] text-muted uppercase">{k}</div>
             </div>
           ))}
         </div>
 
         {kind === 'main' && (
           <>
-            <h2 className="mt-8 text-[17px] font-semibold">Все удержания — в полную силу?</h2>
+            <h2 className="font-display mt-9 text-[24px] leading-tight">Все удержания — в полную силу?</h2>
             <div className="mt-3 grid grid-cols-3 gap-2">
               {RATINGS.map(r => (
                 <motion.button
@@ -360,9 +369,9 @@ function Summary({ state, level, kind, completed, saveId, onClose }: { state: Wo
                   whileTap={{ scale: 0.95 }}
                   onClick={() => setRating(r.id)}
                   aria-pressed={rating === r.id}
-                  className={`flex flex-col items-center gap-1 rounded-2xl border px-2 py-3 text-[14px] font-medium transition ${rating === r.id ? 'border-calm bg-calm/15' : 'border-line bg-surface'}`}
+                  className={`flex flex-col items-center gap-1 rounded-[22px] border px-2 py-3.5 text-[14px] font-medium transition ${rating === r.id ? 'border-gold bg-gold/12 shadow-md shadow-gold/15' : 'border-line bg-surface'}`}
                 >
-                  <r.icon size={26} className={rating === r.id ? 'text-calm' : 'text-muted'} />
+                  <r.icon size={26} strokeWidth={1.4} className={rating === r.id ? 'text-gold' : 'text-muted'} />
                   {r.label}
                   <span className="text-[11px] font-normal text-muted">{r.hint}</span>
                 </motion.button>
@@ -378,7 +387,7 @@ function Summary({ state, level, kind, completed, saveId, onClose }: { state: Wo
         <AnimatePresence>
           {discomfort && (
             <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-              <div className="mt-3 rounded-2xl bg-gold/15 p-4 text-[14px] leading-relaxed">
+              <div className="hairline mt-3 rounded-2xl bg-gold/10 p-4 text-[14px] leading-relaxed">
                 Упражнения не должны вызывать боль. 1–2 дня делайте только расслабление — кнопка появится на главном экране, затем вернитесь
                 на уровень ниже. Если боль повторяется, болит при семяизвержении, в промежности или яичках, мышца «не отпускается», есть кровь,
                 трещина или обострение геморроя — покажитесь специалисту.

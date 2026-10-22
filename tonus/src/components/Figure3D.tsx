@@ -332,7 +332,7 @@ function readTheme() {
     calm: new THREE.Color(v('--calm', '#0f9e8c')),
     floor: new THREE.Color(v('--surface-2', '#e9edf5')),
     ink: v('--muted', '#55607a'),
-    prop: new THREE.Color(dark ? '#33405c' : '#c6cfdc'),
+    prop: new THREE.Color(dark ? '#3b3229' : '#cdbfa9'),
   };
 }
 type Theme = ReturnType<typeof readTheme>;
@@ -707,11 +707,11 @@ export default function Figure3D({ motion, pose, zoom = 'body', focus = 'torso',
         fallback={<div className="grid size-full place-items-center text-[14px] text-muted">3D недоступно на этом устройстве</div>}
       >
         <Environment />
-        <hemisphereLight args={['#fff4ec', theme.dark ? '#1a2540' : '#c9d2e0', 0.55]} />
+        <hemisphereLight args={['#fff4ec', theme.dark ? '#2a2018' : '#d9ccb8', 0.55]} />
         <directionalLight position={[2.2, 4.2, 3]} intensity={2.1} color="#fff0e2" castShadow shadow-mapSize={[1024, 1024]} shadow-bias={-0.0004}
           shadow-camera-left={-1.3} shadow-camera-right={1.3} shadow-camera-top={2.2} shadow-camera-bottom={-0.5} />
-        <directionalLight position={[-3, 2.4, 1.2]} intensity={0.6} color="#dbe6ff" />
-        <directionalLight position={[0.5, 2.8, -3.5]} intensity={1.3} color="#ffffff" />
+        <directionalLight position={[-3, 2.4, 1.2]} intensity={0.6} color="#ffe9cc" />
+        <directionalLight position={[0.5, 2.8, -3.5]} intensity={1.4} color="#ffdcaa" />
         <Athlete inst={inst} data={data} motion={motion} theme={theme} xray={zoom === 'pelvis'} focus={focus} layout={layout} pose={pose} follow={follow} />
         <Props pose={pose} theme={theme} seat={seat} xray={zoom === 'pelvis'} />
         <ContactShadows key={pose} position={[0, 0.001, 0]} scale={3.4} blur={2.4} opacity={theme.dark ? 0.55 : 0.32} far={1.8} resolution={512} frames={1} />

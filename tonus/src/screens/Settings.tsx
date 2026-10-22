@@ -36,7 +36,7 @@ export function Settings() {
   return (
     <div className="space-y-5">
       <section>
-        <h3 className="mb-1 text-[13px] font-medium tracking-wide text-muted uppercase">Подсказки</h3>
+        <h3 className="eyebrow mb-2 px-1 text-gold">Подсказки</h3>
         <div className="card divide-y divide-line px-4">
           <Switch checked={settings.sound} onChange={v => setSettings({ sound: v })} label="Звуковые сигналы" hint="Высокий тон — сжать, низкий — расслабить" icon={<Volume2 size={18} />} />
           <Switch checked={settings.voice} onChange={v => setSettings({ voice: v })} label="Голосовые подсказки" hint={voiceSupported() ? '«Сжать», «Расслабить», названия блоков' : 'Браузер не поддерживает голос'} icon={<Mic size={18} />} />
@@ -47,22 +47,22 @@ export function Settings() {
       </section>
 
       <section>
-        <h3 className="mb-1 text-[13px] font-medium tracking-wide text-muted uppercase">Цель</h3>
+        <h3 className="eyebrow mb-2 px-1 text-gold">Цель</h3>
         <div className="card flex items-center justify-between px-4 py-3">
           <div>
             <div className="text-[15px] font-medium">Тренировок в день</div>
             <div className="text-[13px] text-muted">Одна основная, остальные лёгкие. Рекомендуется 2</div>
           </div>
           <div className="flex items-center gap-3">
-            <button type="button" aria-label="Меньше" onClick={() => setSettings({ dailyGoal: Math.max(1, settings.dailyGoal - 1) })} className="grid size-9 place-items-center rounded-xl bg-surface-2"><Minus size={18} /></button>
-            <span className="w-5 text-center text-[20px] font-semibold">{settings.dailyGoal}</span>
-            <button type="button" aria-label="Больше" onClick={() => setSettings({ dailyGoal: Math.min(MAX_GOAL, settings.dailyGoal + 1) })} className="grid size-9 place-items-center rounded-xl bg-surface-2"><Plus size={18} /></button>
+            <button type="button" aria-label="Меньше" onClick={() => setSettings({ dailyGoal: Math.max(1, settings.dailyGoal - 1) })} className="hairline grid size-9 place-items-center rounded-full"><Minus size={16} /></button>
+            <span className="font-display w-6 text-center text-[26px]">{settings.dailyGoal}</span>
+            <button type="button" aria-label="Больше" onClick={() => setSettings({ dailyGoal: Math.min(MAX_GOAL, settings.dailyGoal + 1) })} className="hairline grid size-9 place-items-center rounded-full"><Plus size={16} /></button>
           </div>
         </div>
       </section>
 
       <section>
-        <h3 className="mb-1 text-[13px] font-medium tracking-wide text-muted uppercase">Напоминания</h3>
+        <h3 className="eyebrow mb-2 px-1 text-gold">Напоминания</h3>
         <div className="card p-4">
           <p className="text-[14px] leading-snug text-muted">
             Напоминания добавляются в календарь телефона — так они сработают, даже когда приложение закрыто. В уведомлении будет только «Тонус: 5 минут».
@@ -71,9 +71,9 @@ export function Settings() {
             {settings.reminders.map((t, i) => (
               <div key={i} className="flex items-center gap-2">
                 <input type="time" value={t} onChange={e => setTime(i, e.target.value)}
-                  className="h-11 flex-1 rounded-xl border border-line bg-surface-2 px-3 text-[16px] text-ink" aria-label={`Напоминание ${i + 1}`} />
+                  className="h-11 flex-1 rounded-full border border-line bg-surface px-4 text-[16px] text-ink tabular-nums" aria-label={`Напоминание ${i + 1}`} />
                 <button type="button" aria-label="Удалить" onClick={() => setSettings({ reminders: settings.reminders.filter((_, k) => k !== i) })}
-                  className="grid size-11 place-items-center rounded-xl bg-surface-2 text-muted"><Trash2 size={18} /></button>
+                  className="hairline grid size-11 place-items-center rounded-full text-muted"><Trash2 size={17} strokeWidth={1.6} /></button>
               </div>
             ))}
           </div>
@@ -81,7 +81,7 @@ export function Settings() {
             {settings.reminders.length < 5 && (
               <SecondaryButton onClick={() => setSettings({ reminders: [...settings.reminders, '12:00'] })} className="flex-1"><Plus size={18} /> Время</SecondaryButton>
             )}
-            <SecondaryButton onClick={() => downloadFile('tonus-napominaniya.ics', buildIcs(settings.reminders.filter(Boolean)), 'text/calendar')} className="flex-[2] bg-calm/15">
+            <SecondaryButton onClick={() => downloadFile('tonus-napominaniya.ics', buildIcs(settings.reminders.filter(Boolean)), 'text/calendar')} className="flex-[2] border-gold/60">
               <BellRing size={18} /> В календарь
             </SecondaryButton>
           </div>
@@ -90,9 +90,9 @@ export function Settings() {
       </section>
 
       <section>
-        <h3 className="mb-1 text-[13px] font-medium tracking-wide text-muted uppercase">Установка</h3>
+        <h3 className="eyebrow mb-2 px-1 text-gold">Установка</h3>
         <a href={INSTALL_URL} target={INSTALL_URL.startsWith('http') ? '_blank' : undefined} rel="noreferrer" className="card flex items-center gap-3 px-4 py-3">
-          <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface-2 text-muted"><Smartphone size={18} /></span>
+          <span className="grid size-9 shrink-0 place-items-center rounded-full border border-gold/40 text-gold"><Smartphone size={17} strokeWidth={1.6} /></span>
           <span className="min-w-0 flex-1">
             <span className="block text-[15px] font-medium">{isStandalone() ? 'Приложение установлено' : 'Установить на телефон'}</span>
             <span className="block text-[13px] text-muted">iPhone и Android без магазина приложений, профиль для iPhone, QR-код</span>
@@ -102,11 +102,11 @@ export function Settings() {
       </section>
 
       <section>
-        <h3 className="mb-1 text-[13px] font-medium tracking-wide text-muted uppercase">Оформление</h3>
-        <div className="card grid grid-cols-3 gap-1 p-1">
+        <h3 className="eyebrow mb-2 px-1 text-gold">Оформление</h3>
+        <div className="card grid grid-cols-3 gap-1 rounded-full p-1">
           {THEMES.map(([id, label]) => (
             <button key={id} type="button" onClick={() => setSettings({ theme: id })} aria-pressed={settings.theme === id}
-              className={`rounded-[18px] py-2.5 text-[14px] font-medium transition ${settings.theme === id ? 'bg-ink text-bg' : 'text-muted'}`}>
+              className={`rounded-full py-2.5 text-[12px] font-medium tracking-[0.12em] uppercase transition ${settings.theme === id ? 'bg-gold-grad text-on-accent' : 'text-muted'}`}>
               {label}
             </button>
           ))}
@@ -114,7 +114,7 @@ export function Settings() {
       </section>
 
       <section>
-        <h3 className="mb-1 text-[13px] font-medium tracking-wide text-muted uppercase">Данные</h3>
+        <h3 className="eyebrow mb-2 px-1 text-gold">Данные</h3>
         <div className="card space-y-2 p-4">
           <p className="text-[14px] text-muted">Всё хранится только на этом устройстве. Сохраните копию, чтобы перенести журнал на другой телефон.</p>
           <div className="flex gap-2">
@@ -126,7 +126,7 @@ export function Settings() {
           {msg && <p className="text-[14px]">{msg}</p>}
           {confirmReset ? (
             <div className="flex gap-2 pt-1">
-              <SecondaryButton onClick={() => { reset(); setConfirmReset(false); }} className="flex-1 bg-squeeze/15 text-squeeze">Да, стереть всё</SecondaryButton>
+              <SecondaryButton onClick={() => { reset(); setConfirmReset(false); }} className="flex-1 border-squeeze/50 text-squeeze">Да, стереть всё</SecondaryButton>
               <SecondaryButton onClick={() => setConfirmReset(false)} className="flex-1">Отмена</SecondaryButton>
             </div>
           ) : (

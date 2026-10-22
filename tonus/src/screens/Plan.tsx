@@ -20,11 +20,12 @@ export function Plan() {
 
   return (
     <div className="pb-4">
-      <ScreenHeader title="Программа" subtitle="8 уровней и поддержка. Переход — не раньше чем через 2 недели, когда все сжатия в полную силу и с запасом." />
+      <ScreenHeader eyebrow="Восемь уровней" title="Программа" subtitle="8 уровней и поддержка. Переход — не раньше чем через 2 недели, когда все сжатия в полную силу и с запасом." />
 
       <section className="card mx-5 p-5">
-        <h2 className="text-[17px] font-semibold">Из чего состоит тренировка</h2>
-        <ul className="mt-3 space-y-3">
+        <div className="eyebrow text-gold">Состав</div>
+        <h2 className="font-display mt-1.5 text-[26px] leading-tight">Из чего состоит тренировка</h2>
+        <ul className="mt-4 space-y-4">
           {BLOCK_ORDER.map(t => (
             <li key={t}>
               <button type="button" onClick={() => setExercise(t)} className="flex w-full gap-3 text-left">
@@ -32,13 +33,13 @@ export function Plan() {
                 <span className="min-w-0 flex-1">
                   <span className="block text-[15px] font-medium">{BLOCK_INFO[t].title} <span className="font-normal text-muted">— {BLOCK_INFO[t].short.toLowerCase()}</span></span>
                   <span className="block text-[14px] leading-snug text-muted">{BLOCK_INFO[t].how}</span>
-                  <span className="mt-1 inline-flex items-center gap-0.5 text-[13px] font-medium text-calm">Показать в 3D <ChevronRight size={14} /></span>
+                  <span className="mt-1.5 inline-flex items-center gap-0.5 text-[10.5px] font-medium tracking-[0.18em] text-gold uppercase">Показать в 3D <ChevronRight size={13} /></span>
                 </span>
               </button>
             </li>
           ))}
         </ul>
-        <p className="mt-4 rounded-2xl bg-surface-2 p-3 text-[13px] leading-snug text-muted">
+        <p className="mt-5 border-t border-gold/25 pt-4 text-[13px] leading-relaxed text-muted">
           Каждый день — одна основная тренировка, она главная. Лёгкие на 2–3 минуты — 1–2 раза по желанию: их пропуск не мешает прогрессу.
           Уровни 1–4 — сидя на твёрдом стуле, 5–8 — стоя. Весь путь занимает 3–5 месяцев: столько в исследованиях формировался эффект.
           Затем поддержка: 2–3 полные тренировки в неделю и ежедневный «Knack».
@@ -56,21 +57,21 @@ export function Plan() {
                 type="button"
                 whileTap={{ scale: 0.98 }}
                 onClick={() => setOpen(l)}
-                className={`card flex w-full items-center gap-4 p-4 text-left ${current ? 'ring-2 ring-calm' : ''}`}
+                className={`flex w-full items-center gap-4 p-4 text-left ${current ? 'vitrine rounded-[28px] shadow-xl' : 'card'}`}
               >
-                <span className={`grid size-11 shrink-0 place-items-center rounded-2xl text-[17px] font-semibold ${current ? 'bg-calm text-on-accent' : passed ? 'bg-calm/15 text-calm' : 'bg-surface-2 text-muted'}`}>
-                  {passed ? <Check size={20} strokeWidth={3} /> : l.id}
+                <span className={`font-display grid size-12 shrink-0 place-items-center rounded-full text-[21px] ${current ? 'bg-gold-grad text-on-accent shadow-lg shadow-black/30' : passed ? 'border border-gold/50 text-gold' : 'border border-line text-muted'}`}>
+                  {passed ? <Check size={19} strokeWidth={2} /> : l.id}
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-2">
-                    <span className="text-[16px] font-semibold">{l.name}</span>
-                    {current && <Chip tone="calm">сейчас</Chip>}
+                    <span className="font-display text-[21px] leading-tight">{l.name}</span>
+                    {current && <span className="eyebrow text-[9.5px] text-gold">· сейчас</span>}
                   </span>
                   <span className="block text-[13px] text-muted">{l.subtitle} · {POSITION_SHORT[l.position]} · {formatDuration(tl.total)}</span>
                   {current && Number.isFinite(ready.needDays) && (
                     <span className="mt-2 block">
-                      <span className="block h-1.5 overflow-hidden rounded-full bg-surface-2">
-                        <span className="block h-full rounded-full bg-calm" style={{ width: `${Math.min(100, (ready.days / ready.needDays) * 100)}%` }} />
+                      <span className="block h-[3px] overflow-hidden rounded-full bg-white/10">
+                        <span className="bg-gold-grad block h-full rounded-full" style={{ width: `${Math.min(100, (ready.days / ready.needDays) * 100)}%` }} />
                       </span>
                       <span className="mt-1 block text-[12px] text-muted">{Math.min(ready.days, ready.needDays)} из {ready.needDays} дней · {Math.min(ready.done, ready.need)} из {ready.need} тренировок</span>
                     </span>
@@ -104,7 +105,7 @@ function BlockList({ blocks }: { blocks: Block[] }) {
     <ul className="card divide-y divide-line px-4">
       {blocks.map((b, i) => (
         <li key={i} className="flex items-center justify-between gap-3 py-3 text-[15px]">
-          <span className="flex items-center gap-2"><span className={`size-2.5 shrink-0 rounded-full ${dotClass(b.type)}`} />{blockTitle(b)}</span>
+          <span className="flex items-center gap-2.5"><span className={`size-2 shrink-0 rounded-full ${dotClass(b.type)}`} />{blockTitle(b)}</span>
           <span className="text-right text-[14px] text-muted">{blockSummary(b)}</span>
         </li>
       ))}
@@ -118,14 +119,14 @@ function LevelDetails({ level, current, ready, onSelect }: { level: Level; curre
   return (
     <div>
       <p className="text-[15px] text-muted">{level.subtitle}. {POSITION_LABEL[level.position]}.</p>
-      <h3 className="mt-4 mb-2 text-[15px] font-semibold">{level.maintenance ? 'Полная тренировка, 2–3 раза в неделю' : 'Основная тренировка, каждый день'}</h3>
+      <h3 className="font-display mt-5 mb-3 text-[21px] leading-tight">{level.maintenance ? 'Полная тренировка, 2–3 раза в неделю' : 'Основная тренировка, каждый день'}</h3>
       <div className="mb-3 flex flex-wrap gap-2">
-        <Chip><Clock size={14} /> {formatDuration(tl.total)}</Chip>
+        <Chip tone="gold"><Clock size={13} /> {formatDuration(tl.total)}</Chip>
         <Chip tone="squeeze">{tl.contractions} {plural(tl.contractions, 'сокращение', 'сокращения', 'сокращений')}</Chip>
         <Chip>под нагрузкой {formatDuration(tl.tension)}</Chip>
       </div>
       <BlockList blocks={level.blocks} />
-      <h3 className="mt-5 mb-2 text-[15px] font-semibold">{level.maintenance ? 'Ежедневный «Knack»' : 'Лёгкая тренировка, по желанию'} · {formatDuration(light.total)}</h3>
+      <h3 className="font-display mt-6 mb-3 text-[21px] leading-tight">{level.maintenance ? 'Ежедневный «Knack»' : 'Лёгкая тренировка, по желанию'} · {formatDuration(light.total)}</h3>
       <BlockList blocks={level.light} />
       {level.maintenance ? (
         <p className="mt-3 text-[13px] text-muted">

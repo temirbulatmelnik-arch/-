@@ -3,7 +3,8 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --font-sans: "Golos Text Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Jost Variable", "Jost", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Playfair Display Variable", "Playfair Display", Georgia, serif;
   --color-bg: var(--bg);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
@@ -21,41 +22,56 @@
   --color-heat-3: var(--heat-3);
 }
 
+/* «Оникс и шампанское»: слоновая кость и бронза днём, оникс и шампанское вечером.
+   Цвета упражнений — драгоценные камни: гранат — сжатие, нефрит — расслабление, сапфир — дыхание. */
 :root {
-  --bg: #f3f5fa;
-  --surface: #ffffff;
-  --surface-2: #e9edf5;
-  --ink: #0f172a;
-  --muted: #55607a;
-  --faint: #8a94aa;
-  --line: #dde3ee;
-  --calm: #0f9e8c;
-  --squeeze: #e5486b;
-  --breath: #1d8fd6;
-  --gold: #d58a00;
-  --on-accent: #ffffff;
-  --heat-1: #5cc4b2;
-  --heat-2: #1e9584;
-  --heat-3: #0d5f57;
+  --bg: #f2eee7;
+  --surface: #fbf9f5;
+  --surface-2: #ebe5db;
+  --ink: #16130f;
+  --muted: #6b645a;
+  --faint: #a49b8e;
+  --line: #ded6c9;
+  --calm: #2e6a5d;
+  --squeeze: #9b3442;
+  --breath: #3f5f87;
+  --gold: #977240;
+  --on-accent: #fbf7f0;
+  --heat-1: #e3d3b4;
+  --heat-2: #bf9a5f;
+  --heat-3: #7d5c2e;
+  --gold-grad: linear-gradient(135deg, #d0ae72 0%, #a6804a 46%, #6f522a 100%);
+  /* тёмная «витрина» — даже на светлом фоне */
+  --vitrine: radial-gradient(120% 95% at 85% 0%, #3d342a 0%, #221d18 46%, #12100d 100%);
+  --vitrine-ink: #f4ece0;
+  --vitrine-muted: #b4a998;
+  --stage: radial-gradient(90% 80% at 50% 18%, #fffdf9 0%, #efe8dd 55%, #e2d8c9 100%);
+  --shadow: 0 1px 2px rgba(40, 28, 14, 0.06), 0 18px 40px -22px rgba(60, 40, 18, 0.28);
   color-scheme: light;
 }
 
 .dark {
-  --bg: #0b1220;
-  --surface: #121b2e;
-  --surface-2: #1a2540;
-  --ink: #e8edf7;
-  --muted: #9aa6be;
-  --faint: #66728c;
-  --line: #24304a;
-  --calm: #5eead4;
-  --squeeze: #fb7185;
-  --breath: #7dd3fc;
-  --gold: #fbbf24;
-  --on-accent: #0b1220;
-  --heat-1: #1b6b62;
-  --heat-2: #2aa897;
-  --heat-3: #7ce8d6;
+  --bg: #0c0b0a;
+  --surface: #161412;
+  --surface-2: #211e1a;
+  --ink: #f3ece1;
+  --muted: #aaa093;
+  --faint: #6f675c;
+  --line: #2d2924;
+  --calm: #7cc3af;
+  --squeeze: #e27a87;
+  --breath: #95b4dd;
+  --gold: #d6b67e;
+  --on-accent: #16110b;
+  --heat-1: #3a3022;
+  --heat-2: #8c6f40;
+  --heat-3: #e4c791;
+  --gold-grad: linear-gradient(135deg, #f1d9a7 0%, #d3b077 44%, #9e7b45 100%);
+  --vitrine: radial-gradient(120% 95% at 85% 0%, #3a3127 0%, #1d1915 44%, #100e0c 100%);
+  --vitrine-ink: #f4ece0;
+  --vitrine-muted: #ada294;
+  --stage: radial-gradient(90% 80% at 50% 18%, #2c2722 0%, #181512 60%, #0f0d0b 100%);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 22px 46px -24px rgba(0, 0, 0, 0.75);
   color-scheme: dark;
 }
 
@@ -70,21 +86,48 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   min-height: 100dvh;
+  font-size: 15px;
+  letter-spacing: 0.005em;
 }
 
 button { cursor: pointer; }
 button:disabled { cursor: default; }
 
-:focus-visible { outline: 2px solid var(--calm); outline-offset: 2px; border-radius: 8px; }
+:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; border-radius: 10px; }
 
 .pt-safe { padding-top: max(env(safe-area-inset-top), 0px); }
 .pb-safe { padding-bottom: max(env(safe-area-inset-bottom), 0px); }
 
+/* заголовки — дидона с высоким контрастом, как на обложке модного журнала */
+.font-display { font-family: var(--font-serif); font-weight: 500; letter-spacing: -0.015em; font-variant-numeric: lining-nums; text-wrap: balance; }
+.eyebrow { font-size: 11px; font-weight: 500; letter-spacing: 0.22em; text-transform: uppercase; }
+
 .card {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 24px;
+  border-radius: 28px;
+  box-shadow: var(--shadow);
 }
+
+.hairline { border: 1px solid color-mix(in srgb, var(--gold) 38%, transparent); }
+.bg-gold-grad { background: var(--gold-grad); }
+.vitrine { background: var(--vitrine); color: var(--vitrine-ink); border: 1px solid color-mix(in srgb, #d6b67e 22%, transparent); }
+.vitrine .text-muted { color: var(--vitrine-muted); }
+.stage { background: var(--stage); }
+
+/* блик по золоту */
+.sheen { position: relative; overflow: hidden; isolation: isolate; }
+.sheen::after {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(110deg, transparent 30%, rgba(255, 250, 235, 0.38) 48%, transparent 66%);
+  transform: translateX(-120%);
+  animation: sheen 6s ease-in-out infinite;
+}
+@keyframes sheen { 0%, 64% { transform: translateX(-120%); } 84%, 100% { transform: translateX(120%); } }
+
+/* медленное «дыхание» колец на заставке */
+@keyframes breathe { 0%, 100% { transform: scale(1); opacity: 0.9; } 50% { transform: scale(0.93); opacity: 1; } }
+.breathe { animation: breathe 5.5s ease-in-out infinite; transform-origin: center; transform-box: fill-box; }
 
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; }

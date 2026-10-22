@@ -53,8 +53,8 @@ export function Check({ onClose }: { onClose: () => void }) {
     <div className="pt-safe pb-safe fixed inset-0 z-40 flex flex-col bg-bg">
       <div className="mx-auto flex w-full max-w-md flex-1 flex-col overflow-y-auto px-5">
         <div className="flex items-center gap-2 pt-3">
-          <IconButton label="Закрыть" onClick={onClose} className="bg-surface-2"><X size={20} /></IconButton>
-          <div className="flex-1 text-center text-[15px] font-semibold">Контроль</div>
+          <IconButton label="Закрыть" onClick={onClose} className="hairline bg-surface"><X size={19} strokeWidth={1.6} /></IconButton>
+          <div className="eyebrow flex-1 text-center text-gold">Контроль</div>
           <div className="size-11" />
         </div>
 
@@ -79,13 +79,13 @@ export function Check({ onClose }: { onClose: () => void }) {
                 <ul className="mt-4 space-y-2.5">
                   {QUESTIONS.map((q, i) => (
                     <li key={q.title} className="card p-4">
-                      <div className="text-[15px] font-semibold">{q.title}</div>
+                      <div className="font-display text-[19px] leading-tight">{q.title}</div>
                       <p className="mt-1 text-[14px] leading-snug text-muted">{q.text}</p>
                       <div className="mt-3 grid grid-cols-2 gap-2" role="radiogroup" aria-label={q.title}>
                         {([true, false] as const).map(v => (
                           <button key={String(v)} type="button" role="radio" aria-checked={answers[i] === v}
                             onClick={() => setAnswers(a => a.map((x, k) => (k === i ? v : x)))}
-                            className={`rounded-xl py-2 text-[15px] font-medium transition ${answers[i] === v ? (v ? 'bg-calm text-on-accent' : 'bg-squeeze text-on-accent') : 'bg-surface-2 text-muted'}`}>
+                            className={`rounded-full border py-2 text-[13px] font-medium tracking-[0.1em] uppercase transition ${answers[i] === v ? (v ? 'border-transparent bg-calm text-on-accent' : 'border-transparent bg-squeeze text-on-accent') : 'border-line text-muted'}`}>
                             {v ? 'Да' : 'Нет'}
                           </button>
                         ))}
@@ -132,7 +132,7 @@ export function Check({ onClose }: { onClose: () => void }) {
                   <Tile label="Удержание в полную силу" value={`${hold ?? 0} с`} prev={prev?.hold} cur={hold} unit="с" />
                   <Tile label="Чётких быстрых подряд" value={String(quick ?? 0)} prev={prev?.quick} cur={quick} unit="" />
                 </div>
-                <p className="mt-4 rounded-2xl bg-surface-2 p-3 text-[14px] text-muted">
+                <p className="hairline mt-4 rounded-2xl bg-surface p-4 text-[14px] text-muted">
                   Ориентир: по портативной манометрии максимальное сжатие у здоровых мужчин держится 2–10 с. Самотест — по ощущениям,
                   он не равен манометрии, но хорошо показывает динамику. Если результат упадёт больше чем на 20 %, приложение предложит усилить тренировки.
                 </p>
@@ -150,8 +150,8 @@ function Step({ icon, tone = 'calm', title, children, footer }: { icon?: ReactNo
   return (
     <>
       <div className="flex-1 text-[15px] leading-relaxed">
-        {icon && <span className={`mb-4 grid size-14 place-items-center rounded-2xl ${tone === 'gold' ? 'bg-gold/15 text-gold' : 'bg-calm/15 text-calm'}`}>{icon}</span>}
-        <h1 className="mb-3 text-[26px] leading-tight font-semibold tracking-tight">{title}</h1>
+        {icon && <span className={`mb-5 grid size-14 place-items-center rounded-full border ${tone === 'gold' ? 'border-gold/50 text-gold' : 'border-calm/50 text-calm'}`}>{icon}</span>}
+        <h1 className="font-display mb-4 text-[34px] leading-[1.05]">{title}</h1>
         {children}
       </div>
       <div className="pt-6">{footer}</div>
@@ -163,8 +163,8 @@ function Tile({ label, value, prev, cur, unit }: { label: string; value: string;
   const diff = prev !== undefined && cur !== undefined ? cur - prev : null;
   return (
     <div className="card px-3 py-4 text-center">
-      <div className="text-[28px] font-semibold">{value}</div>
-      <div className="mt-1 text-[12px] leading-tight text-muted">{label}</div>
+      <div className="font-display text-[34px] leading-none">{value}</div>
+      <div className="mt-2 text-[9.5px] leading-tight tracking-[0.14em] text-muted uppercase">{label}</div>
       {diff !== null && (
         <div className={`mt-2 text-[13px] font-medium ${diff > 0 ? 'text-calm' : diff < 0 ? 'text-squeeze' : 'text-muted'}`}>
           {diff > 0 ? '+' : ''}{diff} {unit} к прошлому
@@ -176,7 +176,7 @@ function Tile({ label, value, prev, cur, unit }: { label: string; value: string;
 
 const StopButton = ({ onClick, children }: { onClick: () => void; children: ReactNode }) => (
   <motion.button type="button" whileTap={{ scale: 0.97 }} onClick={onClick}
-    className="flex h-14 w-full items-center justify-center rounded-2xl bg-squeeze text-[17px] font-semibold text-on-accent shadow-lg shadow-squeeze/25">
+    className="flex h-14 w-full items-center justify-center rounded-full bg-squeeze text-[13.5px] font-medium tracking-[0.16em] text-on-accent uppercase shadow-lg shadow-squeeze/25">
     {children}
   </motion.button>
 );
@@ -222,8 +222,8 @@ function HoldTest({ onDone, settings }: { onDone: (sec: number) => void; setting
       <div className="mt-6">
         <SphincterRing level={running ? 1 : 0} phase={running ? 'hold' : 'prep'} progress={t / HOLD_MAX}>
           <div className="text-center">
-            <div className="text-[72px] leading-none font-semibold tabular-nums">{Math.floor(t)}</div>
-            <div className="mt-1 text-[15px] text-muted">секунд</div>
+            <div className="font-display text-[84px] leading-none">{Math.floor(t)}</div>
+            <div className="eyebrow mt-2 text-muted">секунд</div>
           </div>
         </SphincterRing>
       </div>
@@ -240,7 +240,7 @@ function RestStep({ onDone }: { onDone: () => void }) {
       <p className="text-muted">Отпустите полностью и восстановитесь. Дальше — быстрые сокращения.</p>
       <div className="mt-6">
         <SphincterRing level={0} phase="relax" progress={t / REST}>
-          <div className="text-[72px] leading-none font-semibold tabular-nums">{left}</div>
+          <div className="font-display text-[84px] leading-none">{left}</div>
         </SphincterRing>
       </div>
     </Step>
@@ -281,8 +281,8 @@ function QuickTest({ onDone, settings }: { onDone: (n: number) => void; settings
       <div className="mt-6">
         <SphincterRing level={squeezing ? 1 : 0} phase={squeezing ? 'squeeze' : 'relax'} progress={(t % 2) / 2}>
           <div className="text-center">
-            <div className="text-[72px] leading-none font-semibold tabular-nums">{cycle}</div>
-            <div className="mt-1 text-[15px] text-muted">{running ? (squeezing ? 'сжать' : 'отпустить') : 'сокращений'}</div>
+            <div className="font-display text-[84px] leading-none">{cycle}</div>
+            <div className="eyebrow mt-2 text-muted">{running ? (squeezing ? 'сжать' : 'отпустить') : 'сокращений'}</div>
           </div>
         </SphincterRing>
       </div>

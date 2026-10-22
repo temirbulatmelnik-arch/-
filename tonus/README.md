@@ -187,7 +187,7 @@ npm run preview   # посмотреть собранную версию
 | [lucide-icons/lucide](https://github.com/lucide-icons/lucide) | иконки | 25 тыс. |
 | [pmndrs/zustand](https://github.com/pmndrs/zustand) | состояние и хранение на устройстве | 59 тыс. |
 | [vite-pwa/vite-plugin-pwa](https://github.com/vite-pwa/vite-plugin-pwa) + `@vite-pwa/assets-generator` | офлайн-режим, установка на телефон, иконки | 4 тыс. |
-| Golos Text (`@fontsource-variable/golos-text`) | шрифт с хорошей кириллицей | — |
+| Playfair Display + Jost (`@fontsource-variable/playfair-display`, `@fontsource-variable/jost`) | оформление «оникс и шампанское»: дидона для заголовков и цифр, геометрический гротеск для текста, оба с кириллицей | — |
 | [MakeHuman](https://github.com/makehumancommunity/makehuman) + [MPFB](https://github.com/makehumancommunity/mpfb2) | реалистичная модель человека: базовая сетка, морфы тела, игровой скелет и веса (CC0) | 1 тыс. / 0,6 тыс. |
 | [Z-Anatomy](https://github.com/LluisV/Z-Anatomy) | анатомия для вида «насквозь»: кости, мышцы тазового дна, сфинктер, диафрагма (CC BY-SA 4.0) | — |
 | Blender (`bpy`) | сборка тела, рельеф, запекание текстур, подгонка анатомии | — |

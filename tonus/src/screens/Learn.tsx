@@ -12,9 +12,9 @@ function Section({ icon, title, children, open: initial = false }: { icon: React
   return (
     <section className="card overflow-hidden">
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-3 p-4 text-left">
-        <span className="grid size-10 shrink-0 place-items-center rounded-2xl bg-surface-2 text-calm">{icon}</span>
-        <span className="flex-1 text-[16px] font-semibold">{title}</span>
-        <motion.span animate={{ rotate: open ? 180 : 0 }} className="text-muted"><ChevronDown size={20} /></motion.span>
+        <span className="grid size-10 shrink-0 place-items-center rounded-full border border-gold/40 text-gold">{icon}</span>
+        <span className="font-display flex-1 text-[20px] leading-tight">{title}</span>
+        <motion.span animate={{ rotate: open ? 180 : 0 }} className="text-gold"><ChevronDown size={18} strokeWidth={1.5} /></motion.span>
       </button>
       <AnimatePresence initial={false}>
         {open && (
@@ -28,10 +28,10 @@ function Section({ icon, title, children, open: initial = false }: { icon: React
 }
 
 const Do = ({ children }: { children: ReactNode }) => (
-  <li className="flex gap-2.5"><Check size={18} className="mt-1 shrink-0 text-calm" strokeWidth={3} /><span>{children}</span></li>
+  <li className="flex gap-2.5"><Check size={17} className="mt-1 shrink-0 text-calm" strokeWidth={2} /><span>{children}</span></li>
 );
 const Dont = ({ children }: { children: ReactNode }) => (
-  <li className="flex gap-2.5"><X size={18} className="mt-1 shrink-0 text-squeeze" strokeWidth={3} /><span>{children}</span></li>
+  <li className="flex gap-2.5"><X size={17} className="mt-1 shrink-0 text-squeeze" strokeWidth={2} /><span>{children}</span></li>
 );
 
 const SOURCES: [string, string][] = [
@@ -69,7 +69,7 @@ function Exercises3D() {
   const [sel, setSel] = useState(1);
   const { type, front, title } = TYPES[sel];
   const [position, setPosition] = useState<Position>('sitting');
-  const chip = (on: boolean) => `shrink-0 rounded-full px-3 py-1.5 text-[14px] font-medium transition ${on ? 'bg-ink text-bg' : 'bg-surface-2 text-muted'}`;
+  const chip = (on: boolean) => `shrink-0 rounded-full border px-3.5 py-1.5 text-[12px] font-medium tracking-[0.08em] uppercase transition ${on ? 'bg-gold-grad border-transparent text-on-accent' : 'border-line text-muted'}`;
   return (
     <div>
       <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 pb-3">
@@ -80,7 +80,7 @@ function Exercises3D() {
       </div>
       <ExerciseDemo key={title} type={type} position={position} front={front} />
       <div className="mt-2"><FigureLegend /></div>
-      <h3 className="mt-5 mb-2 text-[18px] font-semibold">{title}</h3>
+      <h3 className="font-display mt-6 mb-3 text-[28px] leading-tight">{title}</h3>
       <GuideText type={type} guide={front ? QUICK_FRONT : undefined} />
     </div>
   );
@@ -89,7 +89,7 @@ function Exercises3D() {
 export function Learn() {
   return (
     <div className="pb-4">
-      <ScreenHeader title="Техника" subtitle="Как делать правильно и безопасно" />
+      <ScreenHeader eyebrow="Знания" title="Техника" subtitle="Как делать правильно и безопасно" />
       <div className="space-y-3 px-5">
         <Section icon={<PersonStanding size={20} />} title="Упражнения в 3D" open>
           <Exercises3D />
@@ -127,7 +127,7 @@ export function Learn() {
             <Do>Лучше меньше, но правильно: если мышца устала и «уплывает», остановитесь.</Do>
             <Do>Опорожните мочевой пузырь перед тренировкой.</Do>
           </ul>
-          <h3 className="mt-5 mb-2 text-[15px] font-semibold">Частые ошибки</h3>
+          <h3 className="font-display mt-6 mb-3 text-[21px]">Частые ошибки</h3>
           <ul className="space-y-2.5">
             <Dont>Задерживать дыхание или тужиться вниз.</Dont>
             <Dont>Сжимать вполсилы там, где нужен максимум, и не отмечать, что сжатие ослабевало.</Dont>
@@ -156,7 +156,7 @@ export function Learn() {
             <li><b>3–6 месяцев</b> — сила и выносливость самой мышцы. Поэтому на каждом уровне не меньше двух недель, весь путь — 3–5 месяцев.</li>
             <li><b>Дальше</b> — поддержка: 2–3 полные тренировки в неделю и ежедневный «Knack». Без них результат постепенно уходит.</li>
           </ul>
-          <p className="mt-4 rounded-2xl bg-surface-2 p-3 text-[14px] text-muted">
+          <p className="hairline mt-4 rounded-2xl bg-surface-2/50 p-4 text-[14px] text-muted">
             <b className="text-ink">Про «крепкий и узкий».</b> Тренировка делает наружный сфинктер сильнее, выносливее, быстрее и управляемее:
             при сжатии он плотнее закрывает проход и вовремя включается при кашле и нагрузке. Давление в покое создаёт в основном внутренний,
             непроизвольный сфинктер — его тонус упражнения стойко не повышают, анатомия тоже не меняется.
@@ -173,7 +173,7 @@ export function Learn() {
             <Dont>упражнения вызывают боль, а после них — чувство неполного опорожнения, запор, трудно начать мочеиспускание. Это признаки перенапряжения мышц: нужна работа над расслаблением, а не над силой;</Dont>
             <Dont>есть недержание газов или кала — упражнения помогают, но врач подберёт программу и, возможно, биофидбэк.</Dont>
           </ul>
-          <p className="mt-4 font-semibold">Остановите укрепление — только расслабление и консультация специалиста по тазовому дну, если:</p>
+          <p className="font-display mt-5 text-[19px] leading-snug">Остановите укрепление — только расслабление и консультация специалиста по тазовому дну, если:</p>
           <ul className="mt-3 space-y-2.5">
             <Dont>появилась боль при семяизвержении;</Dont>
             <Dont>после тренировок болит промежность, яички или прямая кишка;</Dont>
@@ -215,7 +215,7 @@ export function Learn() {
             {SOURCES.map(([name, url]) => (
               <li key={url}>
                 <a href={url} target="_blank" rel="noreferrer" className="flex items-start gap-2 text-ink underline decoration-line underline-offset-4">
-                  <ExternalLink size={16} className="mt-1 shrink-0 text-muted" /> {name}
+                  <ExternalLink size={15} className="mt-1 shrink-0 text-gold" /> {name}
                 </a>
               </li>
             ))}

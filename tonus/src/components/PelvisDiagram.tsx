@@ -21,9 +21,9 @@ export function PelvisDiagram({ auto = true, contracted: forced }: { auto?: bool
     <figure className="select-none">
       <svg viewBox="0 0 320 220" className="w-full" role="img" aria-label="Схема мышц тазового дна, вид сбоку">
         {/* лобковая кость */}
-        <rect x="40" y="84" width="34" height="46" rx="14" fill="var(--surface-2)" stroke="var(--faint)" strokeWidth="1.5" />
+        <rect x="40" y="84" width="34" height="46" rx="14" fill="var(--surface-2)" stroke="var(--gold)" strokeOpacity="0.6" strokeWidth="1.2" />
         {/* крестец и копчик */}
-        <path d="M262 26 C 290 52, 292 92, 254 116" fill="none" stroke="var(--faint)" strokeWidth="12" strokeLinecap="round" opacity="0.55" />
+        <path d="M262 26 C 290 52, 292 92, 254 116" fill="none" stroke="var(--gold)" strokeWidth="11" strokeLinecap="round" opacity="0.35" />
         {/* гамак мышц */}
         <motion.path d={hammock} initial={false} animate={{ d: hammock }} transition={ease}
           fill="none" stroke="var(--calm)" strokeWidth="14" strokeLinecap="round" opacity="0.9" />
@@ -38,13 +38,13 @@ export function PelvisDiagram({ auto = true, contracted: forced }: { auto?: bool
             <path key={x} d={`M${x - 8} 108 L${x} 98 L${x + 8} 108 M${x} 99 L${x} 124`} fill="none" stroke="var(--squeeze)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
           ))}
         </motion.g>
-        <text x="57" y="62" textAnchor="middle" fontSize="11" fill="var(--muted)">лобковая</text>
-        <text x="57" y="75" textAnchor="middle" fontSize="11" fill="var(--muted)">кость</text>
-        <text x="292" y="132" textAnchor="middle" fontSize="11" fill="var(--muted)">копчик</text>
-        <text x="140" y="212" textAnchor="middle" fontSize="11" fill="var(--muted)">мышцы тазового дна</text>
-        <text x="230" y="186" textAnchor="start" fontSize="11" fill="var(--muted)">сфинктер</text>
+        <text x="57" y="62" textAnchor="middle" fontSize="9.5" letterSpacing="1.4" fill="var(--muted)">ЛОБКОВАЯ</text>
+        <text x="57" y="75" textAnchor="middle" fontSize="9.5" letterSpacing="1.4" fill="var(--muted)">КОСТЬ</text>
+        <text x="292" y="132" textAnchor="middle" fontSize="9.5" letterSpacing="1.4" fill="var(--muted)">КОПЧИК</text>
+        <text x="140" y="212" textAnchor="middle" fontSize="9.5" letterSpacing="1.4" fill="var(--muted)">МЫШЦЫ ТАЗОВОГО ДНА</text>
+        <text x="230" y="186" textAnchor="start" fontSize="9.5" letterSpacing="1.4" fill="var(--muted)">СФИНКТЕР</text>
       </svg>
-      <figcaption className="mt-1 flex items-center justify-center gap-2 text-[14px] font-medium">
+      <figcaption className="eyebrow mt-2 flex items-center justify-center gap-2.5 text-muted">
         <span className={`size-2.5 rounded-full transition-colors ${c ? 'bg-squeeze' : 'bg-calm'}`} />
         {c ? 'Сжатие: вверх и внутрь' : 'Расслабление: гамак опускается'}
       </figcaption>

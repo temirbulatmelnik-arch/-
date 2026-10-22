@@ -1,3 +1,4 @@
+import { motion } from 'motion/react';
 import { AlertTriangle, Check, Frown, Meh, Smile, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { ScreenHeader, capitalize, plural } from '../components/ui';
@@ -49,7 +50,7 @@ function Heatmap({ days, goal }: { days: Map<string, number>; goal: number }) {
                 onClick={() => setSel(k)}
                 title={`${fmtDay(d)}: ${n}`}
                 aria-label={`${fmtDay(d)}: ${n} ${plural(n, 'тренировка', 'тренировки', 'тренировок')}`}
-                className={`aspect-square rounded-[4px] ${future ? 'bg-transparent' : heatClass(n, goal)} ${k === sel ? 'ring-2 ring-ink' : ''}`}
+                className={`aspect-square rounded-[4px] ${future ? 'bg-transparent' : heatClass(n, goal)} ${k === sel ? 'ring-1 ring-gold ring-offset-1 ring-offset-surface' : ''}`}
               />
             );
           }),
@@ -84,8 +85,8 @@ function WeekBars({ days, goal }: { days: Map<string, number>; goal: number }) {
     <div>
       <div className="relative" style={{ height: H }}>
         {/* линия цели */}
-        <div className="absolute inset-x-0 border-t border-line" style={{ bottom: (goal / max) * H }} />
-        <span className="absolute right-0 -translate-y-full pb-0.5 text-[11px] text-muted" style={{ bottom: (goal / max) * H }}>цель {goal}</span>
+        <div className="absolute inset-x-0 border-t border-dashed border-gold/45" style={{ bottom: (goal / max) * H }} />
+        <span className="absolute right-0 -translate-y-full pb-0.5 text-[9.5px] tracking-[0.16em] text-gold uppercase" style={{ bottom: (goal / max) * H }}>цель {goal}</span>
         <div className="absolute inset-0 flex items-end justify-around border-b border-line">
           {list.map((d, i) => {
             const n = days.get(dayKey(d)) ?? 0;
@@ -93,7 +94,7 @@ function WeekBars({ days, goal }: { days: Map<string, number>; goal: number }) {
               <button key={i} type="button" onClick={() => setSel(i)} className="flex h-full w-10 items-end justify-center"
                 aria-label={`${fmtDay(d)}: ${n}`}>
                 <span
-                  className={`block w-6 rounded-t-[4px] transition-[height] duration-500 ${n >= goal ? 'bg-heat-3' : 'bg-heat-2'} ${i === sel ? 'opacity-100' : 'opacity-80'}`}
+                  className={`block w-[14px] rounded-full transition-[height] duration-700 ${n >= goal ? 'bg-gold-grad' : 'bg-heat-2'} ${i === sel ? 'opacity-100' : 'opacity-75'}`}
                   style={{ height: n ? Math.max(4, (n / max) * H) : 0 }}
                 />
               </button>
@@ -152,11 +153,11 @@ function TestChart({ points, unit }: { points: { at: string; v: number }[]; unit
         <line x1={0} x2={W} y1={y(0)} y2={y(0)} stroke="var(--line)" strokeWidth="1" />
         <line x1={0} x2={W} y1={y(top / 2)} y2={y(top / 2)} stroke="var(--line)" strokeWidth="1" opacity="0.6" />
         <text x={0} y={y(top / 2) - 4} className="fill-[var(--faint)] text-[10px]">{top / 2}</text>
-        <path d={path} fill="none" stroke="var(--calm)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={path} fill="none" stroke="var(--gold)" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
         {points.map((p, i) => (
           <g key={p.at} onClick={() => setSel(i)} className="cursor-pointer">
             <circle cx={x(i)} cy={y(p.v)} r={14} fill="transparent" />
-            <circle cx={x(i)} cy={y(p.v)} r={i === sel ? 5.5 : 4} fill="var(--calm)" stroke="var(--surface)" strokeWidth="2" />
+            <circle cx={x(i)} cy={y(p.v)} r={i === sel ? 5.5 : 4} fill="var(--gold)" stroke="var(--surface)" strokeWidth="2" />
           </g>
         ))}
         <text x={x(points.length - 1)} y={y(last.v) - 10} textAnchor={points.length > 1 ? 'end' : 'middle'} className="fill-[var(--ink)] text-[12px] font-semibold">{last.v} {unit}</text>
@@ -173,7 +174,7 @@ function TestChart({ points, unit }: { points: { at: string; v: number }[]; unit
 function Checks({ checks }: { checks: CheckRecord[] }) {
   const holds = checks.filter(c => c.hold !== undefined).map(c => ({ at: c.at, v: c.hold! }));
   const quick = checks.filter(c => c.quick !== undefined).map(c => ({ at: c.at, v: c.quick! }));
-  const Mark = ({ ok }: { ok: boolean }) => (ok ? <Check size={16} className="text-calm" aria-label="да" /> : <X size={16} className="text-squeeze" aria-label="нет" />);
+  const Mark = ({ ok }: { ok: boolean }) => (ok ? <Check size={16} className="text-gold" aria-label="да" /> : <X size={16} className="text-squeeze" aria-label="нет" />);
   if (!checks.length) return <p className="text-[14px] text-muted">Пройдите контроль на главном экране: проверка техники и самотест силы. Здесь появится динамика.</p>;
   return (
     <div className="space-y-5">
@@ -216,38 +217,38 @@ export function Progress() {
 
   return (
     <div className="pb-4">
-      <ScreenHeader title="Прогресс" subtitle="Регулярность важнее рекордов" />
+      <ScreenHeader eyebrow="Дневник" title="Прогресс" subtitle="Регулярность важнее рекордов" />
       <div className="space-y-3 px-5">
-        <section className="card p-5">
-          <div className="text-[13px] text-muted">Текущая серия</div>
-          <div className="text-[52px] leading-none font-semibold">{cur} <span className="text-[22px] font-medium text-muted">{plural(cur, 'день', 'дня', 'дней')}</span></div>
+        <motion.section initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} className="vitrine rounded-[28px] p-6 shadow-xl">
+          <div className="eyebrow text-gold">Текущая серия</div>
+          <div className="font-display mt-2 text-[68px] leading-none">{cur} <span className="text-[24px] italic text-muted">{plural(cur, 'день', 'дня', 'дней')}</span></div>
           <div className="mt-4 grid grid-cols-2 gap-2">
             {tiles.map(([k, v]) => (
-              <div key={k} className="rounded-2xl bg-surface-2 px-3 py-3">
-                <div className="text-[12px] text-muted">{k}</div>
-                <div className="text-[20px] font-semibold">{v}</div>
+              <div key={k} className="rounded-2xl border border-white/10 px-3.5 py-3">
+                <div className="text-[9.5px] tracking-[0.16em] text-muted uppercase">{k}</div>
+                <div className="font-display mt-1 text-[24px] leading-tight">{v}</div>
               </div>
             ))}
           </div>
-        </section>
+        </motion.section>
 
         <section className="card p-5">
-          <h2 className="mb-4 text-[16px] font-semibold">Тренировки за 7 дней</h2>
+          <h2 className="font-display mb-5 text-[24px] leading-tight">Тренировки за 7 дней</h2>
           <WeekBars days={days} goal={settings.dailyGoal} />
         </section>
 
         <section className="card p-5">
-          <h2 className="mb-4 text-[16px] font-semibold">Последние {WEEKS} недель</h2>
+          <h2 className="font-display mb-5 text-[24px] leading-tight">Последние {WEEKS} недель</h2>
           <Heatmap days={days} goal={settings.dailyGoal} />
         </section>
 
         <section className="card p-5">
-          <h2 className="mb-4 text-[16px] font-semibold">Самотесты и техника</h2>
+          <h2 className="font-display mb-5 text-[24px] leading-tight">Самотесты и техника</h2>
           <Checks checks={checks} />
         </section>
 
         <section className="card px-5 pt-4 pb-1">
-          <h2 className="text-[16px] font-semibold">Журнал</h2>
+          <h2 className="font-display text-[24px] leading-tight">Журнал</h2>
           {recent.length ? (
             <ul className="divide-y divide-line">{recent.map(s => <SessionRow key={s.id} s={s} />)}</ul>
           ) : (

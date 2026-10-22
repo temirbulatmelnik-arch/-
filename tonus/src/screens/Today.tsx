@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { ArrowUpRight, Circle, CircleCheck, ClipboardCheck, Clock, Flame, Lightbulb, Mic, MicOff, Play, Settings2, Smartphone, TrendingUp, Vibrate, VibrateOff, Volume2, VolumeX, Waves, X } from 'lucide-react';
+import { ArrowUpRight, Circle, CircleCheck, ClipboardCheck, Clock, Flame, Mic, MicOff, Play, Settings2, Smartphone, TrendingUp, Vibrate, VibrateOff, Volume2, VolumeX, Waves, X } from 'lucide-react';
 import { useMemo, type ReactNode } from 'react';
 import { Chip, IconButton, PrimaryButton, SecondaryButton, capitalize, plural } from '../components/ui';
 import { INTENSIVE_DAYS, WEEK_MIN, WEEK_TARGET, dayPlan } from '../engine/plan';
@@ -18,28 +18,46 @@ function greeting(d = new Date()) {
   return 'Добрый вечер';
 }
 
-function GoalRing({ done, goal, label }: { done: number; goal: number; label: string }) {
-  const r = 52, len = 2 * Math.PI * r;
+/** Плавное появление карточек по очереди */
+const rise = (i: number) => ({
+  initial: { opacity: 0, y: 14 }, animate: { opacity: 1, y: 0 },
+  transition: { duration: 0.55, delay: 0.07 * i, ease: [0.22, 1, 0.36, 1] as const },
+});
+
+/** Цель дня как циферблат: деления, золотая дуга и стрелка */
+function Dial({ done, goal, label }: { done: number; goal: number; label: string }) {
+  const r = 58, len = 2 * Math.PI * r;
   const p = Math.min(1, done / goal);
+  const ticks = Array.from({ length: 60 }, (_, i) => i);
   return (
-    <div className="relative size-[132px] shrink-0">
-      <svg viewBox="0 0 132 132" className="size-full -rotate-90" aria-hidden>
-        <circle cx="66" cy="66" r={r} fill="none" stroke="var(--surface-2)" strokeWidth="12" />
-        <motion.circle
-          cx="66" cy="66" r={r} fill="none" stroke="url(#goalGrad)" strokeWidth="12" strokeLinecap="round"
-          strokeDasharray={len} initial={{ strokeDashoffset: len }} animate={{ strokeDashoffset: len * (1 - p) }}
-          transition={{ duration: 1, ease: 'easeOut' }}
-        />
+    <div className="relative size-[150px] shrink-0">
+      <svg viewBox="0 0 150 150" className="size-full" aria-hidden>
         <defs>
-          <linearGradient id="goalGrad" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stopColor="var(--calm)" />
-            <stop offset="1" stopColor="var(--breath)" />
+          <linearGradient id="dialGold" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="#f3dcab" />
+            <stop offset="0.5" stopColor="#cfab6f" />
+            <stop offset="1" stopColor="#8c6b3a" />
           </linearGradient>
         </defs>
+        {ticks.map(i => {
+          const a = (i / 60) * Math.PI * 2, big = i % 5 === 0;
+          const r1 = 71, r2 = big ? 64 : 67.5;
+          return <line key={i} x1={75 + r1 * Math.sin(a)} y1={75 - r1 * Math.cos(a)} x2={75 + r2 * Math.sin(a)} y2={75 - r2 * Math.cos(a)}
+            stroke="#d6b67e" strokeOpacity={big ? 0.75 : 0.32} strokeWidth={big ? 1.4 : 0.8} strokeLinecap="round" />;
+        })}
+        <circle cx="75" cy="75" r={r} fill="none" stroke="#ffffff" strokeOpacity="0.08" strokeWidth="2.5" />
+        <motion.circle cx="75" cy="75" r={r} fill="none" stroke="url(#dialGold)" strokeWidth="2.5" strokeLinecap="round" transform="rotate(-90 75 75)"
+          strokeDasharray={len} initial={{ strokeDashoffset: len }} animate={{ strokeDashoffset: len * (1 - p) }} transition={{ duration: 1.4, ease: [0.22, 1, 0.36, 1] }} />
+        <circle cx="75" cy="75" r="49" fill="none" stroke="#d6b67e" strokeOpacity="0.18" strokeWidth="0.75" />
+        {/* метка-«жемчужина» на кольце показывает, сколько пройдено */}
+        <motion.g initial={{ rotate: 0 }} animate={{ rotate: p * 360 }} transition={{ duration: 1.4, ease: [0.22, 1, 0.36, 1] }} style={{ originX: '75px', originY: '75px' }}>
+          <line x1="75" y1="24" x2="75" y2="11" stroke="url(#dialGold)" strokeWidth="1.4" strokeLinecap="round" />
+          <circle cx="75" cy={75 - r} r="3.4" fill="#f3dcab" stroke="#8c6b3a" strokeWidth="0.8" />
+        </motion.g>
       </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <div className="text-[34px] leading-none font-semibold">{done}<span className="text-[20px] text-faint">/{goal}</span></div>
-        <div className="mt-1 text-[12px] text-muted">{label}</div>
+      <div className="absolute inset-0 flex flex-col items-center justify-center pt-1">
+        <div className="font-display text-[40px] leading-none">{done}<span className="text-[22px] opacity-50">/{goal}</span></div>
+        <div className="eyebrow mt-1.5 text-[9.5px] opacity-60">{label}</div>
       </div>
     </div>
   );
@@ -85,36 +103,40 @@ export function Today({ onStart, onCheck, onSettings, onPlan }: {
 
   return (
     <div className="px-5 pb-4">
-      <header className="flex items-center justify-between pt-6 pb-5">
+      <header className="flex items-start justify-between pt-7 pb-6">
         <div>
-          <p className="text-[15px] text-muted">{capitalize(new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' }))}</p>
-          <h1 className="text-[28px] leading-tight font-semibold tracking-tight">{greeting()}</h1>
+          <div className="eyebrow text-gold">{capitalize(new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' }))}</div>
+          <h1 className="font-display mt-2.5 text-[44px] leading-[0.98]">{greeting()}</h1>
         </div>
-        <IconButton label="Настройки" onClick={onSettings} className="bg-surface"><Settings2 size={22} /></IconButton>
+        <IconButton label="Настройки" onClick={onSettings} className="hairline mt-1 bg-surface"><Settings2 size={19} strokeWidth={1.6} /></IconButton>
       </header>
 
-      {/* цель дня или недели */}
-      <section className="card flex items-center gap-5 p-5">
-        {plan.mode === 'maintenance' ? <GoalRing done={week} goal={WEEK_TARGET} label="за неделю" /> : <GoalRing done={done} goal={goal} label="сегодня" />}
-        <div className="min-w-0">
-          <div className="text-[17px] font-semibold">{goalTitle}</div>
-          <p className="mt-1 text-[14px] leading-snug text-muted">{goalText}</p>
-          <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-gold/15 px-3 py-1 text-[14px] font-medium">
-            <Flame size={16} className="text-gold" />
-            {days ? `${days} ${plural(days, 'день', 'дня', 'дней')} подряд` : 'Начните серию'}
+      {/* цель дня или недели — циферблат на тёмной витрине */}
+      <motion.section {...rise(0)} className="vitrine relative overflow-hidden rounded-[32px] p-5 shadow-[var(--shadow)]">
+        <span className="pointer-events-none absolute -top-24 -right-16 size-64 rounded-full bg-[radial-gradient(circle,rgba(214,182,126,0.22),transparent_65%)]" />
+        <div className="relative flex items-center gap-4">
+          {plan.mode === 'maintenance' ? <Dial done={week} goal={WEEK_TARGET} label="за неделю" /> : <Dial done={done} goal={goal} label="сегодня" />}
+          <div className="min-w-0">
+            <div className="eyebrow text-[#d6b67e]">{plan.mode === 'maintenance' ? 'Неделя' : 'Сегодня'}</div>
+            <div className="font-display mt-1.5 text-[23px] leading-[1.1]">{goalTitle}</div>
+            <p className="mt-2 text-[13.5px] leading-snug text-muted">{goalText}</p>
+            <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-[#d6b67e]/45 px-3 py-1 text-[12.5px] font-medium tracking-wide">
+              <Flame size={14} className="text-[#d6b67e]" />
+              {days ? `${days} ${plural(days, 'день', 'дня', 'дней')} подряд` : 'Начните серию'}
+            </div>
           </div>
         </div>
-      </section>
+      </motion.section>
 
       {showInstall && (
-        <section className="mt-3 flex items-center gap-3 rounded-3xl bg-breath/15 p-4">
-          <span className="grid size-10 shrink-0 place-items-center rounded-2xl bg-breath/20 text-breath"><Smartphone size={20} /></span>
+        <section className="card mt-3 flex items-center gap-3 p-4">
+          <span className="grid size-10 shrink-0 place-items-center rounded-full bg-surface-2 text-gold"><Smartphone size={19} strokeWidth={1.6} /></span>
           <div className="min-w-0 flex-1">
-            <div className="text-[15px] font-semibold">Установите на экран «Домой»</div>
+            <div className="font-display text-[19px] leading-tight">Установите на экран «Домой»</div>
             <div className="text-[13px] text-muted">Без App Store: откроется как приложение и будет работать без интернета.</div>
           </div>
           <a href={INSTALL_URL} target={INSTALL_URL.startsWith('http') ? '_blank' : undefined} rel="noreferrer"
-            className="rounded-xl bg-breath px-3 py-2 text-[14px] font-semibold text-on-accent">Как</a>
+            className="bg-gold-grad rounded-full px-4 py-2 text-[12px] font-medium tracking-[0.14em] text-on-accent uppercase">Как</a>
           <button type="button" aria-label="Скрыть" onClick={() => setSettings({ installHintHidden: true })} className="-mr-1 p-1 text-faint"><X size={18} /></button>
         </section>
       )}
@@ -122,7 +144,7 @@ export function Today({ onStart, onCheck, onSettings, onPlan }: {
       {/* при дискомфорте или если мышца не отпускается — только расслабление */}
       {(discomfort || tense) && (
         <Notice tone="gold" icon={<Waves size={20} />} title="Сегодня — только расслабление"
-          action={<button type="button" onClick={() => onStart('relax')} className="rounded-xl bg-gold px-3 py-2 text-[14px] font-semibold text-on-accent">2 мин</button>}>
+          action={<button type="button" onClick={() => onStart('relax')} className="bg-gold-grad rounded-full px-4 py-2 text-[12px] font-medium tracking-[0.14em] text-on-accent uppercase">2 мин</button>}>
           {tense
             ? 'По последней проверке мышца не отпускается полностью. Это признак перенапряжения: пока только расслабление и консультация специалиста по тазовому дну.'
             : 'После дискомфорта 1–2 дня делайте только расслабление. Если боль повторяется — к специалисту.'}
@@ -132,45 +154,45 @@ export function Today({ onStart, onCheck, onSettings, onPlan }: {
       {check.due && (
         <Notice tone="breath" icon={<ClipboardCheck size={20} />}
           title={check.due === 'first' ? 'Сначала — проверка техники' : check.due === 'retry' ? 'Повторите проверку техники' : `Пора на контроль: ${check.days} ${plural(check.days ?? 0, 'день', 'дня', 'дней')} с прошлого`}
-          action={<button type="button" onClick={onCheck} className="rounded-xl bg-breath px-3 py-2 text-[14px] font-semibold text-on-accent">Пройти</button>}>
+          action={<button type="button" onClick={onCheck} className="bg-gold-grad rounded-full px-4 py-2 text-[12px] font-medium tracking-[0.14em] text-on-accent uppercase">Пройти</button>}>
           Зеркало, ладонь и самотест силы — 3–4 минуты. Без свежей проверки приложение не предложит следующий уровень.
         </Notice>
       )}
 
       {plan.mode === 'maintenance' && plan.suggest && (
         <Notice tone="calm" icon={<TrendingUp size={20} />} title="Пора на интенсивный блок"
-          action={<button type="button" onClick={startIntensive} className="rounded-xl bg-calm px-3 py-2 text-[14px] font-semibold text-on-accent">Начать</button>}>
+          action={<button type="button" onClick={startIntensive} className="bg-gold-grad rounded-full px-4 py-2 text-[12px] font-medium tracking-[0.14em] text-on-accent uppercase">Начать</button>}>
           {plan.suggest === 'drop' ? 'Самотест показал спад больше чем на 20 %.' : 'Прошло 3 месяца поддержки.'} 4 недели ежедневно на уровне «Пик», потом снова поддержка.
         </Notice>
       )}
 
       {/* готовность к следующему уровню */}
       {ready.ready && next && (
-        <motion.section initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mt-3 flex items-center gap-3 rounded-3xl bg-calm/15 p-4">
+        <motion.section initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="card mt-3 flex items-center gap-3 border-gold/50 p-4">
           <div className="min-w-0 flex-1">
-            <div className="text-[15px] font-semibold">{next.maintenance ? 'Пора на поддержку' : `Готовы к уровню ${next.id} «${next.name}»`}</div>
+            <div className="font-display text-[19px] leading-tight">{next.maintenance ? 'Пора на поддержку' : `Готовы к уровню ${next.id} «${next.name}»`}</div>
             <div className="text-[13px] text-muted">{ready.days} {plural(ready.days, 'день', 'дня', 'дней')} на уровне, все сжатия в полную силу и с запасом, техника проверена.</div>
           </div>
-          <button type="button" onClick={() => setLevel(next.id)} className="rounded-xl bg-calm px-3 py-2 text-[14px] font-semibold text-on-accent">Перейти</button>
+          <button type="button" onClick={() => setLevel(next.id)} className="bg-gold-grad rounded-full px-4 py-2 text-[12px] font-medium tracking-[0.14em] text-on-accent uppercase">Перейти</button>
         </motion.section>
       )}
       {ready.holdBack && plan.mode === 'training' && (
-        <section className="mt-3 rounded-3xl bg-gold/15 p-4 text-[14px] leading-snug">
+        <section className="card mt-3 p-4 text-[14px] leading-snug">
           Последние тренировки были тяжёлыми или с дискомфортом. Останьтесь на этом уровне, а при боли — на уровень ниже.
         </section>
       )}
 
       {/* основная тренировка */}
-      <section className="card mt-3 p-5">
+      <motion.section {...rise(1)} className="card mt-3 p-5">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-[13px] font-medium tracking-wide text-muted uppercase">
+            <div className="eyebrow text-gold">
               {plan.mode === 'training' ? `Основная · уровень ${level.id} из ${MAINTENANCE_ID - 1}` : plan.mode === 'intensive' ? `Интенсивный блок · день ${plan.day} из ${INTENSIVE_DAYS}` : 'Полная тренировка · поддержка'}
             </div>
-            <h2 className="mt-0.5 text-[22px] font-semibold">{level.name}</h2>
-            <p className="text-[14px] text-muted">{level.subtitle}</p>
+            <h2 className="font-display mt-2 text-[32px] leading-none">{level.name}</h2>
+            <p className="mt-1.5 text-[14px] text-muted">{level.subtitle}</p>
           </div>
-          <button type="button" onClick={onPlan} className="flex items-center gap-1 rounded-xl bg-surface-2 px-3 py-1.5 text-[13px] font-medium text-muted">
+          <button type="button" onClick={onPlan} className="hairline flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-medium tracking-[0.12em] text-muted uppercase">
             Программа <ArrowUpRight size={14} />
           </button>
         </div>
@@ -197,45 +219,42 @@ export function Today({ onStart, onCheck, onSettings, onPlan }: {
         {plan.mode === 'training' && Number.isFinite(ready.need) && !ready.ready && <NextLevel r={ready} />}
 
         {mainFirst ? (
-          <PrimaryButton onClick={() => onStart('main')} className="mt-5"><Play size={20} fill="currentColor" /> Начать основную</PrimaryButton>
+          <PrimaryButton onClick={() => onStart('main')} className="mt-5"><Play size={16} fill="currentColor" /> Начать основную</PrimaryButton>
         ) : (
-          <SecondaryButton onClick={() => onStart('main')} className="mt-5 w-full"><Play size={18} /> {mainToday ? 'Повторить основную' : 'Начать основную'}</SecondaryButton>
+          <SecondaryButton onClick={() => onStart('main')} className="mt-5 w-full"><Play size={16} /> {mainToday ? 'Повторить основную' : 'Начать основную'}</SecondaryButton>
         )}
 
         <div className="mt-3 flex gap-2">
           {quick.map(q => (
             <button key={q.label} type="button" onClick={q.set} aria-pressed={q.on}
-              className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2 text-[13px] font-medium transition ${q.on ? 'bg-surface-2 text-ink' : 'bg-transparent text-faint ring-1 ring-line ring-inset'}`}>
-              <q.icon size={16} /> {q.label}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-full border py-2 text-[12px] font-medium tracking-wide transition ${q.on ? 'border-gold/45 text-ink' : 'border-line text-faint'}`}>
+              <q.icon size={15} strokeWidth={1.6} className={q.on ? 'text-gold' : ''} /> {q.label}
             </button>
           ))}
         </div>
-      </section>
+      </motion.section>
 
       {/* лёгкая тренировка */}
-      <section className="card mt-3 p-5">
-        <div className="text-[13px] font-medium tracking-wide text-muted uppercase">{plan.mode === 'maintenance' ? 'Каждый день' : 'По желанию, 1–2 раза в день'}</div>
-        <h2 className="mt-0.5 text-[20px] font-semibold">{plan.mode === 'maintenance' ? 'Ежедневный «Knack»' : 'Лёгкая тренировка'}</h2>
+      <motion.section {...rise(2)} className="card mt-3 p-5">
+        <div className="eyebrow text-gold">{plan.mode === 'maintenance' ? 'Каждый день' : 'По желанию, 1–2 раза в день'}</div>
+        <h2 className="font-display mt-2 text-[27px] leading-none">{plan.mode === 'maintenance' ? 'Ежедневный «Knack»' : 'Лёгкая тренировка'}</h2>
         <p className="mt-1 text-[14px] text-muted">{capitalize(lightLevel.blocks.filter(b => b.type !== 'release').map(b => blockTitle(b).toLowerCase()).join(', '))} и расслабление.</p>
         <div className="mt-3 flex flex-wrap gap-2">
           <Chip><Clock size={14} /> {formatDuration(lightTl.total)}</Chip>
           <Chip tone="squeeze">{lightTl.contractions} {plural(lightTl.contractions, 'сокращение', 'сокращения', 'сокращений')}</Chip>
         </div>
         {!mainFirst && !goalMet ? (
-          <PrimaryButton onClick={() => onStart('light')} className="mt-4"><Play size={20} fill="currentColor" /> Лёгкая тренировка</PrimaryButton>
+          <PrimaryButton onClick={() => onStart('light')} className="mt-4"><Play size={16} fill="currentColor" /> Лёгкая тренировка</PrimaryButton>
         ) : (
-          <SecondaryButton onClick={() => onStart('light')} className="mt-4 w-full"><Play size={18} /> Лёгкая тренировка</SecondaryButton>
+          <SecondaryButton onClick={() => onStart('light')} className="mt-4 w-full"><Play size={16} /> Лёгкая тренировка</SecondaryButton>
         )}
-      </section>
+      </motion.section>
 
       {/* совет дня */}
-      <section className="card mt-3 flex gap-3 p-5">
-        <span className="grid size-10 shrink-0 place-items-center rounded-2xl bg-gold/15 text-gold"><Lightbulb size={20} /></span>
-        <div>
-          <div className="text-[15px] font-semibold">{tip.title}</div>
-          <p className="mt-1 text-[14px] leading-relaxed text-muted">{tip.text}</p>
-        </div>
-      </section>
+      <motion.figure {...rise(3)} className="mx-1 mt-9 border-l border-gold/60 pl-5">
+        <div className="eyebrow mb-2 text-gold">Совет дня · {tip.title}</div>
+        <blockquote className="font-display text-[20px] leading-snug italic">{tip.text}</blockquote>
+      </motion.figure>
     </div>
   );
 }
@@ -248,10 +267,10 @@ const NOTICE_TONES = {
 
 function Notice({ tone, icon, title, action, children }: { tone: keyof typeof NOTICE_TONES; icon: ReactNode; title: string; action: ReactNode; children: ReactNode }) {
   return (
-    <section className={`mt-3 rounded-3xl p-4 ${NOTICE_TONES[tone].split(' ')[0]}`}>
+    <section className="card mt-3 p-4">
       <div className="flex items-center gap-3">
-        <span className={`grid size-10 shrink-0 place-items-center rounded-2xl ${NOTICE_TONES[tone]}`}>{icon}</span>
-        <div className="min-w-0 flex-1 text-[15px] leading-snug font-semibold">{title}</div>
+        <span className={`grid size-10 shrink-0 place-items-center rounded-full ${NOTICE_TONES[tone]}`}>{icon}</span>
+        <div className="font-display min-w-0 flex-1 text-[19px] leading-tight">{title}</div>
         {action}
       </div>
       <p className="mt-2 text-[13px] leading-snug text-muted">{children}</p>
@@ -268,12 +287,12 @@ export function NextLevel({ r }: { r: LevelReadiness }) {
     [r.checked, 'Техника проверена'],
   ];
   return (
-    <div className="mt-4 rounded-2xl bg-surface-2 p-3">
-      <div className="text-[13px] font-medium text-muted">До следующего уровня</div>
+    <div className="mt-4 rounded-[20px] border border-line p-3.5">
+      <div className="eyebrow text-[10px] text-muted">До следующего уровня</div>
       <ul className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[13px]">
         {items.map(([ok, text]) => (
           <li key={text} className={`flex items-center gap-1.5 ${ok ? 'text-ink' : 'text-muted'}`}>
-            {ok ? <CircleCheck size={15} className="shrink-0 text-calm" /> : <Circle size={15} className="shrink-0 text-faint" />}{text}
+            {ok ? <CircleCheck size={15} className="shrink-0 text-gold" /> : <Circle size={15} className="shrink-0 text-faint" />}{text}
           </li>
         ))}
       </ul>
@@ -288,7 +307,7 @@ function BlockBar({ tl }: { tl: Timeline }) {
     <div className="mt-4 flex gap-[2px]" aria-hidden>
       {tl.blocks.map((b, i) => (
         <div key={i} style={{ flexGrow: b.end - b.start }}
-          className={`h-2 rounded-full ${BLOCK_INFO[b.type].color === 'squeeze' ? 'bg-squeeze/80' : b.type === 'breath' ? 'bg-breath/70' : 'bg-calm/70'}`} />
+          className={`h-[3px] rounded-full ${BLOCK_INFO[b.type].color === 'squeeze' ? 'bg-squeeze' : b.type === 'breath' ? 'bg-breath' : 'bg-calm'}`} />
       ))}
     </div>
   );
