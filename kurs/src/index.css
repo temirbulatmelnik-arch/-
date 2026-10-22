@@ -3,7 +3,7 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --font-sans: "Manrope Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Onest Variable", ui-sans-serif, system-ui, sans-serif;
   --color-bg: var(--bg);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
@@ -11,62 +11,67 @@
   --color-muted: var(--muted);
   --color-faint: var(--faint);
   --color-line: var(--line);
-  --color-accent: var(--accent);
-  --color-accent-soft: var(--accent-soft);
-  --color-danger: var(--danger);
+  --color-brass: var(--brass);
+  --color-pos: var(--pos);
+  --color-neg: var(--neg);
   --color-warn: var(--warn);
   --color-info: var(--info);
-  --color-on-accent: var(--on-accent);
-  --color-hero-ink: var(--hero-ink);
-  --color-hero-muted: var(--hero-muted);
+  --color-on-brass: var(--on-brass);
+  --color-card: var(--card-ink);
+  --color-card-muted: var(--card-muted);
+  --color-card-line: var(--card-line);
+  --color-card-brass: var(--card-brass);
 }
 
-/* Графит и мята: спокойный фон, изумрудный акцент для «можно», красный только для «нельзя/срочно» */
+/* Слоновая кость и латунь: тёплая бумага, чернила, одна «чёрная карта» с латунными деталями */
 :root {
-  --bg: #f2f4f1;
-  --surface: #ffffff;
-  --surface-2: #e8ede9;
-  --ink: #0f1d18;
-  --muted: #586862;
-  --faint: #8f9e98;
-  --line: #dde5e0;
-  --accent: #0b845e;
-  --accent-soft: #d4f0e3;
-  --danger: #d23b3b;
-  --warn: #c77d0a;
-  --info: #3466c9;
-  --on-accent: #ffffff;
-  --hero: linear-gradient(155deg, #134a37 0%, #0c3326 55%, #08241b 100%);
-  --hero-ink: #eefaf4;
-  --hero-muted: #9ccdb8;
-  --chart-plan: #0b845e;
-  --chart-fact: #3466c9;
-  --chart-base: #8f9e98;
-  --shadow: 0 1px 2px rgba(15, 40, 30, 0.05), 0 10px 28px -14px rgba(15, 50, 35, 0.22);
+  --bg: #f3f0ea;
+  --surface: #fdfcf9;
+  --surface-2: #ebe6dd;
+  --ink: #17150f;
+  --muted: #6c665c;
+  --faint: #a59e92;
+  --line: #e2dcd1;
+  --brass: #8d6a37;
+  --pos: #2d7550;
+  --neg: #b0402e;
+  --warn: #a3660f;
+  --info: #43608c;
+  --on-brass: #1b1409;
+  --brass-grad: linear-gradient(135deg, #ecd6a8 0%, #d1b07a 45%, #a9844c 100%);
+  --card-bg: radial-gradient(120% 90% at 100% 0%, rgba(214, 178, 118, 0.20) 0%, rgba(214, 178, 118, 0) 55%), linear-gradient(165deg, #2a261f 0%, #191713 55%, #100f0d 100%);
+  --card-ink: #f6f1e7;
+  --card-muted: #a69d8d;
+  --card-line: rgba(246, 241, 231, 0.10);
+  --card-brass: #dcbd86;
+  --chart-plan: #a26f1c;
+  --chart-fact: #3f62a0;
+  --chart-base: #a59e92;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 1px 2px rgba(40, 30, 15, 0.04);
   color-scheme: light;
 }
 
+/* Обсидиан и латунь */
 .dark {
-  --bg: #0a0f0d;
-  --surface: #121916;
-  --surface-2: #1a231f;
-  --ink: #e8f2ed;
-  --muted: #9aaea6;
-  --faint: #62746d;
-  --line: #222d29;
-  --accent: #35d29a;
-  --accent-soft: #123528;
-  --danger: #ff6464;
-  --warn: #f0b04a;
-  --info: #7aa2ff;
-  --on-accent: #04130d;
-  --hero: linear-gradient(155deg, #17543e 0%, #0e3628 50%, #0a2219 100%);
-  --hero-ink: #eefaf4;
-  --hero-muted: #93c7b1;
-  --chart-plan: #2bab7f;
-  --chart-fact: #6b8fe8;
-  --chart-base: #6d7f78;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 14px 36px -16px rgba(0, 0, 0, 0.7);
+  --bg: #0a0a0b;
+  --surface: #131314;
+  --surface-2: #1c1c1e;
+  --ink: #f2eee6;
+  --muted: #9b968c;
+  --faint: #5f5b54;
+  --line: #242427;
+  --brass: #d5b47c;
+  --pos: #8ec7a2;
+  --neg: #ee8b7a;
+  --warn: #e6b467;
+  --info: #93acd6;
+  --on-brass: #1b1409;
+  --card-bg: radial-gradient(120% 90% at 100% 0%, rgba(214, 178, 118, 0.16) 0%, rgba(214, 178, 118, 0) 55%), linear-gradient(165deg, #23201b 0%, #171614 55%, #0e0e0e 100%);
+  --card-line: rgba(214, 180, 124, 0.16);
+  --chart-plan: #bd8a36;
+  --chart-fact: #6a8de0;
+  --chart-base: #6a655d;
+  --shadow: none;
   color-scheme: dark;
 }
 
@@ -82,25 +87,45 @@ body {
   -webkit-font-smoothing: antialiased;
   min-height: 100dvh;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.005em;
 }
 
 button { cursor: pointer; }
 button:disabled { cursor: default; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+:focus-visible { outline: 1.5px solid var(--brass); outline-offset: 2px; border-radius: 12px; }
 
 .pt-safe { padding-top: max(env(safe-area-inset-top), 0px); }
 .pb-safe { padding-bottom: max(env(safe-area-inset-bottom), 0px); }
 
-.eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+/* мелкая разрядка над заголовками */
+.eyebrow { font-size: 10.5px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; }
+/* крупные суммы: тонкие, плотные */
+.figure { font-weight: 300; letter-spacing: -0.035em; font-feature-settings: "tnum", "lnum"; }
 
 .card {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 24px;
+  border-radius: 22px;
   box-shadow: var(--shadow);
 }
 
-.hero { background: var(--hero); color: var(--hero-ink); border-radius: 28px; box-shadow: 0 18px 40px -20px rgba(8, 40, 28, 0.6); }
+/* «чёрная карта» — главный блок экрана */
+.black-card {
+  background: var(--card-bg);
+  color: var(--card-ink);
+  border-radius: 28px;
+  border: 1px solid var(--card-line);
+  box-shadow: 0 24px 48px -28px rgba(20, 14, 4, 0.55), inset 0 1px 0 rgba(255, 240, 210, 0.06);
+  position: relative;
+  overflow: hidden;
+}
+.black-card::before {
+  content: ""; position: absolute; inset: 0 24px auto; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(220, 189, 134, 0.55), transparent);
+}
+
+.bg-brass-grad { background: var(--brass-grad); }
+.divide-hair > * + * { border-top: 1px solid var(--line); }
 
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; }
@@ -111,16 +136,17 @@ button:disabled { cursor: default; }
 }
 /* iOS не увеличивает страницу при фокусе, если шрифт ≥ 16px */
 @layer components {
-.field {
-  width: 100%;
-  background: var(--surface-2);
-  border: 1px solid transparent;
-  border-radius: 16px;
-  padding: 12px 14px;
-  font-size: 16px;
-  outline: none;
-}
-.field:focus { border-color: var(--accent); background: var(--surface); }
+  .field {
+    width: 100%;
+    background: var(--surface-2);
+    border: 1px solid transparent;
+    border-radius: 14px;
+    padding: 12px 14px;
+    font-size: 16px;
+    outline: none;
+    transition: border-color .15s, background .15s;
+  }
+  .field:focus { border-color: var(--brass); background: var(--surface); }
 }
 
 .dark input[type="date"]::-webkit-calendar-picker-indicator,

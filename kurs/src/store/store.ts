@@ -6,7 +6,8 @@ import { DEFAULT_MODEL } from '../domain/models';
 import { annuity } from '../domain/calendar';
 import { monthKey, monthsBetween, today } from '../domain/dates';
 import { setPlanSource, totalDebt, type PlanConfig } from '../domain/plan';
-import type { CalEvent, Debt, DebtSnapshot, EventMark, Expense, FixedItem, IncomeTemplate, PlanSeed, ReserveMove, Settings, WeeklyOverride, WishItem } from '../domain/types';
+import { mergeSeed, type PlanState } from '../domain/planUpdate';
+import type { CalEvent, CardBalance, ChecklistItem, Debt, DebtSnapshot, EventMark, Expense, FixedItem, IncomeTemplate, PlanSeed, ReserveMove, Settings, StrategySection, WeekClosure, WeeklyOverride, WishItem } from '../domain/types';
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
@@ -38,11 +39,37 @@ interface Data {
   overrides: Record<string, { amount?: number; date?: string }>;
   /** цифры плана из зашифрованного файла; null — нейтральные по умолчанию */
   plan: PlanConfig | null;
+  /** редакция загруженного плана и код к нему — чтобы подтягивать новые редакции без потери данных */
+  planRev: number;
+  planCode: string;
+  checklist: ChecklistItem[];
+  strategy: StrategySection[];
+  rules: string[];
+  /** отметки чек-листа на телефоне */
+  checks: Record<string, { done: boolean; at: string }>;
+  /** копилка недельных остатков — отдельный счёт */
+  savings: number;
+  savingsLog: ReserveMove[];
+  /** закрытые недели по понедельнику */
+  closures: Record<string, WeekClosure>;
+  /** остаток на зарплатной карте — для прогноза денег по дням */
+  cardBalance: CardBalance | null;
   settings: Settings;
 }
 
 interface Actions {
-  loadSeed: (seed: PlanSeed) => void;
+  loadSeed: (seed: PlanSeed, code?: string) => void;
+  /** новая редакция плана: стратегия меняется, данные остаются */
+  updateFromSeed: (seed: PlanSeed, code: string) => void;
+  /** обновление плана из чата «Финансы» */
+  applyPlanPatch: (patch: Partial<PlanState>) => void;
+  toggleCheck: (id: string) => void;
+  closeWeek: (c: Omit<WeekClosure, 'at'>) => void;
+  reopenWeek: (monday: string) => void;
+  moveSavings: (amount: number, note: string) => void;
+  setCardBalance: (b: CardBalance | null) => void;
+  setFixed: (list: FixedItem[]) => void;
+  clearOverride: (key: string) => void;
   startEmpty: () => void;
   addExpenses: (items: Omit<Expense, 'id' | 'createdAt'>[]) => void;
   updateExpense: (id: string, patch: Partial<Expense>) => void;
@@ -76,6 +103,7 @@ const nowIso = () => new Date().toISOString();
 const EMPTY: Data = {
   ready: false, asOf: today(), debts: [], incomes: [], fixed: [], oneOff: [], templateFrom: monthKey(today()),
   weeklyOverrides: [], planTrajectory: [], baselineTrajectory: [], reserve: 0, reserveLog: [], expenses: [], marks: {}, wishes: [], snapshots: [], overrides: {}, plan: null,
+  planRev: 0, planCode: '', checklist: [], strategy: [], rules: [], checks: {}, savings: 0, savingsLog: [], closures: {}, cardBalance: null,
   settings: DEFAULT_SETTINGS,
 };
 
@@ -102,10 +130,15 @@ export const useStore = create<State>()(
     (set, get) => ({
       ...EMPTY,
 
-      loadSeed: seed => set(s => ({
+      loadSeed: (seed, code = '') => set(s => ({
         ...EMPTY,
         settings: s.settings,
         ready: true,
+        planRev: seed.rev ?? 1,
+        planCode: code,
+        checklist: seed.checklist ?? [],
+        strategy: seed.strategy ?? [],
+        rules: seed.rules ?? [],
         asOf: seed.asOf,
         plan: seed.plan ?? null,
         debts: seed.debts,
@@ -123,6 +156,42 @@ export const useStore = create<State>()(
       })),
 
       startEmpty: () => set(s => ({ ...EMPTY, settings: s.settings, ready: true })),
+
+      updateFromSeed: (seed, code) => set(s => ({ ...mergeSeed(s, seed), planRev: seed.rev ?? s.planRev, planCode: code })),
+      applyPlanPatch: patch => set(s => {
+        const next: Partial<Data> = { ...patch };
+        if (patch.reserve != null && patch.reserve !== s.reserve) {
+          next.reserveLog = [...s.reserveLog, { id: uid(), date: today(), amount: patch.reserve - s.reserve, note: 'Сверка из чата «Финансы»' }];
+        }
+        return patch.debts ? { ...next, ...withSnapshot(patch.debts, s.snapshots) } : next;
+      }),
+      toggleCheck: id => set(s => {
+        const base = s.checklist.find(c => c.id === id)?.done ?? false;
+        const cur = s.checks[id]?.done ?? base;
+        return { checks: { ...s.checks, [id]: { done: !cur, at: nowIso() } } };
+      }),
+      closeWeek: c => set(s => ({
+        closures: { ...s.closures, [c.monday]: { ...c, at: nowIso() } },
+        ...(c.transferred > 0 ? { savings: s.savings + c.transferred, savingsLog: [...s.savingsLog, { id: uid(), date: today(), amount: c.transferred, note: 'Остаток недели' }] } : {}),
+      })),
+      reopenWeek: monday => set(s => {
+        const c = s.closures[monday];
+        if (!c) return {};
+        const closures = { ...s.closures };
+        delete closures[monday];
+        return {
+          closures,
+          ...(c.transferred > 0 ? { savings: s.savings - c.transferred, savingsLog: [...s.savingsLog, { id: uid(), date: today(), amount: -c.transferred, note: 'Неделя открыта заново' }] } : {}),
+        };
+      }),
+      moveSavings: (amount, note) => set(s => ({ savings: s.savings + amount, savingsLog: [...s.savingsLog, { id: uid(), date: today(), amount, note }] })),
+      setCardBalance: b => set({ cardBalance: b }),
+      setFixed: list => set({ fixed: list }),
+      clearOverride: key => set(s => {
+        const overrides = { ...s.overrides };
+        delete overrides[key];
+        return { overrides };
+      }),
 
       addExpenses: items => set(s => ({
         expenses: [...s.expenses, ...items.map(i => ({ ...i, id: uid(), createdAt: nowIso() }))].sort((a, b) => a.date.localeCompare(b.date)),
@@ -199,22 +268,27 @@ export const useStore = create<State>()(
       setSettings: patch => set(s => ({ settings: { ...s.settings, ...patch } })),
 
       exportData: () => {
-        const { settings, ...rest } = pickData(get());
-        // ключ API в резервную копию не кладём: файл может попасть в облако или к другим людям
-        return JSON.stringify({ app: 'kurs', version: 1, exportedAt: nowIso(), ...rest, settings: { ...settings, apiKey: '' } }, null, 1);
+        const { settings, planCode: _code, ...rest } = pickData(get());
+        // ключ API и код плана в резервную копию не кладём: файл может попасть в облако или к другим людям
+        return JSON.stringify({ app: 'kurs', version: 2, exportedAt: nowIso(), ...rest, settings: { ...settings, apiKey: '' } }, null, 1);
       },
       importData: raw => {
         const d = raw as Partial<Data> & { app?: string };
         if (!d || d.app !== 'kurs' || !Array.isArray(d.debts) || !Array.isArray(d.expenses)) return false;
-        set(s => ({ ...EMPTY, ...pickData(d as Data), ready: true, settings: { ...DEFAULT_SETTINGS, ...d.settings, apiKey: s.settings.apiKey } }));
+        set(s => ({ ...EMPTY, ...pickData({ ...EMPTY, ...d } as Data), fixed: withIds(d.fixed ?? []), ready: true, planCode: s.planCode, settings: { ...DEFAULT_SETTINGS, ...d.settings, apiKey: s.settings.apiKey } }));
         return true;
       },
       reset: () => set({ ...EMPTY }),
     }),
     {
       name: 'kurs',
-      version: 1,
+      version: 2,
       partialize: s => pickData(s),
+      // версия 1: обязательные платежи без id — добавляем, остальное новые поля берут значения по умолчанию
+      migrate: persisted => {
+        const p = persisted as Partial<Data>;
+        return { ...p, fixed: withIds(p.fixed ?? []) } as State;
+      },
       merge: (persisted, current) => {
         const p = persisted as Partial<Data> | undefined;
         return { ...current, ...p, settings: { ...DEFAULT_SETTINGS, ...p?.settings } };
@@ -225,6 +299,10 @@ export const useStore = create<State>()(
 
 // расчёты плана (этапы, лимиты) читают цифры прямо из хранилища
 setPlanSource(() => useStore.getState().plan);
+
+function withIds(list: (Omit<FixedItem, 'id'> & { id?: string })[]): FixedItem[] {
+  return list.map((f, i) => ({ ...f, id: f.id ?? `fixed-${i}` }));
+}
 
 function pickData(s: Data): Data {
   const keys = Object.keys(EMPTY) as (keyof Data)[];

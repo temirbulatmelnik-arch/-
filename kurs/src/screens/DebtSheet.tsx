@@ -2,7 +2,7 @@
 import { Lock, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { Field, PrimaryButton, SecondaryButton, Segmented, Sheet, Switch } from '../components/ui';
+import { Field, Money, PrimaryButton, SecondaryButton, Segmented, Sheet, Switch } from '../components/ui';
 import { ddmmyyyy, monthName, relDays } from '../domain/dates';
 import { parseAmount, pct, rub } from '../domain/money';
 import type { Debt, DebtKind } from '../domain/types';
@@ -42,16 +42,16 @@ function Body({ d }: { d: Debt }) {
   return (
     <div className="space-y-4 pt-1">
       <div className="card p-5">
-        <div className="text-[13px] font-semibold text-muted">{d.name}</div>
-        <div className="mt-1 text-[34px] font-extrabold tracking-tight">{rub(d.balance)}</div>
+        <div className="text-[13px] font-medium text-muted">{d.name}</div>
+        <Money value={d.balance} className="figure mt-1 block text-[40px] leading-none" />
         <div className="mt-2 flex flex-wrap gap-1.5 text-[12.5px]">
-          <span className="rounded-full bg-surface-2 px-2.5 py-1 font-semibold">ставка {pct(d.rate)}</span>
-          {d.limit && <span className="rounded-full bg-surface-2 px-2.5 py-1 font-semibold">лимит {rub(d.limit)}</span>}
-          <span className="rounded-full bg-surface-2 px-2.5 py-1 font-semibold">≈ {rub(interest)} процентов в месяц</span>
-          {d.targetClose && <span className="rounded-full bg-accent/12 px-2.5 py-1 font-semibold text-accent">закрыть: {monthName(d.targetClose)}</span>}
+          <span className="rounded-full bg-surface-2 px-2.5 py-1 font-medium">ставка {pct(d.rate)}</span>
+          {d.limit && <span className="rounded-full bg-surface-2 px-2.5 py-1 font-medium">лимит {rub(d.limit)}</span>}
+          <span className="rounded-full bg-surface-2 px-2.5 py-1 font-medium">≈ {rub(interest)} процентов в месяц</span>
+          {d.targetClose && <span className="rounded-full bg-brass/12 px-2.5 py-1 font-medium text-brass">закрыть: {monthName(d.targetClose)}</span>}
         </div>
         {d.frozen && !d.closed && (
-          <p className="mt-3 flex items-start gap-2 rounded-xl bg-danger/10 p-3 text-[13.5px] leading-snug text-danger">
+          <p className="mt-3 flex items-start gap-2 rounded-xl bg-neg/10 p-3 text-[13.5px] leading-snug text-neg">
             <Lock size={16} className="mt-0.5 shrink-0" /> Заморожена: только гасим. Банк предложит поднять лимит — отказ.
           </p>
         )}
@@ -64,7 +64,7 @@ function Body({ d }: { d: Debt }) {
         <>
           <div className="card space-y-3 p-4">
             <Field label="Текущий остаток (из приложения банка)" hint="Или загрузите скриншот экрана долга — «Курс» обновит сам.">
-              <input value={balance} onChange={e => setBalance(e.target.value)} inputMode="decimal" className="field text-[18px] font-bold" />
+              <input value={balance} onChange={e => setBalance(e.target.value)} inputMode="decimal" className="field text-[18px] font-medium" />
             </Field>
             <SecondaryButton className="w-full" disabled={parseAmount(balance) == null || parseAmount(balance) === d.balance}
               onClick={() => { updateDebt(d.id, { balance: parseAmount(balance)! }); toast('Остаток обновлён'); }}>Сохранить остаток</SecondaryButton>
@@ -72,7 +72,7 @@ function Body({ d }: { d: Debt }) {
 
           <div className="card space-y-3 p-4">
             <Field label="Внести досрочно" hint={d.kind === 'split' ? 'При досрочном погашении выберите «уменьшить платёж».' : d.kind === 'loan' ? 'Выберите досрочное погашение с сокращением срока.' : 'Сначала внесите обязательный платёж, сверх него — досрочно.'}>
-              <input value={extra} onChange={e => setExtra(e.target.value)} inputMode="decimal" placeholder="0" className="field text-[18px] font-bold" />
+              <input value={extra} onChange={e => setExtra(e.target.value)} inputMode="decimal" placeholder="0" className="field text-[18px] font-medium" />
             </Field>
             <Switch checked={fromReserve} onChange={setFromReserve} label="Деньги из резерва" hint={`Сейчас в резерве ${rub(reserve)}. Брать только сверх суммы, которую резерв должен держать.`} />
             <PrimaryButton disabled={extraValue <= 0} onClick={() => { prepay(d.id, Math.min(extraValue, d.balance), fromReserve); setExtra(''); toast(extraValue >= d.balance - 0.5 ? `${d.short} закрыт!` : 'Досрочный платёж учтён'); }}>
@@ -86,7 +86,7 @@ function Body({ d }: { d: Debt }) {
         <SecondaryButton className="w-full" onClick={() => updateDebt(d.id, { closed: false, closedOn: undefined, balance: Math.max(1, parseAmount(balance) ?? 1) })}>Открыть снова</SecondaryButton>
       )}
       <button type="button" onClick={() => { if (confirm(`Удалить «${d.short}» из приложения?`)) { removeDebt(d.id); set({ debt: null }); } }}
-        className="flex w-full items-center justify-center gap-1.5 py-2 text-[13px] font-semibold text-faint"><Trash2 size={14} /> Удалить долг из приложения</button>
+        className="flex w-full items-center justify-center gap-1.5 py-2 text-[13px] font-medium text-faint"><Trash2 size={14} /> Удалить долг из приложения</button>
     </div>
   );
 }

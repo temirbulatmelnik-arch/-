@@ -7,9 +7,14 @@ import { forecast } from './forecast';
 import { buildIcs } from './ics';
 import { rub, parseAmount } from './money';
 import { categoryLimit, currentPhase, DEFAULT_PLAN, setPlanSource, splitBonus, targetDebt, weeklyLimit, type PlanConfig } from './plan';
-import { fromAi } from './proposals';
+import { fromAi, fromDrafts } from './proposals';
+import { cashFlow } from './cashflow';
+import { applyChatPlan, mergeSeed, parseChatPlan, type PlanState } from './planUpdate';
+import { parseStatementText, isIncomeLine } from './pdf';
+import { weekReport, weekToClose } from './weekly';
+import { draft } from './statements';
 import { parseCsv, parseText } from './statements';
-import type { Debt, PlanSeed } from './types';
+import type { Debt, Expense, PlanSeed } from './types';
 import { open, seal } from './vault';
 
 const debt = (p: Partial<Debt>): Debt => ({
@@ -105,7 +110,7 @@ describe('план', () => {
 });
 
 describe('календарь', () => {
-  const cal = { debts: DEBTS, incomes: [{ kind: 'salary' as const, name: 'Зарплата', day: 10, amount: 48_648 }], fixed: [{ name: 'Связь', day: 1, amount: 1000 }], oneOff: [], templateFrom: '2027-01', weeklyOverrides: [] };
+  const cal = { debts: DEBTS, incomes: [{ kind: 'salary' as const, name: 'Зарплата', day: 10, amount: 48_648 }], fixed: [{ id: 'tel', name: 'Связь', day: 1, amount: 1000 }], oneOff: [], templateFrom: '2027-01', weeklyOverrides: [] };
   it('шаблон месяца: платежи, поступления, понедельники', () => {
     const ev = eventsBetween(cal, '2027-01-01', '2027-01-31');
     expect(ev.find(e => e.key === 'pay:loan:2027-01')?.date).toBe('2027-01-11');
@@ -222,5 +227,117 @@ describe('разбор ответа Claude → что обновить', () => {
     expect(r.items.find(i => i.type === 'tx')).toMatchObject({ tx: { source: 'credit' } });
     expect(r.items.find(i => i.type === 'mark')).toMatchObject({ event: { key: 'pay:loan:2027-01' }, amount: 45_000 });
     expect(r.warnings[0]).toMatch(/кредитной/);
+  });
+});
+
+describe('обязательные платежи по датам и прогноз денег', () => {
+  const cal = {
+    debts: [], incomes: [{ kind: 'salary' as const, name: 'Зарплата', day: 10, amount: 50_000 }], oneOff: [], templateFrom: '2026-11', weeklyOverrides: [],
+    fixed: [
+      { id: 'tel', name: 'Связь', day: 8, amount: 1000, from: '2026-11' },
+      { id: 'gym', name: 'Спортзал', day: 12, amount: 3000, from: '2026-11' },
+      { id: 'sub', name: 'Подписка', day: 22, amount: 2400, from: '2026-10' },
+    ],
+  };
+  it('каждый в свой день и со своего месяца', () => {
+    const oct = eventsBetween(cal, '2026-10-01', '2026-10-31').filter(e => e.key.startsWith('fix:'));
+    expect(oct.map(e => e.key)).toEqual(['fix:sub:2026-10']);
+    const nov = eventsBetween(cal, '2026-11-01', '2026-11-30').filter(e => e.key.startsWith('fix:'));
+    expect(nov.map(e => [e.date, e.amount])).toEqual([['2026-11-08', 1000], ['2026-11-12', 3000], ['2026-11-22', 2400]]);
+  });
+  it('перенос даты вручную: событие уходит в свой новый день, даже в другой месяц', () => {
+    const ev = eventsBetween({ ...cal, overrides: { 'fix:sub:2026-11': { date: '2026-12-02', amount: 2500 } } }, '2026-12-01', '2026-12-05');
+    expect(ev.find(e => e.key === 'fix:sub:2026-11')).toMatchObject({ date: '2026-12-02', amount: 2500, moved: true });
+  });
+  it('баланс карты по дням: минимум перед зарплатой', () => {
+    const paid = { 'fix:sub:2026-10': { done: true, amount: 2400, at: '' } };
+    const f = cashFlow(cal, paid, { amount: 5000, date: '2026-11-01', source: 'manual' }, '2026-11-30');
+    // пн 02.11 −10 000 недельного лимита, 08.11 −1 000 связь, пн 09.11 −10 000, 10.11 +50 000 зарплата
+    expect(f.byDay['2026-11-02']).toBe(-5000);
+    expect(f.byDay['2026-11-08']).toBe(-6000);
+    expect(f.byDay['2026-11-10']).toBe(34_000);
+    expect(f.min!.balance).toBe(-16_000);
+    expect(f.min!.event.date).toBe('2026-11-09');
+    // неоплаченная подписка прошлого месяца учитывается как платёж к оплате
+    expect(cashFlow(cal, {}, { amount: 5000, date: '2026-11-01', source: 'manual' }, '2026-11-30').points[0]).toMatchObject({ overdue: true, delta: -2400 });
+  });
+});
+
+describe('неделя', () => {
+  it('какую неделю закрывать', () => {
+    expect(weekToClose('2026-10-25', {})).toBe('2026-10-19'); // вс — текущую
+    expect(weekToClose('2026-10-26', {})).toBe('2026-10-19'); // пн — прошлую
+    expect(weekToClose('2026-10-26', { '2026-10-19': { monday: '2026-10-19', limit: 0, spent: 0, left: 0, transferred: 0, at: '' } })).toBe('2026-10-26');
+    expect(weekToClose('2026-10-22', {})).toBe('2026-10-19');
+  });
+  it('итог: лимит, траты по категориям, фикс и резерв не считаются', () => {
+    const e = (amount: number, category: Expense['category'], source: Expense['source'] = 'life') => ({ id: String(amount), date: '2026-11-03', amount, category, source, createdAt: '' });
+    const r = weekReport([e(1000, 'groceries'), e(500, 'taxi'), e(2400, 'fixed'), e(3000, 'health', 'reserve')], DEBTS, [], '2026-11-02');
+    expect(r.limit).toBe(10_000);
+    expect(r.spent).toBe(1500);
+    expect(r.left).toBe(8500);
+    expect(r.byCategory.map(c => c.id)).toEqual(['groceries', 'taxi']);
+  });
+});
+
+describe('выписка PDF (текст)', () => {
+  const raw = [
+    'Выписка по счёту за период с 26.10.2026 по 01.11.2026',
+    'Входящий остаток 12 000,00',
+    '26.10.2026 12:31 Оплата Пятёрочка 1234 -1 234,56 RUB',
+    '27.10.2026 08:10 YANDEX.GO -412,00',
+    '28.10.2026 Заработная плата +48 000,00',
+    'по реестру 15',
+    '30.10.2026 Погашение кредита ВТБ -44 694,66',
+    'Исходящий остаток 13 658,78',
+  ].join('\n');
+  it('строки, знаки, остаток и конец периода', () => {
+    const st = parseStatementText(raw);
+    expect(st.lines.map(l => [l.date, l.amount])).toEqual([['2026-10-26', 1234.56], ['2026-10-27', 412], ['2026-10-28', 48000], ['2026-10-30', 44694.66]]);
+    expect(st.lines.map(isIncomeLine)).toEqual([false, false, true, false]);
+    expect(st.closingBalance).toBe(13658.78);
+    expect(st.periodEnd).toBe('2026-11-01');
+  });
+  it('погашение кредита в выписке отмечает платёж в календаре, а не трату', () => {
+    const named = DEBTS.map(d => (d.id === 'loan' ? { ...d, name: 'Кредит ВТБ' } : d));
+    const cal = { debts: named, incomes: [], fixed: [], oneOff: [], templateFrom: '2026-10', weeklyOverrides: [] };
+    const st = parseStatementText(raw);
+    const rows = st.lines.map(l => draft(l.date, l.amount, l.text, { income: isIncomeLine(l) }));
+    const r = fromDrafts(rows, { cal, marks: {}, expenses: [], reserve: 0, now: '2026-11-01' }, '', { cardBalance: { amount: st.closingBalance!, date: st.periodEnd! } });
+    expect(r.items.find(i => i.type === 'mark')).toMatchObject({ event: { key: 'pay:loan:2026-11' }, amount: 44694.66 });
+    expect(r.items.filter(i => i.type === 'tx' && i.on).map(i => i.type === 'tx' && i.tx.category)).toEqual(['groceries', 'taxi']);
+    expect(r.items.find(i => i.type === 'card')).toMatchObject({ balance: 13658.78, date: '2026-11-01' });
+  });
+});
+
+describe('обмен с чатом и обновление плана', () => {
+  const state: PlanState = {
+    debts: DEBTS, incomes: [], fixed: [], oneOff: [], templateFrom: '2027-01', weeklyOverrides: [], planTrajectory: [], baselineTrajectory: [],
+    plan: PLAN, marks: { a: { done: true, at: '' } }, overrides: {}, checklist: [{ id: 'x', title: 'Старое' }], strategy: [], rules: [], reserve: 100_000,
+  };
+  it('находит JSON в ответе чата и применяет только присланное', () => {
+    const answer = 'Вот обновление:\n```json\n{"app":"kurs-plan","version":1,"checklist":[{"id":"y","title":"Новое","due":"2027-01-31"}],"debts":[{"id":"tbank","balance":280000}],"payments":[{"debtId":"sber","month":"2027-01","amount":19000,"date":"2027-01-29"}],"bonusRules":{"2027-04":{"targets":["split"]}}}\n```\nУдачи!';
+    const p = parseChatPlan(answer)!;
+    expect(p.app).toBe('kurs-plan');
+    const patch = applyChatPlan(p, state);
+    expect(patch.checklist).toEqual([{ id: 'y', title: 'Новое', due: '2027-01-31' }]);
+    expect(patch.debts!.find(d => d.id === 'tbank')!.balance).toBe(280_000);
+    expect(patch.debts!.find(d => d.id === 'sber')!.balance).toBe(400_000);
+    expect(patch.overrides!['pay:sber:2027-01']).toEqual({ amount: 19_000, date: '2027-01-29' });
+    expect(patch.plan!.bonusRules!['2026-12']).toBeTruthy(); // старые решения сохранились
+    expect(patch.plan!.bonusRules!['2027-04']).toEqual({ targets: ['split'] });
+    expect(patch.marks).toBeUndefined();
+    expect(parseChatPlan('просто текст')).toBeNull();
+  });
+  it('новая редакция плана: остатки и отметки с телефона остаются', () => {
+    const local = { ...state, debts: DEBTS.map(d => (d.id === 'alfa' ? { ...d, balance: 70_000 } : d)) };
+    const seed = { asOf: '2026-10-22', debts: DEBTS.map(d => (d.id === 'alfa' ? { ...d, note: 'новая заметка' } : d)), incomes: [], fixed: [{ id: 'tel', name: 'Связь', day: 8, amount: 1000 }], oneOff: [], templateFrom: '2027-01', reserve: 0, plan: PLAN, weeklyOverrides: [], planTrajectory: [], baselineTrajectory: [], marks: { b: { done: true, at: '' } }, checklist: [{ id: 'z', title: 'Из аудита' }] };
+    const m = mergeSeed(local, seed);
+    const alfa = m.debts!.find(d => d.id === 'alfa')!;
+    expect(alfa.balance).toBe(70_000);
+    expect(alfa.note).toBe('новая заметка');
+    expect(Object.keys(m.marks!).sort()).toEqual(['a', 'b']);
+    expect(m.fixed).toHaveLength(1);
+    expect(m.checklist![0].id).toBe('z');
   });
 });

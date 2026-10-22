@@ -1,7 +1,7 @@
 // Резерв: баланс, сколько он должен держать до следующей премии, история движений.
 import { useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { Field, PrimaryButton, SecondaryButton, Segmented, Sheet } from '../components/ui';
+import { Field, Money, PrimaryButton, SecondaryButton, Segmented, Sheet } from '../components/ui';
 import { addMonths, ddmm, monthIn, monthKey, monthsBetween } from '../domain/dates';
 import { parseAmount, rub } from '../domain/money';
 import { nextBonusMonth, RESERVE_BUFFER, shortfallFor } from '../domain/plan';
@@ -44,8 +44,8 @@ function Body() {
   return (
     <div className="space-y-4 pt-1">
       <div className="card p-5">
-        <div className="text-[13px] font-semibold text-muted">Сейчас</div>
-        <div className="mt-1 text-[34px] font-extrabold tracking-tight">{rub(reserve)}</div>
+        <div className="text-[13px] font-medium text-muted">Сейчас</div>
+        <Money value={reserve} className="figure mt-1 block text-[40px] leading-none" />
         <p className={`mt-2 text-[13.5px] leading-snug ${reserve < need ? 'text-warn' : 'text-muted'}`}>
           До премии {monthIn(next)} резерв должен держать ≈ {rub(need)}: {rub(RESERVE_BUFFER)} на непредвиденное и нехватку зарплаты за {[month, ...months].length} мес.
           {reserve < need ? ' Сейчас меньше — трать строго по недельному лимиту.' : ''}
@@ -55,19 +55,19 @@ function Body() {
       <div className="card space-y-3 p-4">
         <Segmented<Mode> value={mode} onChange={setMode} options={[{ id: 'out', label: 'Взял' }, { id: 'in', label: 'Положил' }, { id: 'set', label: 'Сверить' }]} />
         <Field label={mode === 'set' ? 'Баланс в приложении банка' : 'Сумма'} hint={mode === 'out' ? 'Только нехватка по плану, здоровье и срочное.' : mode === 'set' ? 'Или загрузите скриншот накопительного счёта.' : undefined}>
-          <input value={amount} onChange={e => setAmount(e.target.value)} inputMode="decimal" placeholder="0" className="field text-[18px] font-bold" />
+          <input value={amount} onChange={e => setAmount(e.target.value)} inputMode="decimal" placeholder="0" className="field text-[18px] font-medium" />
         </Field>
         {mode !== 'set' && <input value={note} onChange={e => setNote(e.target.value)} placeholder="На что" className="field" />}
         <PrimaryButton onClick={apply} disabled={mode === 'set' ? parseAmount(amount) == null : value <= 0}>Сохранить</PrimaryButton>
       </div>
 
       <div>
-        <div className="mb-2 px-1 text-[13px] font-semibold text-muted">История</div>
+        <div className="mb-2 px-1 text-[13px] font-medium text-muted">История</div>
         <div className="card divide-y divide-line overflow-hidden">
           {[...log].reverse().slice(0, 30).map(m => (
             <div key={m.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
               <span className="min-w-0"><span className="block truncate text-[14px] font-medium">{m.note}</span><span className="text-[12px] text-faint">{ddmm(m.date)}</span></span>
-              <span className={`shrink-0 text-[14px] font-bold ${m.amount >= 0 ? 'text-accent' : ''}`}>{rub(m.amount, { sign: true })}</span>
+              <span className={`shrink-0 text-[14px] font-medium ${m.amount >= 0 ? 'text-brass' : ''}`}>{rub(m.amount, { sign: true })}</span>
             </div>
           ))}
         </div>

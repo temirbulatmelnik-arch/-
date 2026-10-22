@@ -12,7 +12,8 @@ export type Proposal =
   | { id: string; type: 'debt'; on: boolean; debt: Debt; balance: number; minPayment: number; dueDate: string; event: CalEvent | null }
   | { id: string; type: 'mark'; on: boolean; event: CalEvent; amount: number }
   | { id: string; type: 'income'; on: boolean; event: CalEvent | null; amount: number; date: string; bonus: boolean }
-  | { id: string; type: 'reserve'; on: boolean; balance: number };
+  | { id: string; type: 'reserve'; on: boolean; balance: number }
+  | { id: string; type: 'card'; on: boolean; balance: number; date: string };
 
 export interface Review {
   summary: string;
@@ -47,10 +48,28 @@ export function markDuplicates(txs: DraftTx[], expenses: Expense[]): DraftTx[] {
 let n = 0;
 const pid = () => `p${n++}`;
 
-export function fromDrafts(txs: DraftTx[], ctx: Ctx, summary: string): Review {
+/** Платёж по долгу или обязательный платёж в выписке → отметка «оплачено» в календаре */
+function paymentMarks(txs: DraftTx[], ctx: Ctx, items: Proposal[]) {
+  for (const t of txs) {
+    if (t.income) continue;
+    const upper = t.merchant.toUpperCase();
+    let ev: CalEvent | null = null;
+    const debtId = /ПОГАШ|ПЛАТ[ЕЁ]Ж ПО|КРЕДИТ|ВНЕСЕНИ|ЗАДОЛЖ|СПЛИТ|РАССРОЧ/.test(upper) ? guessDebt(t.merchant, ctx.cal.debts) : '';
+    if (debtId) ev = matchEvent(ctx, t.date, e => e.kind === 'payment' && e.debtId === debtId);
+    if (!ev && t.category === 'fixed') {
+      // подписка или связь: по названию или по сумме (±2%)
+      ev = matchEvent(ctx, t.date, e => e.key.startsWith('fix:') && (upper.includes(e.title.toUpperCase()) || Math.abs(e.amount - t.amount) <= e.amount * 0.02));
+    }
+    if (ev && !items.some(i => i.type === 'mark' && i.event.key === ev!.key)) items.push({ id: pid(), type: 'mark', on: true, event: ev, amount: t.amount });
+  }
+}
+
+export function fromDrafts(txs: DraftTx[], ctx: Ctx, summary: string, extra: { cardBalance?: { amount: number; date: string } } = {}): Review {
   const items: Proposal[] = markDuplicates(txs, ctx.expenses)
     .filter(t => !t.income)
     .map(tx => ({ id: pid(), type: 'tx', on: !tx.skip && !tx.duplicate, tx }));
+  paymentMarks(txs, ctx, items);
+  if (extra.cardBalance) items.push({ id: pid(), type: 'card', on: true, balance: extra.cardBalance.amount, date: extra.cardBalance.date });
   const incomes = txs.filter(t => t.income);
   for (const t of incomes) {
     // вид поступления по подписи: «Зарплата» не должна закрыть ожидаемый «Аванс»
@@ -97,6 +116,9 @@ export function fromAi(r: AiResult, ctx: Ctx): Review {
   }
 
   if (r.savingsBalance > 0) items.push({ id: pid(), type: 'reserve', on: Math.abs(r.savingsBalance - ctx.reserve) >= 1, balance: r.savingsBalance });
+  if (r.accountBalance) items.push({ id: pid(), type: 'card', on: true, balance: r.accountBalance, date: valid(r.balanceDate) });
+  // подписки и связь, оплаченные в выписке, отмечаются в календаре
+  paymentMarks(drafts.filter(t => t.category === 'fixed'), ctx, items);
 
   const warnings = [...r.warnings];
   if (expenseTx.some(t => t.card === 'credit')) warnings.unshift('Есть траты с кредитной карты — это нарушение плана.');

@@ -1,4 +1,4 @@
-import { BellRing, Download, KeyRound, Smartphone, Upload } from 'lucide-react';
+import { BellRing, ChevronRight, Download, KeyRound, Smartphone, Upload } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { Field, PrimaryButton, SecondaryButton, Segmented, Sheet, Switch } from '../components/ui';
 import { MODELS } from '../domain/models';
@@ -22,7 +22,7 @@ export function SettingsSheet() {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="mt-5">
-      <h3 className="mb-2 px-1 text-[13px] font-bold tracking-wide text-muted uppercase">{title}</h3>
+      <h3 className="mb-2 px-1 text-[13px] font-medium tracking-wide text-muted uppercase">{title}</h3>
       <div className="card space-y-3 p-4">{children}</div>
     </section>
   );
@@ -49,6 +49,20 @@ function Body() {
 
   return (
     <div className="-mt-3">
+      <Section title="План">
+        {([
+          ['Связь с чатом «Финансы»', 'Отчёт для чата и обновление плана из него', { sync: true }],
+          ['Обязательные платежи', 'Связь, спортзал, подписки — даты и суммы', { fixed: true }],
+          ['Зарплатная карта', 'Остаток для прогноза по дням', { card: true }],
+          ['Остатки недель', 'Копилка и закрытые недели', { savings: true }],
+        ] as const).map(([title, hint, open]) => (
+          <button key={title} type="button" onClick={() => useUi.getState().set({ settings: false, ...open })} className="flex w-full items-center justify-between gap-3 py-1 text-left">
+            <span><span className="block text-[14.5px] font-medium">{title}</span><span className="block text-[12.5px] text-muted">{hint}</span></span>
+            <ChevronRight size={16} className="shrink-0 text-faint" />
+          </button>
+        ))}
+      </Section>
+
       <Section title="Напоминания">
         <p className="text-[13.5px] leading-snug text-muted">Веб-приложение не может само будить телефон по расписанию, поэтому напоминания идут через календарь iPhone: один файл — все платежи, поступления и понедельники на полгода, с будильниками.</p>
         <div className="grid grid-cols-3 gap-2">
@@ -56,7 +70,7 @@ function Body() {
             const on = st.remindDays.includes(d);
             return (
               <button key={d} type="button" onClick={() => s.setSettings({ remindDays: on ? st.remindDays.filter(x => x !== d) : [...st.remindDays, d] })}
-                className={`rounded-xl py-2.5 text-[13px] font-bold ${on ? 'bg-accent text-on-accent' : 'bg-surface-2 text-muted'}`}>
+                className={`rounded-xl py-2.5 text-[13px] font-medium ${on ? 'bg-brass text-on-brass' : 'bg-surface-2 text-muted'}`}>
                 {d === 0 ? 'в день' : d === 1 ? 'за день' : 'за 3 дня'}
               </button>
             );
@@ -82,15 +96,15 @@ function Body() {
         <Field label="Ключ API Anthropic" hint={<>Создаётся на console.anthropic.com → API Keys. Это отдельный платный доступ, не подписка Claude. Хранится только на этом телефоне и не попадает в резервную копию.</>}>
           <div className="flex gap-2">
             <input value={key} onChange={e => setKey(e.target.value)} type="password" placeholder="sk-ant-…" autoCapitalize="off" autoCorrect="off" spellCheck={false} className="field text-[14px]" />
-            <button type="button" onClick={() => { s.setSettings({ apiKey: key.trim() }); toast(key.trim() ? 'Ключ сохранён' : 'Ключ удалён'); }} className="shrink-0 rounded-2xl bg-accent px-4 text-on-accent" aria-label="Сохранить ключ"><KeyRound size={18} /></button>
+            <button type="button" onClick={() => { s.setSettings({ apiKey: key.trim() }); toast(key.trim() ? 'Ключ сохранён' : 'Ключ удалён'); }} className="shrink-0 rounded-2xl bg-brass px-4 text-on-brass" aria-label="Сохранить ключ"><KeyRound size={18} /></button>
           </div>
         </Field>
         <div className="space-y-1.5">
           {MODELS.map(m => (
             <button key={m.id} type="button" onClick={() => s.setSettings({ model: m.id })}
-              className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left ${st.model === m.id ? 'bg-accent/12 ring-1 ring-accent' : 'bg-surface-2'}`}>
-              <span><span className="block text-[14px] font-bold">{m.name}</span><span className="block text-[12px] text-muted">{m.note}</span></span>
-              {st.model === m.id && <span className="text-[12px] font-bold text-accent">выбрано</span>}
+              className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left ${st.model === m.id ? 'bg-brass/12 ring-1 ring-brass' : 'bg-surface-2'}`}>
+              <span><span className="block text-[14px] font-medium">{m.name}</span><span className="block text-[12px] text-muted">{m.note}</span></span>
+              {st.model === m.id && <span className="text-[12px] font-medium text-brass">выбрано</span>}
             </button>
           ))}
         </div>
@@ -111,9 +125,9 @@ function Body() {
       </Section>
 
       <Section title="Приложение">
-        <a href={INSTALL_URL} className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-surface-2 text-[15px] font-semibold"><Smartphone size={18} /> Установка на iPhone</a>
+        <a href={INSTALL_URL} className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-surface-2 text-[15px] font-medium"><Smartphone size={18} /> Установка на iPhone</a>
         <button type="button" onClick={() => { if (confirm('Стереть все данные «Курса» на этом телефоне? Сначала сохраните копию.')) { s.reset(); useUi.getState().set({ settings: false }); } }}
-          className="w-full py-2 text-[13px] font-semibold text-danger">Стереть все данные</button>
+          className="w-full py-2 text-[13px] font-medium text-neg">Стереть все данные</button>
         <p className="text-center text-[12px] text-faint">Курс {__APP_VERSION__}</p>
       </Section>
     </div>

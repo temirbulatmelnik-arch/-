@@ -49,7 +49,7 @@ export function forecast(opts: { debts: Debt[]; incomes: IncomeTemplate[]; reser
     }
 
     // досрочно — только в месяц премии, как в плане: резерв до следующей премии, остальное в долг
-    // (с учётом решений плана по месяцам: например, годовая — только в Альфу)
+    // (с учётом решений плана по месяцам: например, премия месяца — только в один долг)
     const bonusMonth = early ? earlyIncomes.some(e => e.incomeKind && BONUS_KINDS.includes(e.incomeKind)) : opts.incomes.some(t => t.months?.includes(mon));
     const rule = planConfig().bonusRules?.[m];
     if (bonusMonth || rule) {

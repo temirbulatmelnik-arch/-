@@ -47,17 +47,6 @@ export type CategoryId =
   | 'fixed' | 'groceries' | 'work' | 'taxi' | 'transport' | 'health'
   | 'shopping' | 'beauty' | 'tobacco' | 'fun';
 
-export interface Category {
-  id: CategoryId;
-  name: string;
-  short: string;
-  emoji: string;
-  /** лимит этапа 1 в месяц */
-  limit: number;
-  /** было в среднем в 2026 */
-  baseline: number;
-}
-
 /** Откуда оплачена трата: карта жизни (норма), резерв (по правилам) или кредитка (нарушение) */
 export type Source = 'life' | 'reserve' | 'credit';
 
@@ -69,7 +58,7 @@ export interface Expense {
   note?: string;
   source: Source;
   /** откуда пришла: вручную, выписка, скриншот */
-  origin?: 'manual' | 'csv' | 'text' | 'ai';
+  origin?: 'manual' | 'csv' | 'text' | 'ai' | 'pdf';
   /** для поиска дублей при импорте */
   fingerprint?: string;
   createdAt: string;
@@ -92,6 +81,8 @@ export interface CalEvent {
   debtId?: string;
   incomeKind?: IncomeKind;
   note?: string;
+  /** дата перенесена вручную */
+  moved?: boolean;
 }
 
 export type IncomeKind = 'salary' | 'bonusMonthly' | 'advance' | 'bonusQuarter' | 'bonusYear' | 'vacation' | 'thirteenth' | 'other';
@@ -159,6 +150,7 @@ export interface Settings {
   remindTime: string;
   lastBackupAt?: string;
   lastIcsAt?: string;
+  lastReportAt?: string;
   badge: boolean;
 }
 
@@ -171,14 +163,56 @@ export interface IncomeTemplate {
   months?: number[];
 }
 
+/** Обязательный ежемесячный платёж (связь, спортзал, подписка) — у каждого своя дата */
 export interface FixedItem {
+  id: string;
   name: string;
   day: number;
   amount: number;
+  /** с какого месяца (YYYY-MM) появляется в календаре; раньше — уже оплачено до начала плана */
+  from?: string;
+  note?: string;
+}
+
+/** Пункт чек-листа из аудита: разовое действие с желательным сроком */
+export interface ChecklistItem {
+  id: string;
+  title: string;
+  note?: string;
+  /** YYYY-MM-DD или YYYY-MM */
+  due?: string;
+  /** выполнено на момент составления плана */
+  done?: boolean;
+}
+
+/** Раздел стратегии из аудита: заголовок и текст (абзацы через пустую строку, пункты с «- ») */
+export interface StrategySection {
+  title: string;
+  text: string;
+}
+
+/** Итог недели: сколько потрачено из лимита и сколько остатка переведено в копилку */
+export interface WeekClosure {
+  monday: string;
+  limit: number;
+  spent: number;
+  left: number;
+  transferred: number;
+  at: string;
+}
+
+/** Баланс зарплатной карты на дату — от него считается прогноз денег по дням */
+export interface CardBalance {
+  amount: number;
+  /** YYYY-MM-DD: платежи и поступления до этой даты включительно уже учтены в балансе */
+  date: string;
+  source: 'manual' | 'statement';
 }
 
 /** Исходные данные плана (зашифрованы в seed.enc.json) */
 export interface PlanSeed {
+  /** номер редакции плана: выше, чем на телефоне, — приложение предложит обновиться без потери данных */
+  rev?: number;
   asOf: string;
   debts: Debt[];
   incomes: IncomeTemplate[];
@@ -196,6 +230,9 @@ export interface PlanSeed {
   baselineTrajectory: [string, number][];
   /** отметки по событиям, которые уже случились */
   marks?: Record<string, EventMark>;
+  checklist?: ChecklistItem[];
+  strategy?: StrategySection[];
+  rules?: string[];
 }
 
 export interface WeeklyOverride {

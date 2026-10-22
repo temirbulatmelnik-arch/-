@@ -62,20 +62,19 @@ export interface CategoryInfo {
   id: CategoryId;
   name: string;
   short: string;
-  emoji: string;
 }
 
 export const CATEGORIES: CategoryInfo[] = [
-  { id: 'groceries', name: 'Продукты', short: 'Продукты', emoji: '🛒' },
-  { id: 'work', name: 'Обеды и кофе на работе', short: 'Обеды', emoji: '🥪' },
-  { id: 'taxi', name: 'Такси', short: 'Такси', emoji: '🚕' },
-  { id: 'transport', name: 'Метро, автобусы, самокаты', short: 'Транспорт', emoji: '🚇' },
-  { id: 'health', name: 'Аптеки и медицина', short: 'Здоровье', emoji: '💊' },
-  { id: 'shopping', name: 'Одежда, маркетплейсы, быт', short: 'Покупки', emoji: '🛍️' },
-  { id: 'beauty', name: 'Красота, уход, оптика', short: 'Уход', emoji: '💈' },
-  { id: 'tobacco', name: 'Табак и алкоголь', short: 'Табак', emoji: '🚬' },
-  { id: 'fun', name: 'Кафе, доставка, досуг, подарки, прочее', short: 'Кафе и досуг', emoji: '☕' },
-  { id: 'fixed', name: 'Связь, спортзал, подписки', short: 'Фикс', emoji: '📱' },
+  { id: 'groceries', name: 'Продукты', short: 'Продукты' },
+  { id: 'work', name: 'Обеды и кофе на работе', short: 'Обеды' },
+  { id: 'taxi', name: 'Такси', short: 'Такси' },
+  { id: 'transport', name: 'Метро, автобусы, самокаты', short: 'Транспорт' },
+  { id: 'health', name: 'Аптеки и медицина', short: 'Здоровье' },
+  { id: 'shopping', name: 'Одежда, маркетплейсы, быт', short: 'Покупки' },
+  { id: 'beauty', name: 'Красота, уход, оптика', short: 'Уход' },
+  { id: 'tobacco', name: 'Табак и алкоголь', short: 'Табак' },
+  { id: 'fun', name: 'Кафе, доставка, досуг, подарки, прочее', short: 'Кафе и досуг' },
+  { id: 'fixed', name: 'Связь, спортзал, подписки', short: 'Подписки' },
 ];
 
 export const CATEGORY = Object.fromEntries(CATEGORIES.map(c => [c.id, c])) as Record<CategoryId, CategoryInfo>;
@@ -167,7 +166,7 @@ export function splitBonus(opts: { amount: number; reserve: number; date: string
   const keep = RESERVE_BUFFER + months.reduce((s, m) => s + shortfallFor(m, opts.debts), 0);
   let free = Math.max(0, opts.reserve + opts.amount - (rule?.full ? RESERVE_BUFFER : keep));
   const allocations: BonusSplit['allocations'] = [];
-  // решение плана на месяц ограничивает, какие долги гасим (например, годовая — только Альфа, остальное в резерв)
+  // решение плана на месяц ограничивает, какие долги гасим (например, премия месяца — только в один долг, остальное в резерв)
   const queue = openDebts(opts.debts).filter(d => !d.noPrepay && (!rule?.targets || rule.targets.includes(d.id))).sort((a, b) => a.order - b.order);
   for (const debt of queue) {
     if (free <= 0) break;
@@ -183,3 +182,11 @@ export function splitBonus(opts: { amount: number; reserve: number; date: string
 export const totalDebt = (debts: Debt[]) => openDebts(debts).reduce((s, d) => s + d.balance, 0);
 export const monthlyInterest = (debts: Debt[]) => openDebts(debts).reduce((s, d) => s + (d.balance * d.rate) / 12, 0);
 export { openDebts };
+
+/** Сколько резерв должен держать сейчас: 20 000 + нехватка за текущий месяц и месяцы до следующей премии */
+export function reserveNeed(now: string, debts: Debt[]): { need: number; next: string } {
+  const month = monthKey(now);
+  const next = nextBonusMonth(month);
+  const months = [month, ...Array.from({ length: Math.max(0, monthsBetween(month, next) - 1) }, (_, i) => addMonths(month, i + 1))];
+  return { need: RESERVE_BUFFER + months.reduce((s, m) => s + shortfallFor(m, debts), 0), next };
+}

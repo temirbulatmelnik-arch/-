@@ -1,8 +1,9 @@
 // Сводки для экранов: неделя, месяц по категориям, что требует внимания сегодня.
-import { addDays, daysBetween, monthKey, weekStart } from './dates';
+import { addDays, daysBetween, ddmm, monthKey, weekStart } from './dates';
 import { eventsBetween, urgency, type CalendarInput } from './calendar';
 import { baselineOf, BIG_PURCHASE_HOURS, CATEGORIES, categoryLimit, currentPhase, weeklyLimit } from './plan';
-import type { CalEvent, CategoryId, Debt, EventMark, Expense, WeeklyOverride, WishItem } from './types';
+import { checklistDue } from './planUpdate';
+import type { CalEvent, CategoryId, ChecklistItem, Debt, EventMark, Expense, WeeklyOverride, WishItem } from './types';
 
 /** Трата идёт из недельного лимита: с карты жизни и не фиксированный платёж */
 export const countsWeekly = (e: Expense) => e.source !== 'reserve' && e.category !== 'fixed';
@@ -60,12 +61,13 @@ export interface Alert {
   title: string;
   text?: string;
   event?: CalEvent;
-  action?: 'pay' | 'income' | 'weekly' | 'wish' | 'backup' | 'calendar';
+  action?: 'pay' | 'income' | 'weekly' | 'wish' | 'backup' | 'calendar' | 'check';
 }
 
 export function alerts(opts: {
   cal: CalendarInput; marks: Record<string, EventMark>; expenses: Expense[]; wishes: WishItem[];
   now: string; nowMs: number; lastBackupAt?: string; lastIcsAt?: string;
+  checklist?: ChecklistItem[]; checks?: Record<string, { done: boolean }>;
 }): Alert[] {
   const out: Alert[] = [];
   const events = eventsBetween(opts.cal, addDays(opts.now, -45), addDays(opts.now, 3));
@@ -93,6 +95,11 @@ export function alerts(opts: {
     if (opts.nowMs - Date.parse(w.createdAt) >= BIG_PURCHASE_HOURS * 3600_000) {
       out.push({ id: `wish:${w.id}`, tone: 'info', action: 'wish', title: `48 часов прошло: «${w.title}»`, text: 'Всё ещё нужно? Купить можно только из недельного лимита.' });
     }
+  }
+  for (const c of opts.checklist ?? []) {
+    if (opts.checks?.[c.id]?.done ?? c.done) continue;
+    const due = checklistDue(c, opts.now);
+    if (due === 'overdue' || due === 'soon') out.push({ id: `check:${c.id}`, tone: due === 'overdue' ? 'warn' : 'info', action: 'check', title: c.title, text: c.due ? `Срок — ${c.due.length === 7 ? c.due : ddmm(c.due)}${c.note ? `. ${c.note}` : ''}` : c.note });
   }
   if (!opts.lastBackupAt || daysBetween(opts.lastBackupAt.slice(0, 10), opts.now) >= 14) {
     out.push({ id: 'backup', tone: 'info', action: 'backup', title: opts.lastBackupAt ? 'Пора сохранить резервную копию' : 'Сохраните резервную копию', text: 'Данные живут только на этом телефоне. Копия — файл в «Файлах» или iCloud.' });

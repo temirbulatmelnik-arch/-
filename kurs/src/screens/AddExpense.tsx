@@ -1,7 +1,7 @@
 // Быстрый ввод траты: сумма → категория → «Записать». Больше 5 000 — предложить паузу 48 часов.
 import { AlertTriangle, Hourglass, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { PrimaryButton, SecondaryButton, Segmented, Sheet } from '../components/ui';
+import { CATEGORY_ICON, PrimaryButton, SecondaryButton, Segmented, Sheet } from '../components/ui';
 import { today } from '../domain/dates';
 import { parseAmount, rub } from '../domain/money';
 import { BIG_PURCHASE, CATEGORIES, CATEGORY } from '../domain/plan';
@@ -24,7 +24,7 @@ export function AddExpenseSheet() {
 // prefill приходит пропсом: во время анимации закрытия в состоянии уже null
 function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   const edit = p.edit;
-  const store = useStore();
+  const store = useStore.getState();
   const [amount, setAmount] = useState(edit ? String(edit.amount) : p.amount ? String(p.amount) : '');
   const [category, setCategory] = useState<CategoryId | null>(edit?.category ?? p.category ?? null);
   const [source, setSource] = useState<Source>(edit?.source ?? 'life');
@@ -65,14 +65,14 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   if (askPause) {
     return (
       <div className="space-y-4 pt-2">
-        <div className="flex items-start gap-3 rounded-2xl bg-warn/12 p-4">
-          <Hourglass className="mt-0.5 shrink-0 text-warn" size={22} />
+        <div className="card flex items-start gap-3 p-4">
+          <span className="grid size-10 shrink-0 place-items-center rounded-full bg-warn/12 text-warn"><Hourglass size={18} strokeWidth={1.5} /></span>
           <div>
-            <div className="text-[16px] font-bold">{rub(value)} — крупная трата</div>
-            <p className="mt-1 text-[14px] leading-snug text-muted">Правило плана: всё дороже {rub(BIG_PURCHASE)} — только из недельного лимита и после паузы 48 часов. Через двое суток желание часто проходит само.</p>
+            <div className="text-[16px] font-medium">{rub(value)} — крупная трата</div>
+            <p className="mt-1 text-[13.5px] leading-snug text-muted">Правило плана: всё дороже {rub(BIG_PURCHASE)} — только из недельного лимита и после паузы 48 часов. Через двое суток желание часто проходит само.</p>
           </div>
         </div>
-        <PrimaryButton onClick={pause}><Hourglass size={18} /> Отложить на 48 часов</PrimaryButton>
+        <PrimaryButton onClick={pause}><Hourglass size={17} strokeWidth={1.6} /> Отложить на 48 часов</PrimaryButton>
         <SecondaryButton onClick={save} className="w-full">Уже купил — просто записать</SecondaryButton>
       </div>
     );
@@ -80,20 +80,24 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
 
   return (
     <div className="space-y-4 pt-1">
-      <div className="flex items-baseline gap-2 rounded-3xl bg-surface p-4 ring-1 ring-line">
+      <div className="flex items-baseline gap-2 rounded-[22px] border border-line bg-surface px-5 py-4">
         <input ref={input} value={amount} onChange={e => setAmount(e.target.value)} inputMode="decimal" placeholder="0" aria-label="Сумма"
-          className="w-full min-w-0 bg-transparent text-[44px] leading-none font-extrabold tracking-tight outline-none placeholder:text-faint" />
-        <span className="text-[30px] font-bold text-muted">₽</span>
+          className="figure w-full min-w-0 bg-transparent text-[48px] leading-none outline-none placeholder:text-faint" />
+        <span className="text-[26px] text-muted">₽</span>
       </div>
 
       <div className="grid grid-cols-5 gap-2">
-        {CATEGORIES.map(c => (
-          <button key={c.id} type="button" onClick={() => setCategory(c.id)}
-            className={`flex aspect-square flex-col items-center justify-center gap-1 rounded-2xl text-center transition active:scale-95 ${category === c.id ? 'bg-accent text-on-accent' : 'bg-surface-2'}`}>
-            <span className="text-[22px] leading-none">{c.emoji}</span>
-            <span className="px-0.5 text-[10.5px] leading-tight font-bold">{c.short}</span>
-          </button>
-        ))}
+        {CATEGORIES.map(c => {
+          const Icon = CATEGORY_ICON[c.id];
+          const on = category === c.id;
+          return (
+            <button key={c.id} type="button" onClick={() => setCategory(c.id)}
+              className={`flex aspect-square flex-col items-center justify-center gap-1.5 rounded-2xl border text-center transition active:scale-95 ${on ? 'border-ink bg-ink text-bg' : 'border-line bg-surface'}`}>
+              <Icon size={20} strokeWidth={1.5} className={on ? 'text-card-brass' : 'text-ink/75'} />
+              <span className="px-0.5 text-[10px] leading-tight font-medium">{c.short}</span>
+            </button>
+          );
+        })}
       </div>
 
       <Segmented<Source> value={source} onChange={setSource} options={[
@@ -102,12 +106,12 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
         { id: 'credit', label: 'Кредитка' },
       ]} />
       {source === 'credit' && (
-        <p className="flex items-start gap-2 rounded-2xl bg-danger/10 p-3 text-[13.5px] leading-snug text-danger">
-          <AlertTriangle size={17} className="mt-0.5 shrink-0" /> Кредитки заморожены: только гасим. Запишем как нарушение плана — оно будет видно на главном экране.
+        <p className="flex items-start gap-2 rounded-2xl bg-neg/10 px-4 py-3 text-[13px] leading-snug text-neg">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" /> Кредитки заморожены — только гасим. Запишу как нарушение плана.
         </p>
       )}
       {source === 'reserve' && (
-        <p className="rounded-2xl bg-info/10 p-3 text-[13.5px] leading-snug text-info">Из резерва — только здоровье по назначению и срочное. Не входит в недельный лимит и уменьшает резерв.</p>
+        <p className="rounded-2xl bg-info/10 px-4 py-3 text-[13px] leading-snug text-info">Из резерва — только здоровье по назначению и срочное. Не входит в недельный лимит и уменьшает резерв.</p>
       )}
 
       <div className="grid grid-cols-[1fr_auto] gap-2">
@@ -115,10 +119,10 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
         <input type="date" value={date} onChange={e => setDate(e.target.value || today())} className="field w-[150px]" aria-label="Дата" />
       </div>
 
-      <PrimaryButton onClick={save} disabled={!valid}>{edit ? 'Сохранить' : category ? `Записать ${value ? rub(value) : ''}` : 'Выберите категорию'}</PrimaryButton>
+      <PrimaryButton onClick={save} disabled={!valid}>{edit ? 'Сохранить' : category ? `Записать${value ? ` ${rub(value)}` : ''}` : 'Выберите категорию'}</PrimaryButton>
       {edit && (
-        <SecondaryButton onClick={() => { store.removeExpense(edit.id); toast('Трата удалена'); onDone(); }} className="w-full text-danger">
-          <Trash2 size={17} /> Удалить
+        <SecondaryButton onClick={() => { store.removeExpense(edit.id); toast('Трата удалена'); onDone(); }} className="w-full text-neg">
+          <Trash2 size={16} strokeWidth={1.5} /> Удалить
         </SecondaryButton>
       )}
     </div>

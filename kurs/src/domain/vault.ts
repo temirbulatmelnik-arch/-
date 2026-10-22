@@ -3,6 +3,8 @@
 
 export interface Sealed {
   v: 1;
+  /** редакция плана — открытым текстом, чтобы телефон понял, что есть обновление, ещё до ввода кода */
+  rev?: number;
   iter: number;
   salt: string;
   iv: string;

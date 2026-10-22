@@ -36,8 +36,9 @@ export interface CalendarInput {
   overrides?: Record<string, { amount?: number; date?: string }>;
 }
 
-/** Все события в диапазоне дат [from, to] */
-export function eventsBetween(input: CalendarInput, from: string, to: string): CalEvent[] {
+/** Все события в диапазоне дат [from, to]. Перенос даты вручную учитывается: генерируем с запасом и фильтруем после. */
+export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: string): CalEvent[] {
+  const from = addDays(rangeFrom, -35), to = addDays(rangeTo, 35);
   const out: CalEvent[] = [];
   const byId = new Map(input.debts.map(d => [d.id, d]));
   const closedBefore = (debtId: string | undefined, date: string) => {
@@ -52,16 +53,15 @@ export function eventsBetween(input: CalendarInput, from: string, to: string): C
   }
 
   for (let m = monthKey(from); m <= monthKey(to); m = nextMonth(m)) {
-    if (m < input.templateFrom) continue;
     const push = (e: CalEvent) => { if (e.date >= from && e.date <= to) out.push(e); };
 
-    if (input.fixed.length) {
-      const day = Math.min(...input.fixed.map(f => f.day));
-      push({
-        key: `fix:${m}`, date: dayIn(m, day), dateMode: 'exact', kind: 'payment',
-        title: input.fixed.map(f => f.name).join(', '), amount: input.fixed.reduce((s, f) => s + f.amount, 0),
-      });
+    // обязательные платежи — у каждого своя дата; работают с собственного месяца, а не с начала шаблона
+    for (const f of input.fixed) {
+      if (m < (f.from ?? input.templateFrom)) continue;
+      push({ key: `fix:${f.id}:${m}`, date: dayIn(m, f.day), dateMode: 'exact', kind: 'payment', title: f.name, amount: f.amount, note: f.note });
     }
+
+    if (m < input.templateFrom) continue;
     for (const d of input.debts) {
       if (d.closed || d.balance <= 0.5) continue;
       if (d.rule.type === 'schedule') {
@@ -97,13 +97,27 @@ export function eventsBetween(input: CalendarInput, from: string, to: string): C
 
   const rank = { payment: 0, weekly: 1, income: 2 } as const;
   const ov = input.overrides ?? {};
-  return out.map(e => (ov[e.key] ? { ...e, amount: ov[e.key].amount ?? e.amount, date: ov[e.key].date ?? e.date, approx: ov[e.key].amount != null ? false : e.approx } : e)).sort((a, b) => a.date.localeCompare(b.date) || rank[a.kind] - rank[b.kind] || a.title.localeCompare(b.title));
+  return out
+    .map(e => (ov[e.key] ? { ...e, amount: ov[e.key].amount ?? e.amount, date: ov[e.key].date ?? e.date, approx: ov[e.key].amount != null ? false : e.approx, moved: ov[e.key].date != null && ov[e.key].date !== e.date } : e))
+    .filter(e => e.date >= rangeFrom && e.date <= rangeTo)
+    .sort((a, b) => a.date.localeCompare(b.date) || rank[a.kind] - rank[b.kind] || a.title.localeCompare(b.title));
 }
 
 const nextMonth = (m: string) => {
   const [y, mm] = m.split('-').map(Number);
   return mm === 12 ? `${y + 1}-01` : `${y}-${String(mm + 1).padStart(2, '0')}`;
 };
+
+export type EventGroup = 'debt' | 'fixed' | 'income' | 'weekly' | 'other';
+
+/** К какой группе относится строка календаря: кредиты, обязательные, поступления, понедельники, разовые */
+export function eventGroup(e: CalEvent): EventGroup {
+  if (e.kind === 'income') return 'income';
+  if (e.kind === 'weekly') return 'weekly';
+  if (e.debtId) return 'debt';
+  if (e.key.startsWith('fix:')) return 'fixed';
+  return 'other';
+}
 
 export type Urgency = 'done' | 'overdue' | 'soon' | 'later';
 

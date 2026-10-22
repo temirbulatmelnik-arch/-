@@ -24,6 +24,10 @@ export interface AiResult {
   incomes: { kind: IncomeKind; amount: number; date: string }[];
   /** баланс накопительного счёта (резерв); 0 — не видно */
   savingsBalance: number;
+  /** остаток на зарплатной (дебетовой) карте или счёте на конец выписки; 0 — не видно */
+  accountBalance: number;
+  /** дата этого остатка YYYY-MM-DD */
+  balanceDate: string;
   warnings: string[];
 }
 
@@ -49,6 +53,8 @@ function schema(debtIds: string[]) {
     payments: { type: 'array', items: obj({ debtId: { type: 'string', enum: debtIds }, amount: numT, date: str }) },
     incomes: { type: 'array', items: obj({ kind: { type: 'string', enum: ['salary', 'bonusMonthly', 'advance', 'bonusQuarter', 'bonusYear', 'vacation', 'thirteenth', 'other'] }, amount: numT, date: str }) },
     savingsBalance: numT,
+    accountBalance: numT,
+    balanceDate: str,
     warnings: { type: 'array', items: str },
   });
 }
@@ -66,6 +72,8 @@ function systemPrompt(debts: Debt[], now: string): string {
 - payments — подтверждение платежа по долгу (чек, «Платёж выполнен», погашение в истории).
 - incomes — поступления зарплаты (salary, ~10-го), премии за месяц (bonusMonthly, ~15-го), аванса (advance, ~25-го), квартальной (bonusQuarter) или годовой (bonusYear) премии, отпускных (vacation), 13-й зарплаты (thirteenth).
 - savingsBalance — баланс накопительного (сберегательного) счёта — это резерв, иначе 0.
+- accountBalance и balanceDate — остаток на зарплатной (дебетовой) карте или текущем счёте: исходящий остаток выписки на дату конца периода или баланс на экране карты. Не видно — 0 и пустая строка.
+Выписка PDF может быть длинной: перечисли в transactions все операции за период, без пропусков.
 - warnings — коротко по-русски: трата с кредитной карты, оформление новой рассрочки/кредита/«Долями»/Сплита, предложение повысить лимит, просрочка, комиссия, страховка или платные уведомления.
 
 Долги в приложении (debtId):

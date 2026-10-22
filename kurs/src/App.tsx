@@ -1,27 +1,31 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { CalendarClock, PieChart, TrendingDown, Wallet } from 'lucide-react';
+import { CalendarDays, Compass, PieChart, Wallet } from 'lucide-react';
 import { useEffect } from 'react';
 import { Toast } from './components/ui';
+import { CardSheet, SavingsSheet } from './screens/Accounts';
 import { AddExpenseSheet } from './screens/AddExpense';
 import { BonusSheet } from './screens/BonusSheet';
 import { Budget } from './screens/Budget';
-import { Calendar } from './screens/Calendar';
 import { DebtSheet } from './screens/DebtSheet';
-import { Debts } from './screens/Debts';
 import { EventSheet } from './screens/EventSheet';
+import { FixedSheet } from './screens/FixedSheet';
+import { ImportSheet } from './screens/Import';
 import { Onboarding } from './screens/Onboarding';
+import { Payments } from './screens/Payments';
+import { Plan } from './screens/Plan';
 import { updateBadge } from './screens/reminders';
 import { ReserveSheet } from './screens/ReserveSheet';
-import { ScanSheet } from './screens/Scan';
 import { SettingsSheet } from './screens/Settings';
+import { SyncSheet, UnlockSheet, usePlanUpdates } from './screens/Sync';
 import { Week } from './screens/Week';
+import { WeekSheet } from './screens/WeekSheet';
 import { useStore } from './store/store';
 import { useUi, type Tab } from './store/ui';
 
 const TABS: { id: Tab; label: string; icon: typeof Wallet }[] = [
   { id: 'week', label: 'Неделя', icon: Wallet },
-  { id: 'calendar', label: 'Платежи', icon: CalendarClock },
-  { id: 'debts', label: 'Долги', icon: TrendingDown },
+  { id: 'payments', label: 'Платежи', icon: CalendarDays },
+  { id: 'plan', label: 'План', icon: Compass },
   { id: 'budget', label: 'Бюджет', icon: PieChart },
 ];
 
@@ -32,7 +36,7 @@ function useTheme() {
     const apply = () => {
       const dark = theme === 'dark' || (theme === 'system' && mq.matches);
       document.documentElement.classList.toggle('dark', dark);
-      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#0a0f0d' : '#f2f4f1');
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#0a0a0b' : '#f3f0ea');
     };
     apply();
     mq.addEventListener('change', apply);
@@ -42,6 +46,7 @@ function useTheme() {
 
 export default function App() {
   useTheme();
+  usePlanUpdates();
   const ready = useStore(s => s.ready);
   const { tab, setTab, toast, set } = useUi();
 
@@ -58,25 +63,26 @@ export default function App() {
   if (!ready) return <Onboarding />;
 
   return (
-    <div className="pt-safe mx-auto min-h-dvh w-full max-w-md pb-28">
+    <div className="pt-safe mx-auto min-h-dvh w-full max-w-md pb-32">
       <AnimatePresence mode="wait">
         <motion.main key={tab} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
           {tab === 'week' && <Week />}
-          {tab === 'calendar' && <Calendar />}
-          {tab === 'debts' && <Debts />}
+          {tab === 'payments' && <Payments />}
+          {tab === 'plan' && <Plan />}
           {tab === 'budget' && <Budget />}
         </motion.main>
       </AnimatePresence>
 
-      <nav className="pb-safe fixed inset-x-0 bottom-0 z-30 border-t border-line bg-bg/85 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-md">
+      <nav className="pb-safe pointer-events-none fixed inset-x-0 bottom-0 z-30">
+        <div className="pointer-events-auto mx-auto mb-3 flex w-[min(92%,380px)] rounded-full border border-line bg-surface/85 p-1.5 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.35)] backdrop-blur-xl">
           {TABS.map(t => {
             const active = t.id === tab;
             return (
               <button key={t.id} type="button" onClick={() => setTab(t.id)} aria-current={active ? 'page' : undefined}
-                className={`relative flex flex-1 flex-col items-center gap-1 pt-2.5 pb-2 text-[11px] font-bold transition-colors ${active ? 'text-accent' : 'text-faint'}`}>
-                <t.icon size={23} strokeWidth={active ? 2.3 : 1.8} />
-                {t.label}
+                className={`relative flex flex-1 flex-col items-center gap-0.5 rounded-full py-2 text-[10.5px] font-medium transition-colors ${active ? 'text-ink' : 'text-faint'}`}>
+                {active && <motion.span layoutId="tab-bg" className="absolute inset-0 rounded-full bg-surface-2" transition={{ type: 'spring', stiffness: 500, damping: 40 }} />}
+                <t.icon size={20} strokeWidth={active ? 1.8 : 1.5} className={`relative ${active ? 'text-brass' : ''}`} />
+                <span className="relative">{t.label}</span>
               </button>
             );
           })}
@@ -84,12 +90,18 @@ export default function App() {
       </nav>
 
       <AddExpenseSheet />
-      <ScanSheet />
+      <ImportSheet />
       <EventSheet />
       <BonusSheet />
       <DebtSheet />
       <ReserveSheet />
       <SettingsSheet />
+      <WeekSheet />
+      <SavingsSheet />
+      <CardSheet />
+      <FixedSheet />
+      <SyncSheet />
+      <UnlockSheet />
       <Toast text={toast} onDone={() => set({ toast: null })} />
     </div>
   );

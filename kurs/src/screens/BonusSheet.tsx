@@ -2,7 +2,7 @@
 import { Minus, Plus } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { PrimaryButton, Sheet } from '../components/ui';
+import { Money, PrimaryButton, Sheet } from '../components/ui';
 import { monthName } from '../domain/dates';
 import { parseAmount, rub } from '../domain/money';
 import { RESERVE_BUFFER, shortfallFor, splitBonus } from '../domain/plan';
@@ -43,27 +43,27 @@ function Body() {
   return (
     <div className="space-y-4 pt-1">
       <label className="block">
-        <span className="mb-1.5 block text-[13px] font-semibold text-muted">{ev?.title ?? 'Сумма премии'}</span>
-        <div className="flex items-baseline gap-2 rounded-2xl bg-surface-2 px-4 py-3">
-          <input value={amount} onChange={x => setAmount(x.target.value)} inputMode="decimal" placeholder="0" className="w-full bg-transparent text-[30px] font-extrabold outline-none" autoFocus={!ev} />
-          <span className="text-[22px] font-bold text-muted">₽</span>
+        <span className="mb-1.5 block text-[13px] font-medium text-muted">{ev?.title ?? 'Сумма премии'}</span>
+        <div className="flex items-baseline gap-2 rounded-2xl border border-line bg-surface px-4 py-3">
+          <input value={amount} onChange={x => setAmount(x.target.value)} inputMode="decimal" placeholder="0" className="figure w-full bg-transparent text-[36px] leading-none outline-none" autoFocus={!ev} />
+          <span className="text-[22px] font-medium text-muted">₽</span>
         </div>
       </label>
 
-      {split.rule?.note && <p className="rounded-2xl bg-accent/10 p-4 text-[14px] leading-snug">{split.rule.note}</p>}
+      {split.rule?.note && <p className="rounded-2xl bg-brass/10 p-4 text-[14px] leading-snug">{split.rule.note}</p>}
 
       <div className="card p-4">
-        <div className="text-[13px] font-semibold text-muted">Оставить в резерве</div>
-        <div className="mt-1 text-[26px] font-extrabold">{rub(split.keep)}</div>
+        <div className="text-[13px] font-medium text-muted">Оставить в резерве</div>
+        <Money value={split.keep} className="figure mt-1 block text-[30px] leading-none" />
         <div className="mt-2 text-[13px] leading-snug text-muted">
           {rub(RESERVE_BUFFER)} на непредвиденное
           {split.months.map(m => <span key={m}> + {rub(shortfallFor(m, debts))} нехватки за {monthName(m).split(' ')[0]}</span>)}
         </div>
         <div className="mt-3 flex items-center justify-between rounded-xl bg-surface-2 px-3 py-2">
-          <span className="text-[13.5px] font-semibold">Месяцев до следующей премии</span>
+          <span className="text-[13.5px] font-medium">Месяцев до следующей премии</span>
           <span className="flex items-center gap-2">
             <button type="button" aria-label="Меньше" onClick={() => setMonths(Math.max(0, n - 1))} className="grid size-8 place-items-center rounded-full bg-surface"><Minus size={15} /></button>
-            <span className="w-5 text-center text-[16px] font-extrabold">{n}</span>
+            <span className="w-5 text-center text-[16px] font-medium">{n}</span>
             <button type="button" aria-label="Больше" onClick={() => setMonths(Math.min(6, n + 1))} className="grid size-8 place-items-center rounded-full bg-surface"><Plus size={15} /></button>
           </span>
         </div>
@@ -71,15 +71,15 @@ function Body() {
       </div>
 
       <div className="card p-4">
-        <div className="text-[13px] font-semibold text-muted">Сегодня же — досрочно в долг</div>
+        <div className="text-[13px] font-medium text-muted">Сегодня же — досрочно в долг</div>
         {alloc.length === 0 && <p className="mt-2 text-[14px] text-muted">{split.rule?.targets?.length === 0 ? 'По плану эти деньги целиком идут в резерв.' : 'Премии не хватает сверх резерва — всё остаётся в резерве.'}</p>}
         <div className="mt-2 space-y-2">
           {alloc.map(a => (
             <div key={a.debt.id} className="rounded-xl bg-surface-2 p-3">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[15px] font-bold">{a.debt.short}{a.amount >= a.debt.balance - 0.5 ? ' — закрыть' : ''}</span>
+                <span className="text-[15px] font-medium">{a.debt.short}{a.amount >= a.debt.balance - 0.5 ? ' — закрыть' : ''}</span>
                 <input value={edits[a.debt.id] ?? String(Math.round(a.amount))} onChange={x => setEdits({ ...edits, [a.debt.id]: x.target.value })} inputMode="decimal"
-                  className="w-32 rounded-lg bg-surface px-2 py-1 text-right text-[16px] font-extrabold outline-none" />
+                  className="w-32 rounded-lg bg-surface px-2 py-1 text-right text-[16px] font-medium outline-none" />
               </div>
               <div className="mt-1 text-[12.5px] leading-snug text-muted">
                 остаток {rub(a.debt.balance)}
@@ -92,7 +92,7 @@ function Body() {
         </div>
       </div>
 
-      <div className="rounded-2xl bg-accent/10 p-4 text-[14px] leading-relaxed">
+      <div className="rounded-2xl bg-brass/10 p-4 text-[14px] leading-relaxed">
         <b>Резерв после распределения: {rub(reserveAfter)}</b>
         {sent > 0 && <><br />В долг уходит {rub(sent)} — это примерно {rub(alloc.reduce((s, a) => s + (a.amount * a.debt.rate) / 12, 0))} процентов, которые не придётся платить в следующем месяце.</>}
       </div>
