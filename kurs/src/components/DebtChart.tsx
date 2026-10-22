@@ -38,7 +38,7 @@ export function DebtChart({ plan, fact, forecast, baseline }: { plan: Series; fa
   };
 
   // подписи оси: начало и январи (январь вплотную к началу не подписываем — налезет)
-  const ticks = months.filter(m => m === start || (m.endsWith('-01') && monthsBetween(start, m) >= 3));
+  const ticks = months.filter(m => m === start || (m.endsWith('-01') && monthsBetween(start, m) >= 5));
   const rows = hover ? [
     { name: 'План', color: 'var(--chart-plan)', v: valueAt(plan, hover) },
     { name: 'Факт', color: 'var(--chart-fact)', v: valueAt(fact, hover) },

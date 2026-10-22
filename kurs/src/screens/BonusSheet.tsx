@@ -50,6 +50,8 @@ function Body() {
         </div>
       </label>
 
+      {split.rule?.note && <p className="rounded-2xl bg-accent/10 p-4 text-[14px] leading-snug">{split.rule.note}</p>}
+
       <div className="card p-4">
         <div className="text-[13px] font-semibold text-muted">Оставить в резерве</div>
         <div className="mt-1 text-[26px] font-extrabold">{rub(split.keep)}</div>
@@ -70,7 +72,7 @@ function Body() {
 
       <div className="card p-4">
         <div className="text-[13px] font-semibold text-muted">Сегодня же — досрочно в долг</div>
-        {alloc.length === 0 && <p className="mt-2 text-[14px] text-muted">Премии не хватает сверх резерва — всё остаётся в резерве.</p>}
+        {alloc.length === 0 && <p className="mt-2 text-[14px] text-muted">{split.rule?.targets?.length === 0 ? 'По плану эти деньги целиком идут в резерв.' : 'Премии не хватает сверх резерва — всё остаётся в резерве.'}</p>}
         <div className="mt-2 space-y-2">
           {alloc.map(a => (
             <div key={a.debt.id} className="rounded-xl bg-surface-2 p-3">

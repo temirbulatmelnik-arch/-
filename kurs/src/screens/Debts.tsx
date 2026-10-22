@@ -4,7 +4,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { DebtChart } from '../components/DebtChart';
 import { Bar, Chip, Empty, ScreenHeader, SectionTitle } from '../components/ui';
 import { eventsBetween } from '../domain/calendar';
-import { addDays, addMonths, ddmm, monthKey, monthName } from '../domain/dates';
+import { addDays, addMonths, ddmm, monthIn, monthKey, monthName } from '../domain/dates';
 import { forecast } from '../domain/forecast';
 import { pct, rub } from '../domain/money';
 import { monthlyInterest, targetDebt, totalDebt } from '../domain/plan';
@@ -26,14 +26,14 @@ export const RULES = [
 export function Debts() {
   const now = useToday();
   const cal = useCal();
-  const [debts, incomes, reserve, plan, baseline, snapshots] = useStore(useShallow(s => [s.debts, s.incomes, s.reserve, s.planTrajectory, s.baselineTrajectory, s.snapshots]));
+  const [debts, incomes, reserve, plan, baseline, snapshots, oneOff, templateFrom] = useStore(useShallow(s => [s.debts, s.incomes, s.reserve, s.planTrajectory, s.baselineTrajectory, s.snapshots, s.oneOff, s.templateFrom]));
   const set = useUi(s => s.set);
   const [adding, setAdding] = useState(false);
   const total = totalDebt(debts);
   const start = plan[0]?.[1] ?? debts.reduce((s, d) => s + d.startBalance, 0);
   const target = targetDebt(debts);
   // текущий месяц уже идёт по календарю — модель считает со следующего
-  const fc = useMemo(() => forecast({ debts, incomes, reserve, from: `${addMonths(monthKey(now), 1)}-01` }), [debts, incomes, reserve, now]);
+  const fc = useMemo(() => forecast({ debts, incomes, reserve, from: `${addMonths(monthKey(now), 1)}-01`, oneOff, templateFrom }), [debts, incomes, reserve, now, oneOff, templateFrom]);
   const next = useMemo(() => {
     const ev = eventsBetween(cal, now, addDays(now, 45)).filter(e => e.kind === 'payment' && e.debtId);
     return Object.fromEntries(debts.map(d => [d.id, ev.find(e => e.debtId === d.id)]));
@@ -78,7 +78,10 @@ export function Debts() {
       {target && (
         <div className="mx-4 mt-3 flex items-start gap-3 rounded-2xl bg-accent/10 p-4">
           <Target size={20} className="mt-0.5 shrink-0 text-accent" />
-          <div className="text-[14px] leading-snug"><b>Цель сейчас: {target.short}</b> ({pct(target.rate)}). Все премии сверх резерва — сюда, пока не закроется.</div>
+          <div className="text-[14px] leading-snug"><b>Цель сейчас: {target.short}</b> ({pct(target.rate)}).{' '}
+            {target.targetClose && target.targetClose > monthKey(now)
+              ? <>Закрываем {monthIn(target.targetClose)} премией, до этого — только обязательные платежи.</>
+              : <>Все премии сверх резерва — сюда, пока не закроется.</>}</div>
         </div>
       )}
 

@@ -34,6 +34,10 @@ const PLAN: PlanConfig = {
   shortfallOverrides: { '2026-11': 40_000 },
   bonusMonths: [4, 7, 10, 12],
   merchantRules: [['work', ['КАНТИНА']]],
+  bonusRules: {
+    '2026-11': { targets: [] },
+    '2026-12': { targets: ['alfa'], months: 3, full: true },
+  },
 };
 setPlanSource(() => PLAN);
 
@@ -71,9 +75,9 @@ describe('план', () => {
   it('целевой долг — не рассрочка по графику', () => {
     expect(targetDebt(DEBTS)?.id).toBe('alfa');
   });
-  it('годовая премия: резерв на янв–мар, остальное в Альфу', () => {
-    const s = splitBonus({ amount: 140_000, reserve: 60_000, date: '2026-12-20', debts: DEBTS });
-    expect(s.months).toEqual(['2027-01', '2027-02', '2027-03']);
+  it('без решения плана: резерв на 3 месяца, остальное по порядку лавины', () => {
+    const s = splitBonus({ amount: 140_000, reserve: 60_000, date: '2027-01-20', debts: DEBTS, monthsOverride: 3 });
+    expect(s.months).toEqual(['2027-02', '2027-03', '2027-04']);
     expect(s.keep).toBe(20_000 + 3 * 30_000);
     expect(s.allocations[0].debt.id).toBe('alfa');
     expect(s.allocations[0].amount).toBe(80_000);
@@ -81,6 +85,16 @@ describe('план', () => {
     expect(s.allocations[1]).toMatchObject({ amount: 140_000 + 60_000 - 110_000 - 80_000 });
     expect(s.allocations[1].debt.id).toBe('split');
     expect(s.reserveAfter).toBe(110_000);
+  });
+  it('решение плана на месяц: ноябрьская — вся в резерв, декабрьская — только Альфа целиком', () => {
+    const nov = splitBonus({ amount: 60_000, reserve: 100_000, date: '2026-11-25', debts: DEBTS });
+    expect(nov.allocations).toHaveLength(0);
+    expect(nov.reserveAfter).toBe(160_000);
+    const dec = splitBonus({ amount: 130_000, reserve: 60_000, date: '2026-12-21', debts: DEBTS });
+    expect(dec.allocations.map(a => [a.debt.id, a.amount])).toEqual([['alfa', 80_000]]);
+    expect(dec.reserveAfter).toBe(110_000); // остальное в резерв, Сплит не трогаем
+    const short = splitBonus({ amount: 40_000, reserve: 30_000, date: '2026-12-21', debts: DEBTS });
+    expect(short.allocations).toHaveLength(0); // на целиком не хватает — не дробим
   });
   it('премии мало — всё в резерв', () => {
     const s = splitBonus({ amount: 30_000, reserve: 10_000, date: '2027-07-21', debts: DEBTS });
@@ -125,6 +139,7 @@ describe('прогноз', () => {
     });
     expect(f.freeMonth).not.toBeNull();
     expect(f.freeMonth! <= '2029-06').toBe(true);
+    expect(f.closeMonth.alfa).toBe('2026-12'); // декабрьская — Альфа целиком
     expect(f.closeMonth.alfa! <= f.closeMonth.tbank!).toBe(true);
     expect(f.closeMonth.tbank! <= f.closeMonth.loan!).toBe(true);
   });
