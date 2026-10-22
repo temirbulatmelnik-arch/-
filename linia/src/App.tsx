@@ -1,7 +1,9 @@
 import { AnimatePresence, motion } from 'motion/react';
 import { BookOpen, ChartSpline, Sparkles } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ExerciseDemo } from './components/Exercise';
+import { Figure, viewFor } from './components/Figure';
+import type { FigureMotion } from './components/figureTypes';
 import { Sheet } from './components/ui';
 import { unlockAudio } from './engine/cues';
 import { EXERCISES, type BlockId, type ExerciseId } from './engine/exercises';
@@ -46,6 +48,13 @@ function useTheme() {
   }, [theme]);
 }
 
+/** Служебный кадр: упражнение на выбранной стороне в конечной точке движения (#3d=doorway:r) */
+function StillFigure({ ex, side, xray }: { ex: ExerciseId; side: 'l' | 'r'; xray: boolean }) {
+  const e = EXERCISES[ex];
+  const motion = useRef<FigureMotion>({ anim: e.anim, amount: 1, phase: 'hold', side });
+  return <Figure motion={motion} pose={e.pose} view={viewFor(ex)} xray={xray} muscles={e.muscles} className="aspect-square w-full rounded-[28px] bg-surface-2" />;
+}
+
 export interface Actions {
   openBlock: (b: BlockId) => void;
   start: (b: BlockId, kind: SessionKind) => void;
@@ -69,8 +78,15 @@ export default function App() {
   useEffect(() => window.scrollTo({ top: 0 }), [tab, block]);
 
   // служебный просмотр одного упражнения в 3D: #3d=nod_supine или #3d=nod_supine:skin
-  const debug = location.hash.match(/^#3d=(\w+)(:skin)?/);
-  if (debug && debug[1] in EXERCISES) return <div className="mx-auto max-w-md p-4"><ExerciseDemo ex={debug[1] as ExerciseId} initialXray={!debug[2]} autoRotate={false} /></div>;
+  const debug = location.hash.match(/^#3d=(\w+)(:skin)?(?::([lr]))?/);
+  if (debug && debug[1] in EXERCISES) {
+    const ex = debug[1] as ExerciseId;
+    return (
+      <div className="mx-auto max-w-md p-4">
+        {debug[3] ? <StillFigure ex={ex} side={debug[3] as 'l' | 'r'} xray={!debug[2]} /> : <ExerciseDemo ex={ex} initialXray={!debug[2]} autoRotate={false} />}
+      </div>
+    );
+  }
   if (!onboarded) return <Onboarding />;
 
   const actions: Actions = {

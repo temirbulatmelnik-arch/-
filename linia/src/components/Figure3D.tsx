@@ -111,6 +111,7 @@ const restOf = (meta: AthleteMeta, name: string) => new THREE.Vector3(...meta.bo
 /** Своя копия скелета для каждой фигуры на экране; тело и анатомия — на одном скелете */
 function createInstance(data: Loaded) {
   const { meta } = data;
+  if (meta.landmarks?.eyeY) LM = meta.landmarks;
   const bones = meta.bones.map(b => Object.assign(new THREE.Bone(), { name: b.name }));
   meta.bones.forEach((b, i) => {
     const p = b.parent >= 0 ? meta.bones[b.parent].head : [0, 0, 0];
@@ -163,7 +164,16 @@ interface Spec {
   pivot?: { bone: string; world: Vec3 };
   /** сидя: таз на сиденье */
   seat?: boolean;
+  /** кисть в точку у лица или головы: запястье ставится в target, локоть — в сторону pole (двухзвенная ИК) */
+  reach?: Reach[];
 }
+
+/** Точки и направления — как для левой руки, для правой зеркалятся. target — положение запястья в позе покоя,
+ *  закреплённое на кости bone (едет вместе с ней при кивке и наклоне). */
+interface Reach { side: number; bone: string; target: Vec3; pole: Vec3; hand: Vec3 }
+
+/** Ориентиры лица из файла модели — для точек касания */
+let LM = { eyeY: 1.791, eyeZ: 0.126, menton: 1.685 };
 
 const D = THREE.MathUtils.degToRad;
 const qEuler = (x: number, y = 0, z = 0) => new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z, 'XYZ'));
@@ -190,7 +200,8 @@ function arms(spec: Spec, up: Vec3, fore: Vec3, hand?: Vec3, only?: 1 | -1) {
 function legs(spec: Spec, thigh: Vec3, calf: Vec3) {
   for (const [s, x] of [['l', 1], ['r', -1]] as const) spec.aims.push([`thigh_${s}`, `calf_${s}`, sx(thigh, x)], [`calf_${s}`, `foot_${s}`, sx(calf, x)]);
 }
-const armSide = (spec: Spec, side: number, up: Vec3, fore: Vec3, hand?: Vec3) => arms(spec, sx(up, side), sx(fore, side), hand && sx(hand, side), side as 1 | -1);
+/** одна рука: направления — как для левой, для правой их зеркалит arms() */
+const armSide = (spec: Spec, side: number, up: Vec3, fore: Vec3, hand?: Vec3) => arms(spec, up, fore, hand, side > 0 ? 1 : -1);
 
 /** Положение тела: поворот фигуры и исходные направления рук и ног */
 function basePose(pose: Pose, side: number): Spec {
@@ -267,12 +278,15 @@ function animSpec(anim: Anim, pose: Pose, a: number, side: number, t: number): S
   const spec = basePose(pose, side);
   const r = spec.rots;
   const retract = (k: number) => { r.clavicle_l = [0, 0.22 * k, -0.08 * k]; r.clavicle_r = [0, -0.22 * k, 0.08 * k]; };
-  const fistUnderChin = () => armSide(spec, -1, [0.18, -0.55, 0.82], [-0.35, 0.82, 0.45], [-0.3, 0.6, 0.75]);
+  const reach = (rs: Reach[]) => { spec.reach = [...(spec.reach ?? []), ...rs]; };
+  // кисть ребром под подбородком, между подбородком и грудиной; держится за грудную клетку — подбородок давит на неё
+  const fistUnderChin = () => reach([{ side: -1, bone: 'spine_03', target: [0.09, LM.menton - 0.04, 0.12], pole: [0.6, -1, 0.3], hand: [-1, 0.05, 0.05] }]);
   switch (anim) {
     case 'nod': r.head = [0.2 * a, 0, 0]; r.neck_01 = [-0.04 * a, 0, 0]; break;
     case 'nodPress':
       r.head = [0.15, 0, 0];
-      armSide(spec, side, [0.3, 0.1, 0.95], [-0.3, 0.85, 0.42], [-0.2, 0.9, 0.35]);
+      // ладонь на лбу чуть сбоку
+      reach([{ side, bone: 'head', target: [0.057, LM.eyeY - 0.012, LM.eyeZ + 0.03], pole: [0.8, -0.5, 0.4], hand: [-0.45, 0.85, -0.25] }]);
       break;
     case 'headLift': r.neck_01 = [0.34 * a, 0, 0]; r.head = [0.22 * a, 0, 0]; break;
     case 'er':
@@ -301,15 +315,18 @@ function animSpec(anim: Anim, pose: Pose, a: number, side: number, t: number): S
     case 'trapStretch':
       r.neck_01 = [0.08 * a, 0, side * 0.3 * a]; r.head = [0.12 * a, 0, side * 0.12 * a];
       armSide(spec, side, [0.25, -1, -0.05], [0.12, -1, 0.05]);
-      armSide(spec, -side, [0.45, 0.55, 0.4], [-0.55, 0.65, 0.05]);
+      // другая рука через макушку ложится на дальнюю сторону головы
+      reach([{ side: -side, bone: 'head', target: [0.0, LM.eyeY + 0.105, 0.0], pole: [1, 0.8, 0.2], hand: [-0.85, -0.5, 0.1] }]);
       break;
     case 'scmStretch':
       r.head = [-0.25 * a, side * 0.45 * a, 0];
-      arms(spec, [0.25, -0.55, 0.8], [-0.75, 0.5, 0.2]);
+      // ладони на ключицах
+      for (const x of [1, -1]) reach([{ side: x, bone: 'spine_03', target: [0.104, 1.515, 0.123], pole: [0.8, -1, 0], hand: [-0.9, 0.25, -0.05] }]);
       break;
     case 'chairExt':
       r.spine_03 = [-0.32 * a, 0, 0]; r.spine_02 = [-0.12 * a, 0, 0]; r.neck_01 = [0.04 * a, 0, 0];
-      arms(spec, [0.75, 0.55, 0.25], [-0.7, 0.3, -0.6]);
+      // ладони на затылке, локти в стороны
+      for (const x of [1, -1]) reach([{ side: x, bone: 'head', target: [0.1, LM.eyeY - 0.006, -0.08], pole: [1, 0.3, 0.6], hand: [-0.8, 0.1, -0.3] }]);
       break;
     case 'thread': {
       r.spine_03 = [0, side * 0.55 * (1 - 2 * a), 0]; r.spine_02 = [0, side * 0.2 * (1 - 2 * a), 0];
@@ -325,7 +342,11 @@ function animSpec(anim: Anim, pose: Pose, a: number, side: number, t: number): S
       for (const x of spec.aims) if (x[0] === 'upperarm_r' || x[0] === 'lowerarm_r') x[2] = [x[2][0], x[2][1], -x[2][2] + 0.1];
       break;
     }
-    case 'screen': r.head = [0.04 + 0.03 * Math.sin(t * 0.8), 0, 0]; arms(spec, [0.25, -0.8, 0.55], [-0.15, 0.3, 0.94]); break;
+    case 'screen':
+      r.head = [0.04 + 0.03 * Math.sin(t * 0.8), 0, 0];
+      // телефон в обеих руках на уровне глаз
+      for (const x of [1, -1]) reach([{ side: x, bone: 'spine_03', target: [0.06, LM.eyeY - 0.15, 0.36], pole: [0.5, -1, 0], hand: [-0.3, 0.9, 0.2] }]);
+      break;
     case 'ctar': r.head = [0.13 * a, 0, 0]; r.neck_01 = [0.08 * a, 0, 0]; fistUnderChin(); break;
     case 'tongueTip': r.tongue = [-0.38 * a, 0, 0]; spec.shifts = { tongue: [0, 0.003 * a, 0] }; break;
     case 'tongueBack': r.tongue = [0.12 * a, 0, 0]; spec.shifts = { tongue: [0, 0.007 * a, -0.002 * a] }; break;
@@ -336,7 +357,10 @@ function animSpec(anim: Anim, pose: Pose, a: number, side: number, t: number): S
       break;
     }
     case 'clench': r.jaw = [-0.005 * a, 0, 0]; break;
-    case 'smile': arms(spec, [0.22, -0.45, 0.86], [-0.35, 0.82, 0.45], [-0.25, 0.85, 0.45]); break;
+    case 'smile':
+      // кончики пальцев у уголков рта
+      for (const x of [1, -1]) reach([{ side: x, bone: 'head', target: [0.054, LM.menton - 0.103, 0.25], pole: [0.8, -1, 0], hand: [-0.15, 0.75, -0.64] }]);
+      break;
     case 'platysma': r.head = [-0.22 * a, 0, 0]; r.jaw = [0.12 * a, 0, 0]; break;
     case 'jawJut': r.head = [-0.3 * a, 0, 0]; spec.shifts = { jaw: [0, 0, 0.007 * a] }; break;
     case 'kissCeiling': r.head = [-0.5 * a, 0, 0]; r.neck_01 = [-0.15 * a, 0, 0]; break;
@@ -354,15 +378,35 @@ function applySpec(inst: Instance, meta: AthleteMeta, spec: Spec) {
   for (const [name, [x, y, z]] of Object.entries(spec.rots)) by[name]?.quaternion.copy(qEuler(x, y, z));
   for (const [name, [x, y, z]] of Object.entries(spec.shifts ?? {})) by[name]?.position.add(new THREE.Vector3(x, y, z));
   const restDir = (a: string, b: string) => restOf(meta, b).sub(restOf(meta, a)).normalize();
-  for (const [bone, child, dir] of spec.aims) {
+  const aim = (bone: string, child: string, dir: Vec3 | THREE.Vector3) => {
     const b = by[bone];
-    if (!b) continue;
+    if (!b) return;
     const parents = new THREE.Quaternion();
     const chain: THREE.Bone[] = [];
     for (let p = b.parent; p instanceof THREE.Bone; p = p.parent) chain.unshift(p);
     chain.forEach(p => parents.multiply(p.quaternion));
-    const local = new THREE.Vector3(...dir).normalize().applyQuaternion(parents.invert());
-    b.quaternion.setFromUnitVectors(restDir(bone, child), local);
+    const v = dir instanceof THREE.Vector3 ? dir.clone() : new THREE.Vector3(...dir);
+    b.quaternion.setFromUnitVectors(restDir(bone, child), v.normalize().applyQuaternion(parents.invert()));
+  };
+  for (const [bone, child, dir] of spec.aims) aim(bone, child, dir);
+  // кисть в точку: плечо → локоть → запястье по длинам костей, локоть в плоскости с подсказкой pole
+  for (const r of spec.reach ?? []) {
+    const s = r.side > 0 ? 'l' : 'r';
+    const mx = (v: Vec3) => new THREE.Vector3(v[0] * (r.side > 0 ? 1 : -1), v[1], v[2]);
+    const S = boneInMesh(inst, by[`upperarm_${s}`]);
+    const T = boneInMesh(inst, by[r.bone], mx(r.target).sub(restOf(meta, r.bone)));
+    const la = restOf(meta, `lowerarm_${s}`).distanceTo(restOf(meta, `upperarm_${s}`));
+    const lb = restOf(meta, `hand_${s}`).distanceTo(restOf(meta, `lowerarm_${s}`));
+    const u = T.clone().sub(S);
+    const d = THREE.MathUtils.clamp(u.length(), Math.abs(la - lb) + 1e-3, la + lb - 1e-3);
+    u.normalize();
+    const x = (la * la - lb * lb + d * d) / (2 * d), h = Math.sqrt(Math.max(0, la * la - x * x));
+    const pole = mx(r.pole);
+    const nrm = pole.sub(u.clone().multiplyScalar(pole.dot(u))).normalize();
+    const E = S.clone().addScaledVector(u, x).addScaledVector(nrm, h);
+    aim(`upperarm_${s}`, `lowerarm_${s}`, E.clone().sub(S));
+    aim(`lowerarm_${s}`, `hand_${s}`, S.clone().addScaledVector(u, d).sub(E));
+    aim(`hand_${s}`, `middle_01_${s}`, mx(r.hand));
   }
   if (inst.mesh.morphTargetInfluences) inst.mesh.morphTargetInfluences[0] = spec.breath ?? 0;
 }
@@ -690,7 +734,7 @@ export default function Figure3D({ motion, pose, view, xray, muscles, autoRotate
     const dir = new THREE.Vector3(...sx(camDir(anim, view, side), view === 'face' ? 1 : 1)).applyQuaternion(orient);
     if (dir.y < 0.2) dir.y = 0.2;
     dir.normalize();
-    const pos = focus.clone().addScaledVector(dir, CAM[view].dist);
+    const pos = focus.clone().addScaledVector(dir, CAM[view].dist * (anim === 'doorway' ? 1.4 : 1));
     return { offset, orient, side, camera: { target: focus.toArray() as Vec3, pos: pos.toArray() as Vec3 } };
   }, [inst, data, pose, view, anim, side]);
   const [start] = useState(() => layout.camera);
