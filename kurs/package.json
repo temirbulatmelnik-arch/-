@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "icons": "pwa-assets-generator",
-    "seed": "node tools/encrypt-seed.mjs"
+    "seed": "node tools/encrypt-seed.mjs",
+    "unseed": "node tools/decrypt-seed.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.132.1",
