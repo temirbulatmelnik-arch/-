@@ -39,11 +39,13 @@ export function Player({ block, kind, onClose }: { block: BlockId; kind: Session
     const p = blockPlan(block, bs, history);
     return { plan: p, items: sessionItems(p.training, kind, opts) };
   });
-  const tl = useMemo(() => buildTimeline(items, { stage: plan.stage }), [items, plan.stage]);
   const settings = useStore(s => s.settings);
+  // с голосом паузы перед упражнениями длиннее — в них звучит техника; включение голоса посреди занятия ленту не меняет
+  const [voice] = useState(() => settings.voice);
+  const tl = useMemo(() => buildTimeline(items, { stage: plan.stage, voice }), [items, plan.stage, voice]);
   const setSettings = useStore(s => s.setSettings);
   const addSession = useStore(s => s.addSession);
-  const { state, pause, resume, skip, finishHold } = useWorkout(tl, settings);
+  const { state, pause, resume, skip, finishHold, seek } = useWorkout(tl, settings);
   const [confirmExit, setConfirmExit] = useState(false);
   const savedId = useRef<string | null>(null);
   const [intro, setIntro] = useState<number | null>(null);
@@ -66,10 +68,15 @@ export function Player({ block, kind, onClose }: { block: BlockId; kind: Session
     shown.current.add(step.item);
     pause();
     setIntro(step.item);
-    speak(EXERCISES[items[step.item].ex].voice, settings);
+    speak(step.speak ?? EXERCISES[items[step.item].ex].voice, settings);
   }, [state.index]);
 
-  const startItem = () => { setIntro(null); resume(); };
+  // техника уже прозвучала на экране объяснения — после «Начать» остаётся короткий отсчёт подготовки
+  const startItem = () => {
+    setIntro(null);
+    if (step.phase === 'prep') seek(tl.starts[state.index] + Math.max(0, step.duration - 3));
+    resume({ silent: true });
+  };
   const skipItem = () => { setIntro(null); skip(); resume(); };
 
   const completed = state.worked >= tl.total * COMPLETE_SHARE;
@@ -170,7 +177,7 @@ export function Player({ block, kind, onClose }: { block: BlockId; kind: Session
           {step.failure ? (
             <IconButton label="Не могу держать" onClick={finishHold} className="hairline size-14 bg-surface text-work"><Hand size={22} /></IconButton>
           ) : <div className="size-14" />}
-          <motion.button type="button" whileTap={{ scale: 0.94 }} onClick={state.paused ? resume : pause} aria-label={state.paused ? 'Продолжить' : 'Пауза'}
+          <motion.button type="button" whileTap={{ scale: 0.94 }} onClick={state.paused ? () => resume() : pause} aria-label={state.paused ? 'Продолжить' : 'Пауза'}
             className="bg-gold-grad grid size-20 place-items-center rounded-full text-on-accent shadow-xl shadow-gold/30">
             {state.paused ? <Play size={32} className="translate-x-0.5" fill="currentColor" /> : <Pause size={30} fill="currentColor" />}
           </motion.button>

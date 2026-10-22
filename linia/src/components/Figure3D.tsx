@@ -160,8 +160,10 @@ interface Spec {
   /** сдвиги языка и челюсти, м */
   shifts?: Record<string, Vec3>;
   breath?: number;
-  /** опора: кость остаётся в мировой точке (отжимания), иначе фигура ставится на пол */
-  pivot?: { bone: string; world: Vec3 };
+  /** опора: кость остаётся в мировой точке (отжимания), иначе фигура ставится на пол; keepX — без сдвига вбок */
+  pivot?: { bone: string; world: Vec3; keepX?: boolean };
+  /** опора на руки: ладони стоят на полу, столе или стене; в отжиманиях наклон корпуса подбирается под разгибание рук */
+  support?: Support;
   /** сидя: таз на сиденье */
   seat?: boolean;
   /** кисть в точку у лица или головы: запястье ставится в target, локоть — в сторону pole (двухзвенная ИК) */
@@ -172,22 +174,27 @@ interface Spec {
  *  закреплённое на кости bone (едет вместе с ней при кивке и наклоне). */
 interface Reach { side: number; bone: string; target: Vec3; pole: Vec3; hand: Vec3 }
 
+/** Мировые точки и направления — для левой стороны, правая зеркалится. hand — запястье над опорой, arms — какие руки
+ *  на опоре (1 — левая, −1 — правая, по умолчанию обе), d — если задано, наклон корпуса подбирается так, чтобы от плеча
+ *  до запястья было d длины руки (отжимания). finger — куда смотрят пальцы, pole — куда уходит локоть (оси тела).
+ *  thigh, calf, foot, toes — направления бедра, голени, стопы и пальцев ног в мире: колени и стопы стоят на полу. */
+interface Support { hand: Vec3; arms?: number; d?: number; pole: Vec3; finger: Vec3; thigh?: Vec3; calf?: Vec3; foot?: Vec3; toes?: Vec3 }
+
 /** Ориентиры лица из файла модели — для точек касания */
 let LM = { eyeY: 1.791, eyeZ: 0.126, menton: 1.685 };
 
-const D = THREE.MathUtils.degToRad;
 const qEuler = (x: number, y = 0, z = 0) => new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z, 'XYZ'));
 const qAxis = (axis: Vec3, a: number) => new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(...axis), a);
 const norm = (v: Vec3): Vec3 => { const l = Math.hypot(...v) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
 const mix = (a: Vec3, b: Vec3, k: number): Vec3 => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
 const sx = (v: Vec3, s: number): Vec3 => [v[0] * s, v[1], v[2]];
 const ease = (x: number) => { const t = THREE.MathUtils.clamp(x, 0, 1); return t * t * (3 - 2 * t); };
-/** мировое направление → оси тела при повороте фигуры q */
-const toBody = (q: THREE.Quaternion, v: Vec3): Vec3 => new THREE.Vector3(...v).applyQuaternion(q.clone().invert()).toArray() as Vec3;
 
 const ARM_DOWN: Vec3 = [0.13, -1, 0.02], FORE_DOWN: Vec3 = [0.1, -1, 0.14], HAND_DOWN: Vec3 = [0.06, -1, 0.1];
 const SUPINE = qEuler(-Math.PI / 2);
 const PRONE = qEuler(Math.PI / 2);
+/** на четвереньках руки длиннее бёдер — плечи выше таза */
+const QUAD_TILT = Math.PI / 2 - 0.13;
 /** лёжа на боку: side — какой бок сверху (+1 левый, −1 правый) */
 const sideLying = (top: number) => qAxis([0, 0, 1], top > 0 ? Math.PI / 2 : -Math.PI / 2).multiply(qEuler(-Math.PI / 2));
 
@@ -231,16 +238,18 @@ function basePose(pose: Pose, side: number): Spec {
       break;
     case 'side': {
       spec.orient = sideLying(side);
-      legs(spec, [0.06, -0.62, 0.78], [0.03, -0.88, -0.48]);
+      // ноги сведены: верхняя лежит на нижней, а не висит в воздухе
+      legs(spec, [-0.07, -0.62, 0.78], [0, -0.88, -0.48]);
       // нижняя рука под головой, верхняя вдоль тела
       armSide(spec, -side, [0.15, 1, 0.12], [-0.3, 0.45, 0.85]);
       armSide(spec, side, [0.1, -1, 0.12], [0.06, -1, 0.2]);
       break;
     }
     case 'quadruped':
-      spec.orient = PRONE;
-      legs(spec, [0.1, 0, 1], [0.06, -1, 0.02]);
-      arms(spec, [0.12, 0, 1], [0.1, 0.05, 1], [0.05, 1, 0.1]);
+      // колени под тазом, голени и тыл стоп на полу, ладони под плечами; спина чуть поднята к плечам
+      spec.orient = qEuler(QUAD_TILT);
+      spec.pivot = { bone: 'calf_l', world: [0, 0.065, -0.25], keepX: true };
+      spec.support = { hand: [0.22, MAT + 0.035, 0.24], pole: [0.3, -1, 0], finger: [0.1, -0.1, 1], thigh: [0, -1, 0], calf: [0, -0.012, -1], foot: [0, -0.3, -0.95] };
       break;
     case 'plank': case 'pushKnee': case 'pushTable': case 'pushWall':
       // настраивается в движении «плюс»
@@ -249,23 +258,23 @@ function basePose(pose: Pose, side: number): Spec {
   return spec;
 }
 
-/** Отжимание «плюс»: угол корпуса и руки к опоре. e — разгибание рук, plus — лопатки вперёд */
+/** Отжимание «плюс». a: −1 — внизу, 0 — вверху на прямых руках (старт и пауза), 1 — «плюс»: лопатки разъехались.
+ *  Ладони и стопы стоят на опоре, наклон корпуса считает applySpec — тело не висит в воздухе и не проваливается в опору. */
 function pushPose(pose: Pose, a: number): Spec {
-  const e = ease(a / 0.75), plus = ease((a - 0.75) / 0.25);
+  const e = ease(a + 1), plus = ease(a);
+  // запястье на 3,5 см над опорой: стол — 0,74 м, пол с ковриком — 0,012 м, стена — z 0,61 м
   const cfg = {
-    plank: { pivot: 'foot_l', top: 64, bottom: 78, support: [0, -1, 0] as Vec3, world: [0, 0.08, -0.75] as Vec3 },
-    pushKnee: { pivot: 'calf_l', top: 50, bottom: 70, support: [0, -1, 0] as Vec3, world: [0, 0.06, -0.35] as Vec3 },
-    pushTable: { pivot: 'foot_l', top: 30, bottom: 46, support: [0, -0.62, 0.78] as Vec3, world: [0, 0.08, -0.55] as Vec3 },
-    pushWall: { pivot: 'foot_l', top: 12, bottom: 22, support: [0, -0.05, 1] as Vec3, world: [0, 0.08, -0.35] as Vec3 },
-  }[pose as 'plank']!;
-  const phi = D(cfg.bottom + (cfg.top - cfg.bottom) * e);
-  const orient = qEuler(phi);
-  const spec: Spec = { orient, aims: [], rots: {}, pivot: { bone: cfg.pivot, world: cfg.world } };
-  const toSupport = norm(toBody(orient, cfg.support));
-  const bentUp: Vec3 = norm([0.55, -0.55, toSupport[2] * 0.6]);
-  arms(spec, norm(mix(bentUp, [0.12, toSupport[1], toSupport[2]], e)), [0.08, toSupport[1], toSupport[2]], [0.03, 0.6, 0.8]);
-  if (pose === 'pushKnee') legs(spec, [0.07, -1, 0], norm([0.04, -Math.sin(phi), -Math.cos(phi)]));
-  // «плюс»: лопатки разъезжаются вперёд, верх спины чуть округляется
+    plank: { pivot: 'foot_l', world: [0, 0.17, -0.75], hand: [0.25, MAT + 0.035, 0.62], bottom: 0.64, finger: [0.15, -0.1, 1], toes: [0, -0.25, -1] },
+    pushKnee: { pivot: 'calf_l', world: [0, 0.065, -0.35], hand: [0.25, MAT + 0.035, 0.44], bottom: 0.62, finger: [0.15, -0.1, 1], calf: [0, -0.012, -1], foot: [0, -0.3, -0.95] },
+    pushTable: { pivot: 'foot_l', world: [0, 0.14, -0.62], hand: [0.25, 0.775, 0.45], bottom: 0.6, finger: [0.15, -0.1, 1], foot: [0, -0.8, 0.6] },
+    pushWall: { pivot: 'foot_l', world: [0, 0.079, -0.32], hand: [0.25, 1.3, 0.575], bottom: 0.6, finger: [0.2, 1, -0.05], foot: [0, -0.447, 0.894] },
+  }[pose as 'plank'] as { pivot: string; world: Vec3; hand: Vec3; bottom: number; finger: Vec3; calf?: Vec3; foot?: Vec3; toes?: Vec3 };
+  const spec: Spec = {
+    orient: new THREE.Quaternion(), aims: [], rots: {}, pivot: { bone: cfg.pivot, world: cfg.world, keepX: true },
+    support: { hand: cfg.hand, d: cfg.bottom + (0.975 - cfg.bottom) * e, pole: [0.5, -0.45, -0.75], finger: cfg.finger, calf: cfg.calf, foot: cfg.foot, toes: cfg.toes },
+  };
+  if (pose === 'pushKnee') legs(spec, [0.07, -1, 0], [0.07, -1, 0]);
+  // «плюс»: лопатки разъезжаются вперёд, верх спины чуть округляется — плечи уходят к опоре, и корпус поднимается от рук
   spec.rots.clavicle_l = [0, -0.28 * plus, 0];
   spec.rots.clavicle_r = [0, 0.28 * plus, 0];
   spec.rots.spine_03 = [0.08 * plus, 0, 0];
@@ -274,7 +283,7 @@ function pushPose(pose: Pose, a: number): Spec {
 
 /** Движение упражнения поверх положения тела */
 function animSpec(anim: Anim, pose: Pose, a: number, side: number, t: number): Spec {
-  if (['plank', 'pushKnee', 'pushTable', 'pushWall'].includes(pose)) return pushPose(pose, anim === 'plus' ? a : 1);
+  if (['plank', 'pushKnee', 'pushTable', 'pushWall'].includes(pose)) return pushPose(pose, anim === 'plus' ? a : 0);
   const spec = basePose(pose, side);
   const r = spec.rots;
   const retract = (k: number) => { r.clavicle_l = [0, 0.22 * k, -0.08 * k]; r.clavicle_r = [0, -0.22 * k, 0.08 * k]; };
@@ -330,6 +339,9 @@ function animSpec(anim: Anim, pose: Pose, a: number, side: number, t: number): S
       break;
     case 'thread': {
       r.spine_03 = [0, side * 0.55 * (1 - 2 * a), 0]; r.spine_02 = [0, side * 0.2 * (1 - 2 * a), 0];
+      // рука уходит под корпус — плечо и висок опускаются к полу, опорная рука сгибается, колени на месте
+      spec.orient = qEuler(QUAD_TILT + 0.45 * ease(a));
+      spec.support = { ...spec.support!, arms: -side };
       armSide(spec, side, norm(mix([0.85, 0.05, -0.5], [-0.85, 0.05, 0.5], a)), norm(mix([0.9, 0.1, -0.45], [-0.9, 0.1, 0.4], a)));
       break;
     }
@@ -371,6 +383,13 @@ function animSpec(anim: Anim, pose: Pose, a: number, side: number, t: number): S
   return spec;
 }
 
+/** Базис из направления кости и поперечного направления (для кисти — от указательного к мизинцу) */
+function basis(f: THREE.Vector3, across: THREE.Vector3) {
+  const x = f.clone().normalize();
+  const y = across.clone().addScaledVector(x, -across.dot(x)).normalize();
+  return new THREE.Matrix4().makeBasis(x, y, x.clone().cross(y));
+}
+
 /** Ставит кости по описанию позы */
 function applySpec(inst: Instance, meta: AthleteMeta, spec: Spec) {
   const { by } = inst;
@@ -378,34 +397,81 @@ function applySpec(inst: Instance, meta: AthleteMeta, spec: Spec) {
   for (const [name, [x, y, z]] of Object.entries(spec.rots)) by[name]?.quaternion.copy(qEuler(x, y, z));
   for (const [name, [x, y, z]] of Object.entries(spec.shifts ?? {})) by[name]?.position.add(new THREE.Vector3(x, y, z));
   const restDir = (a: string, b: string) => restOf(meta, b).sub(restOf(meta, a)).normalize();
-  const aim = (bone: string, child: string, dir: Vec3 | THREE.Vector3) => {
-    const b = by[bone];
-    if (!b) return;
-    const parents = new THREE.Quaternion();
+  /** поворот всех родителей кости — чтобы перевести направление из осей тела в оси кости */
+  const parentsInv = (b: THREE.Bone) => {
+    const q = new THREE.Quaternion();
     const chain: THREE.Bone[] = [];
     for (let p = b.parent; p instanceof THREE.Bone; p = p.parent) chain.unshift(p);
-    chain.forEach(p => parents.multiply(p.quaternion));
-    const v = dir instanceof THREE.Vector3 ? dir.clone() : new THREE.Vector3(...dir);
-    b.quaternion.setFromUnitVectors(restDir(bone, child), v.normalize().applyQuaternion(parents.invert()));
+    chain.forEach(p => q.multiply(p.quaternion));
+    return q.invert();
   };
-  for (const [bone, child, dir] of spec.aims) aim(bone, child, dir);
-  // кисть в точку: плечо → локоть → запястье по длинам костей, локоть в плоскости с подсказкой pole
-  for (const r of spec.reach ?? []) {
-    const s = r.side > 0 ? 'l' : 'r';
-    const mx = (v: Vec3) => new THREE.Vector3(v[0] * (r.side > 0 ? 1 : -1), v[1], v[2]);
+  const aimFrom = (bone: string, rest: THREE.Vector3, dir: Vec3 | THREE.Vector3) => {
+    const b = by[bone];
+    if (!b) return;
+    const v = dir instanceof THREE.Vector3 ? dir.clone() : new THREE.Vector3(...dir);
+    b.quaternion.setFromUnitVectors(rest, v.normalize().applyQuaternion(parentsInv(b)));
+  };
+  const aim = (bone: string, child: string, dir: Vec3 | THREE.Vector3) => aimFrom(bone, restDir(bone, child), dir);
+  /** кисть целиком: пальцы по finger, мизинец в сторону across — ладонь ложится на опору */
+  const aimHand = (s: string, finger: THREE.Vector3, across: THREE.Vector3) => {
+    const b = by[`hand_${s}`];
+    const r0 = basis(restDir(`hand_${s}`, `middle_01_${s}`), restOf(meta, `pinky_01_${s}`).sub(restOf(meta, `index_01_${s}`)));
+    const r = new THREE.Quaternion().setFromRotationMatrix(basis(finger, across).multiply(r0.transpose()));
+    b.quaternion.copy(parentsInv(b).multiply(r));
+  };
+  const armLen = (s: string) => [restOf(meta, `lowerarm_${s}`).distanceTo(restOf(meta, `upperarm_${s}`)), restOf(meta, `hand_${s}`).distanceTo(restOf(meta, `lowerarm_${s}`))];
+  /** двухзвенная ИК: запястье в точку T (оси модели), локоть — в сторону pole */
+  const ik = (s: string, T: THREE.Vector3, pole: THREE.Vector3) => {
     const S = boneInMesh(inst, by[`upperarm_${s}`]);
-    const T = boneInMesh(inst, by[r.bone], mx(r.target).sub(restOf(meta, r.bone)));
-    const la = restOf(meta, `lowerarm_${s}`).distanceTo(restOf(meta, `upperarm_${s}`));
-    const lb = restOf(meta, `hand_${s}`).distanceTo(restOf(meta, `lowerarm_${s}`));
+    const [la, lb] = armLen(s);
     const u = T.clone().sub(S);
     const d = THREE.MathUtils.clamp(u.length(), Math.abs(la - lb) + 1e-3, la + lb - 1e-3);
     u.normalize();
     const x = (la * la - lb * lb + d * d) / (2 * d), h = Math.sqrt(Math.max(0, la * la - x * x));
-    const pole = mx(r.pole);
-    const nrm = pole.sub(u.clone().multiplyScalar(pole.dot(u))).normalize();
+    const nrm = pole.clone().addScaledVector(u, -pole.dot(u)).normalize();
     const E = S.clone().addScaledVector(u, x).addScaledVector(nrm, h);
     aim(`upperarm_${s}`, `lowerarm_${s}`, E.clone().sub(S));
     aim(`lowerarm_${s}`, `hand_${s}`, S.clone().addScaledVector(u, d).sub(E));
+  };
+  for (const [bone, child, dir] of spec.aims) aim(bone, child, dir);
+  if (spec.support && spec.pivot) {
+    const P = spec.support, pv = spec.pivot;
+    const wb = (w: Vec3) => new THREE.Vector3(...w).applyQuaternion(spec.orient.clone().invert());
+    // бёдра — до поиска опоры: от них зависит, где колено
+    if (P.thigh) for (const [s, x] of [['l', 1], ['r', -1]] as const) aim(`thigh_${s}`, `calf_${s}`, wb(sx(P.thigh, x)));
+    const pm = boneInMesh(inst, by[pv.bone]);
+    const F = new THREE.Vector3(pm.x, pv.world[1], pv.world[2]);
+    const H = new THREE.Vector3(...P.hand);
+    if (P.d !== undefined) {
+      // наклон корпуса: плечо ходит по дуге вокруг опоры (стопы или колени) — ищем угол, при котором до запястья ровно d
+      const v = boneInMesh(inst, by.upperarm_l).sub(pm);
+      const [la, lb] = armLen('l');
+      const D = P.d * (la + lb);
+      const X = new THREE.Vector3(1, 0, 0);
+      const dist = (phi: number) => v.clone().applyAxisAngle(X, phi).add(F).distanceTo(H);
+      // ближе всего плечо к рукам, когда оно на линии опора–руки; до этого расстояние только убывает
+      let hi = Math.atan2(H.z - F.z, H.y - F.y) - Math.atan2(v.z, v.y), lo = hi - 1.5;
+      for (let k = 0; k < 32; k++) { const m = (lo + hi) / 2; if (dist(m) > D) lo = m; else hi = m; }
+      spec.orient = qEuler((lo + hi) / 2);
+    }
+    const inv = spec.orient.clone().invert();
+    const toMesh = (w: THREE.Vector3) => w.sub(F).applyQuaternion(inv).add(pm);
+    const body = (w: Vec3) => new THREE.Vector3(...w).applyQuaternion(inv);
+    for (const [s, x] of [['l', 1], ['r', -1]] as const) {
+      if (!P.arms || P.arms === x) {
+        ik(s, toMesh(new THREE.Vector3(H.x * x, H.y, H.z)), new THREE.Vector3(P.pole[0] * x, P.pole[1], P.pole[2]));
+        aimHand(s, body(sx(P.finger, x)), body([x, 0, 0]));
+      }
+      if (P.calf) aim(`calf_${s}`, `foot_${s}`, body(sx(P.calf, x)));
+      if (P.foot) aim(`foot_${s}`, `ball_${s}`, body(sx(P.foot, x)));
+      if (P.toes) aimFrom(`ball_${s}`, restDir(`foot_${s}`, `ball_${s}`), body(sx(P.toes, x)));
+    }
+  }
+  // кисть в точку: плечо → локоть → запястье по длинам костей, локоть в плоскости с подсказкой pole
+  for (const r of spec.reach ?? []) {
+    const s = r.side > 0 ? 'l' : 'r';
+    const mx = (v: Vec3) => new THREE.Vector3(v[0] * (r.side > 0 ? 1 : -1), v[1], v[2]);
+    ik(s, boneInMesh(inst, by[r.bone], mx(r.target).sub(restOf(meta, r.bone))), mx(r.pole));
     aim(`hand_${s}`, `middle_01_${s}`, mx(r.hand));
   }
   if (inst.mesh.morphTargetInfluences) inst.mesh.morphTargetInfluences[0] = spec.breath ?? 0;
@@ -440,7 +506,9 @@ function placement(inst: Instance, meta: AthleteMeta, spec: Spec): THREE.Vector3
   inst.mesh.updateMatrixWorld(true);
   if (spec.pivot) {
     const p = boneInMesh(inst, inst.by[spec.pivot.bone]).applyQuaternion(spec.orient);
-    return new THREE.Vector3(...spec.pivot.world).sub(p);
+    const w = new THREE.Vector3(...spec.pivot.world);
+    if (spec.pivot.keepX) w.x = p.x;
+    return w.sub(p);
   }
   if (spec.seat) {
     // стопы на полу: лодыжки на прежней высоте
@@ -652,6 +720,11 @@ function Props({ pose, theme, xray, layout, data, inst }: { pose: Pose; theme: T
   const mat = (c: THREE.Color, o = 1) => <meshStandardMaterial color={c} roughness={0.8} transparent={xray || o < 1} opacity={xray ? 0.35 * o : o} depthWrite={!xray} />;
   const lying = ['supine', 'supineRoll', 'prone', 'side', 'quadruped', 'plank', 'pushKnee'].includes(pose);
   const seatY = data.meta.landmarks ? restOf(data.meta, 'thigh_l').y + layout.offset.y - 0.09 : 0.45;
+  // коврик — вдоль тела под серединой, валик — поперёк середины спины
+  const along = new THREE.Vector3(0, 1, 0).applyQuaternion(layout.orient);
+  const yaw = Math.atan2(along.x, along.z);
+  const mid = new THREE.Vector3(0, 0.9, 0).applyQuaternion(layout.orient).add(layout.offset);
+  const back = new THREE.Vector3(0, 1.3, 0).applyQuaternion(layout.orient).add(layout.offset);
   const backZ = useMemo(() => {
     const box = new THREE.Box3().setFromBufferAttribute(inst.mesh.geometry.getAttribute('position') as THREE.BufferAttribute);
     return box.min.z;
@@ -662,7 +735,7 @@ function Props({ pose, theme, xray, layout, data, inst }: { pose: Pose; theme: T
         <circleGeometry args={[2.2, 64]} />
         <meshStandardMaterial color={theme.prop} roughness={1} transparent opacity={0.6} />
       </mesh>
-      {lying && <mesh position={[0, MAT / 2, layout.offset.z]} receiveShadow><boxGeometry args={[0.7, MAT, 2.0]} />{mat(theme.mat)}</mesh>}
+      {lying && <mesh position={[mid.x, MAT / 2, mid.z]} rotation={[0, yaw, 0]} receiveShadow><boxGeometry args={[0.7, MAT, 2.0]} />{mat(theme.mat)}</mesh>}
       {(pose === 'sitting' || pose === 'chairBack') && (
         <mesh position={[0, seatY / 2, -0.05]} castShadow receiveShadow><cylinderGeometry args={[0.22, 0.2, seatY, 40]} />{mat(theme.prop)}</mesh>
       )}
@@ -676,7 +749,7 @@ function Props({ pose, theme, xray, layout, data, inst }: { pose: Pose; theme: T
           <mesh position={[0, 2.12, 0.08]}><boxGeometry args={[0.98, 0.08, 0.16]} />{mat(theme.prop, 0.9)}</mesh>
         </>
       )}
-      {pose === 'supineRoll' && <mesh position={[0, MAT + 0.03, layout.offset.z + 0.05]} rotation={[0, 0, Math.PI / 2]}><cylinderGeometry args={[0.035, 0.035, 0.5, 24]} />{mat(theme.prop)}</mesh>}
+      {pose === 'supineRoll' && <mesh position={[back.x, MAT + 0.03, back.z]} rotation={[0, yaw, Math.PI / 2]}><cylinderGeometry args={[0.035, 0.035, 0.5, 24]} />{mat(theme.prop)}</mesh>}
     </>
   );
 }
@@ -726,7 +799,8 @@ export default function Figure3D({ motion, pose, view, xray, muscles, autoRotate
   const side = motion.current.side === 'r' ? -1 : 1;
   // раскладка на позу: поворот фигуры, сдвиг на пол, точка и направление камеры — один раз на смену позы и вида
   const layout = useMemo(() => {
-    const spec = animSpec(anim, pose, 0, side, 0);
+    // отжимание: камера на середину хода, чтобы и верх, и низ были в кадре
+    const spec = animSpec(anim, pose, anim === 'plus' ? -0.5 : 0, side, 0);
     applySpec(inst, data.meta, spec);
     const offset = placement(inst, data.meta, spec);
     const orient = spec.orient.clone();
@@ -734,7 +808,7 @@ export default function Figure3D({ motion, pose, view, xray, muscles, autoRotate
     const dir = new THREE.Vector3(...sx(camDir(anim, view, side), view === 'face' ? 1 : 1)).applyQuaternion(orient);
     if (dir.y < 0.2) dir.y = 0.2;
     dir.normalize();
-    const pos = focus.clone().addScaledVector(dir, CAM[view].dist * (anim === 'doorway' ? 1.4 : 1));
+    const pos = focus.clone().addScaledVector(dir, CAM[view].dist * (anim === 'doorway' ? 1.4 : anim === 'plus' ? 1.25 : 1));
     return { offset, orient, side, camera: { target: focus.toArray() as Vec3, pos: pos.toArray() as Vec3 } };
   }, [inst, data, pose, view, anim, side]);
   const [start] = useState(() => layout.camera);

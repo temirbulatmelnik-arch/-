@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { EXERCISES } from './exercises';
 import { MUSCLES } from './muscles';
 import { FACE, LEVELS, POSTURE, sessionItems, type Item } from './program';
-import { amountAt, at, buildTimeline, demoTimeline, locate, nextItemStart, stepEnd } from './timeline';
+import { amountAt, at, buildTimeline, demoTimeline, locate, nextItemStart, speechSeconds, stepEnd } from './timeline';
 import { checkPlan, readiness, regressSignal, stageOf, trend, weekDone, type CheckRecord, type SessionRecord } from './stats';
 import { blockPlan } from './plan';
 
@@ -117,6 +117,40 @@ describe('лента шагов', () => {
     expect(amountAt(tl, hold, 5)).toBe(1);
     expect(nextItemStart(tl, 1)).toBe(tl.items[1].start);
     expect(nextItemStart(tl, tl.items[5].start + 1)).toBe(tl.total);
+  });
+
+  it('отжимание «плюс»: старт и пауза сверху на прямых руках, повтор — вниз, выжать и «плюс»', () => {
+    const tl = buildTimeline([{ ex: 'pushup_table', sets: 2, reps: 2, tempo: [1.5, 1, 1.5], setRest: 25 }]);
+    expect(tl.steps[0]).toMatchObject({ phase: 'prep', amount: 0 });
+    const rep = tl.steps.slice(1, 4);
+    expect(rep.map(s => [s.phase, s.amount])).toEqual([['down', -1], ['up', 1], ['hold', 1]]);
+    expect(rep[1].counted).toBe(true);
+    expect(tl.steps.find(s => s.label === 'Отдых')!.amount).toBe(0);
+    expect(tl.reps).toBe(4);
+    // в демонстрации после «плюса» — возврат наверх, круг замыкается без рывка
+    const demo = demoTimeline('pushup_full');
+    expect(demo.steps[demo.steps.length - 1]).toMatchObject({ phase: 'rest', amount: 0 });
+  });
+
+  it('с голосом перед упражнением звучит техника, и пауза длится, пока она звучит', () => {
+    const items: Item[] = [{ ex: 'nod_supine', reps: 3, hold: 10 }, { ex: 'pushup_knee', sets: 2, reps: 5, tempo: [1.5, 1, 1.5], setRest: 30 }];
+    const quiet = buildTimeline(items), loud = buildTimeline(items, { voice: true });
+    const preps = loud.steps.filter(s => s.phase === 'prep');
+    expect(preps[1].speak).toContain(EXERCISES.pushup_knee.brief);
+    expect(preps[1].speak).toContain('Упор лёжа с колен');
+    for (const p of preps) expect(p.duration).toBeGreaterThanOrEqual(speechSeconds(p.speak!));
+    // без голоса лента прежняя
+    expect(quiet.steps.filter(s => s.phase === 'prep').map(s => s.duration)).toEqual([8, 9]);
+    // отдых между подходами: напоминание техники заканчивается до отсчёта последних секунд
+    const rest = loud.steps.find(s => s.label === 'Отдых')!;
+    const [[at, text]] = rest.says!;
+    expect(text).toContain('Дальше подход 2');
+    expect(at + speechSeconds(text)).toBeLessThanOrEqual(rest.duration - 3);
+    // в названиях для голоса нет латиницы и цифр, в технике — цифр и значков, которые синтезатор читает плохо
+    for (const e of Object.values(EXERCISES)) {
+      expect(e.brief, e.id).not.toMatch(/[0-9%≈°]/);
+      expect(e.say ?? e.title, e.id).not.toMatch(/[A-Za-z0-9]/);
+    }
   });
 
   it('демонстрация собирается для каждого упражнения', () => {

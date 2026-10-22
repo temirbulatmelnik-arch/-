@@ -20,13 +20,14 @@ export function useBlock(block: BlockId) {
   const history = useStore(s => s.history);
   const checks = useStore(s => s.checks);
   const opts = useSessionOptions();
+  const voice = useStore(s => s.settings.voice);
   const plan = useMemo(() => blockPlan(block, bs, history), [block, bs, history]);
   const items = useMemo(() => sessionItems(plan.training, 'core', opts), [plan.training, opts]);
-  const timeline = useMemo(() => buildTimeline(items, { stage: plan.stage }), [items, plan.stage]);
+  const timeline = useMemo(() => buildTimeline(items, { stage: plan.stage, voice }), [items, plan.stage, voice]);
   const extras = useMemo(() => plan.training.extras
     .map(kind => ({ kind, items: sessionItems(plan.training, kind, opts) }))
     .filter(x => x.items.length)
-    .map(x => ({ ...x, total: buildTimeline(x.items).total })), [plan.training, opts]);
+    .map(x => ({ ...x, total: buildTimeline(x.items, { voice }).total })), [plan.training, opts, voice]);
   return {
     bs, plan, items, timeline, extras, opts,
     week: weekDone(history, block),

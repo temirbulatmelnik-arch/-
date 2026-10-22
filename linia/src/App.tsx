@@ -3,7 +3,7 @@ import { BookOpen, ChartSpline, Sparkles } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { ExerciseDemo } from './components/Exercise';
 import { Figure, viewFor } from './components/Figure';
-import type { FigureMotion } from './components/figureTypes';
+import type { FigureMotion, FigureView } from './components/figureTypes';
 import { Sheet } from './components/ui';
 import { unlockAudio } from './engine/cues';
 import { EXERCISES, type BlockId, type ExerciseId } from './engine/exercises';
@@ -49,10 +49,10 @@ function useTheme() {
 }
 
 /** Служебный кадр: упражнение на выбранной стороне в конечной точке движения (#3d=doorway:r) */
-function StillFigure({ ex, side, xray }: { ex: ExerciseId; side: 'l' | 'r'; xray: boolean }) {
+function StillFigure({ ex, side, xray, amount = 1, view }: { ex: ExerciseId; side: 'l' | 'r'; xray: boolean; amount?: number; view?: FigureView }) {
   const e = EXERCISES[ex];
-  const motion = useRef<FigureMotion>({ anim: e.anim, amount: 1, phase: 'hold', side });
-  return <Figure motion={motion} pose={e.pose} view={viewFor(ex)} xray={xray} muscles={e.muscles} className="aspect-square w-full rounded-[28px] bg-surface-2" />;
+  const motion = useRef<FigureMotion>({ anim: e.anim, amount, phase: 'hold', side });
+  return <Figure motion={motion} pose={e.pose} view={view ?? viewFor(ex)} xray={xray} muscles={e.muscles} className="aspect-square w-full rounded-[28px] bg-surface-2" />;
 }
 
 export interface Actions {
@@ -77,13 +77,13 @@ export default function App() {
 
   useEffect(() => window.scrollTo({ top: 0 }), [tab, block]);
 
-  // служебный просмотр одного упражнения в 3D: #3d=nod_supine или #3d=nod_supine:skin
-  const debug = location.hash.match(/^#3d=(\w+)(:skin)?(?::([lr]))?/);
+  // служебный просмотр одного упражнения в 3D: #3d=nod_supine, #3d=nod_supine:skin, кадр — #3d=doorway:l@0.5, вид — …!body
+  const debug = location.hash.match(/^#3d=(\w+)(:skin)?(?::([lr]))?(?:@(-?[\d.]+))?(?:!(\w+))?/);
   if (debug && debug[1] in EXERCISES) {
     const ex = debug[1] as ExerciseId;
     return (
       <div className="mx-auto max-w-md p-4">
-        {debug[3] ? <StillFigure ex={ex} side={debug[3] as 'l' | 'r'} xray={!debug[2]} /> : <ExerciseDemo ex={ex} initialXray={!debug[2]} autoRotate={false} />}
+        {debug[3] ? <StillFigure ex={ex} side={debug[3] as 'l' | 'r'} xray={!debug[2]} amount={debug[4] ? Number(debug[4]) : 1} view={debug[5] as FigureView | undefined} /> : <ExerciseDemo ex={ex} initialXray={!debug[2]} autoRotate={false} />}
       </div>
     );
   }

@@ -13,7 +13,7 @@ export interface Step {
   hint?: string;
   /** секунды */
   duration: number;
-  /** куда идёт движение 3D-фигуры: 0 — исходное положение, 1 — конечное */
+  /** куда идёт движение 3D-фигуры: 0 — исходное положение, 1 — конечное; у отжиманий −1 — нижняя точка */
   amount: number;
   /** за сколько секунд фигура доходит до цели */
   ease: number;
@@ -62,6 +62,17 @@ const PREP = 5;
 const PREP_MOVE = 9;
 const SWITCH = 5;
 
+/** Сколько секунд синтезатор читает фразу: с запасом, чтобы техника не обрывалась счётом первого повтора */
+export const speechSeconds = (text: string) => text.length / 13 + 0.6;
+
+/** Усилие словами — синтезатор плохо читает «≈» и «%» */
+const EFFORT_SAY: Record<string, string> = {
+  '10–20 %': 'десять–двадцать процентов', '50–60 %': 'пятьдесят–шестьдесят процентов', '60–70 %': 'шестьдесят–семьдесят процентов',
+  '≈ 70 %': 'около семидесяти процентов', '≈ 80 %': 'около восьмидесяти процентов',
+  '5 из 10': 'пять из десяти', '6 из 10': 'шесть из десяти', '7 из 10': 'семь из десяти',
+};
+const nameSay = (ex: ExerciseId) => EXERCISES[ex].say ?? EXERCISES[ex].title;
+
 /** Ступень внутри уровня: значения-массивы растут с каждым занятием «с запасом» */
 export const at = <T,>(v: T | T[] | undefined, stage: number): T | undefined => (Array.isArray(v) ? v[Math.min(v.length - 1, Math.max(0, stage))] : v);
 
@@ -81,6 +92,14 @@ function repSteps(item: Item, ex: ExerciseId, stage: number, base: Omit<Step, 'p
     } else if (item.breaths) {
       out.push({ ...b, phase: 'inhale', label: 'Вдох', hint: 'Медленно, рёбра раскрываются', duration: 4, amount: 1, ease: 4, cue: 'breath', speak: r === 1 ? 'Вдох' : undefined, counted: true });
       out.push({ ...b, phase: 'exhale', label: 'Выдох', hint: 'Длинный, плечи опускаются', duration: 6, amount: 0, ease: 6, cue: 'none', speak: r === 1 ? 'Выдох' : undefined });
+    } else if (item.tempo && e.anim === 'plus') {
+      // отжимание начинается сверху, на прямых руках (amount 0): вниз (−1), выжать и «плюс» (1), задержка, пауза снова сверху
+      const [up, pause, down] = item.tempo;
+      const top = hold ?? pause;
+      out.push({ ...b, phase: 'down', label: w.down ?? 'Вниз', duration: down, amount: -1, ease: down, cue: 'release', speak: reps > 1 ? countWord(r) : w.down });
+      out.push({ ...b, phase: 'up', label: w.up ?? 'Вверх', duration: up, amount: 1, ease: up, cue: 'go', counted: true });
+      if (top > 0) out.push({ ...b, phase: 'hold', label: w.hold ?? 'Держите «плюс»', duration: top, amount: 1, ease: 0.3, cue: 'none' });
+      if (item.rest) out.push({ ...b, phase: 'rest', label: 'Пауза', duration: item.rest, amount: 0, ease: 0.5, cue: 'none' });
     } else if (item.tempo) {
       const [up, pause, down] = item.tempo;
       const top = hold ?? pause;
@@ -126,18 +145,23 @@ function timedSteps(item: Item, ex: ExerciseId, stage: number, base: Omit<Step, 
   return [{ ...b, phase: 'hold', label: side ? `Держите: ${SIDE_LABEL[side]}` : 'Держите', hint: e.guide.feel, duration: time, amount: 1, ease: 2.5, cue: 'go', speak: 'Держите', says, tick: true, counted: true }];
 }
 
-function itemSteps(item: Item, index: number, stage: number, first: boolean, poseChanged: boolean, blocksOnly: boolean): Step[] {
+function itemSteps(item: Item, index: number, stage: number, first: boolean, poseChanged: boolean, blocksOnly: boolean, voice: boolean): Step[] {
   const e = EXERCISES[item.ex];
   const out: Step[] = [];
   const sets = item.sets ?? 1;
   const base = (ex: ExerciseId) => ({ item: index, ex, anim: EXERCISES[ex].anim, sets });
   if (!blocksOnly) {
     const effort = item.effort ? ` Усилие ${item.effort}.` : '';
+    const pose = first || poseChanged ? `${POSE_LABEL[e.pose]}. ` : '';
+    // с голосом пауза перед упражнением — это и есть короткий рассказ о технике: она длится, пока он звучит
+    const name = item.circuit ? `Круг: ${item.circuit.map(c => nameSay(c).replace(' лёжа на животе', '').replace(/^Буква /, '')).join(', ')}` : nameSay(item.ex);
+    const told = `${name}. ${pose}${e.brief}${item.effort ? ` Усилие ${EFFORT_SAY[item.effort] ?? item.effort}.` : ''}`;
+    const prep = first ? PREP_FIRST : poseChanged ? PREP_MOVE : PREP;
     out.push({
       ...base(item.ex), phase: 'prep', label: item.circuit ? `Круг ${item.circuit.map(c => EXERCISES[c].title.match(/«(.)»/)?.[1] ?? '').join('–')}` : e.title,
-      hint: `${first || poseChanged ? `${POSE_LABEL[e.pose]}. ` : ''}${e.how}${effort}`,
-      duration: first ? PREP_FIRST : poseChanged ? PREP_MOVE : PREP, amount: 0, ease: 1, cue: 'prep',
-      speak: poseChanged || first ? `${e.title}. ${POSE_LABEL[e.pose]}` : e.title,
+      hint: `${pose}${e.how}${effort}`,
+      duration: voice ? Math.max(prep, Math.ceil(speechSeconds(told) + 1)) : prep, amount: 0, ease: 1, cue: 'prep',
+      speak: voice ? told : poseChanged || first ? `${e.title}. ${POSE_LABEL[e.pose]}` : e.title,
     });
   }
   const reps = at(item.reps, stage) ?? 1;
@@ -145,7 +169,14 @@ function itemSteps(item: Item, index: number, stage: number, first: boolean, pos
   for (let s = 1; s <= sets; s++) {
     if (item.circuit) {
       item.circuit.forEach((c, k) => {
-        if (k > 0) out.push({ ...base(c), set: s, phase: 'switch', label: `Дальше: ${EXERCISES[c].title}`, hint: EXERCISES[c].how, duration: SWITCH, amount: 0, ease: 1, cue: 'switch', speak: EXERCISES[c].title.replace(/ лёжа на животе/, '') });
+        if (k > 0) {
+          const told = `${nameSay(c).replace(/ лёжа на животе/, '')}. ${EXERCISES[c].brief}`;
+          out.push({
+            ...base(c), set: s, phase: 'switch', label: `Дальше: ${EXERCISES[c].title}`, hint: EXERCISES[c].how,
+            duration: voice ? Math.max(SWITCH, Math.ceil(speechSeconds(told) + 1)) : SWITCH, amount: 0, ease: 1, cue: 'switch',
+            speak: voice ? told : EXERCISES[c].title.replace(/ лёжа на животе/, ''),
+          });
+        }
         out.push(...repSteps(item, c, stage, { ...base(c), set: s }, reps, () => undefined));
       });
     } else {
@@ -157,10 +188,18 @@ function itemSteps(item: Item, index: number, stage: number, first: boolean, pos
         else out.push(...repSteps(item, item.ex, stage, b, reps, r => (item.alternate ? (r % 2 ? 'r' : 'l') : side)));
       });
     }
-    if (s < sets) out.push({
-      ...base(item.circuit?.[0] ?? item.ex), set: s, phase: 'rest', label: 'Отдых', hint: `Дальше подход ${s + 1} из ${sets}`,
-      duration: item.setRest ?? SET_REST, amount: 0, ease: 1.2, cue: 'release', speak: 'Отдых', tick: true,
-    });
+    if (s < sets) {
+      // в конце отдыха — напоминание техники перед следующим подходом, если успевает до отсчёта
+      const rest = item.setRest ?? SET_REST;
+      const next = item.circuit?.[0] ?? item.ex;
+      const told = `Дальше подход ${s + 1}. ${EXERCISES[next].brief}`;
+      const at = rest - speechSeconds(told) - 3.5;
+      out.push({
+        ...base(next), set: s, phase: 'rest', label: 'Отдых', hint: `Дальше подход ${s + 1} из ${sets}`,
+        duration: rest, amount: 0, ease: 1.2, cue: 'release', speak: 'Отдых', tick: true,
+        says: voice && at >= 3 ? [[Math.round(at), told]] : undefined,
+      });
+    }
   }
   // у последнего шага удержания отдых не нужен — дальше подготовка следующего упражнения
   const last = out[out.length - 1];
@@ -173,14 +212,16 @@ export interface BuildOptions {
   stage?: number;
   /** без шагов подготовки — для демонстрации упражнения по кругу */
   blocksOnly?: boolean;
+  /** голос включён: перед упражнением и в отдыхе между подходами коротко звучит техника */
+  voice?: boolean;
 }
 
-export function buildTimeline(items: Item[], { stage = 0, blocksOnly = false }: BuildOptions = {}): Timeline {
+export function buildTimeline(items: Item[], { stage = 0, blocksOnly = false, voice = false }: BuildOptions = {}): Timeline {
   const steps: Step[] = [];
   items.forEach((item, i) => {
     const pose = EXERCISES[item.ex].pose;
     const prev = i > 0 ? EXERCISES[items[i - 1].ex].pose : pose;
-    steps.push(...itemSteps(item, i, stage, i === 0, pose !== prev, blocksOnly));
+    steps.push(...itemSteps(item, i, stage, i === 0, pose !== prev, blocksOnly, voice));
   });
   const starts: number[] = [];
   let t = 0;
@@ -251,6 +292,8 @@ export function demoItem(ex: ExerciseId): Item {
   if (ex === 'tongue_quick') return { ex, reps: 4, quick: true };
   if (e.words?.hold || ['nod_supine', 'nod_seated', 'nod_resisted', 'ctar_hold', 'tongue_tip', 'tongue_back', 'jaw_open', 'clench', 'smile_resist', 'head_lift'].includes(ex))
     return ex.startsWith('prone') || ex === 'chair_ext' ? { ex, reps: 2, tempo: [1.5, 2, 1.5] } : { ex, reps: 2, hold: 3, rest: 2, alternate: ex === 'nod_resisted' };
+  // отжимание: после «плюса» — короткий возврат наверх, чтобы круг замкнулся без рывка
+  if (e.anim === 'plus') return { ex, reps: 2, tempo: [1.5, 0.8, 1.5], rest: 0.8 };
   return { ex, reps: 2, tempo: [1.5, 0.8, 1.5] };
 }
 

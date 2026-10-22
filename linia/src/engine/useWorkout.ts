@@ -30,6 +30,7 @@ export function useWorkout(tl: Timeline, cues: CueSettings) {
   const lastTick = useRef(-1);
   const said = useRef(new Set<string>());
   const pausedRef = useRef(false);
+  const quiet = useRef(false);
   const doneRef = useRef(false);
   const raf = useRef(0);
   const cuesRef = useRef(cues);
@@ -64,7 +65,8 @@ export function useWorkout(tl: Timeline, cues: CueSettings) {
         reps.current++;
       }
       playCue(step.cue, c);
-      if (step.speak) speak(step.speak, c);
+      if (step.speak && !quiet.current) speak(step.speak, c);
+      quiet.current = false;
     }
     step.says?.forEach(([at, text], k) => {
       const key = `${loc.index}:${k}`;
@@ -102,11 +104,13 @@ export function useWorkout(tl: Timeline, cues: CueSettings) {
     setState(s => ({ ...s, paused: true }));
   }, []);
 
-  const resume = useCallback(() => {
+  /** silent — без повтора фразы текущего шага (её уже прочитали, например на экране объяснения) */
+  const resume = useCallback((opts?: { silent?: boolean }) => {
     if (doneRef.current) return;
     unlockAudio();
     // после паузы заново подаём сигнал текущего шага
     lastIndex.current = -1;
+    quiet.current = !!opts?.silent;
     run(tRef.current);
   }, [run]);
 
@@ -151,5 +155,5 @@ export function useWorkout(tl: Timeline, cues: CueSettings) {
     };
   }, [run, pause]);
 
-  return { state, pause, resume, skip, finishHold };
+  return { state, pause, resume, skip, finishHold, seek: jump };
 }
