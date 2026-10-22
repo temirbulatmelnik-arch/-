@@ -83,6 +83,8 @@ export interface CalEvent {
   note?: string;
   /** дата перенесена вручную */
   moved?: boolean;
+  /** дата по графику, если поступление сдвинулось на рабочий день */
+  planned?: string;
 }
 
 export type IncomeKind = 'salary' | 'bonusMonthly' | 'advance' | 'bonusQuarter' | 'bonusYear' | 'vacation' | 'thirteenth' | 'other';

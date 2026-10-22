@@ -12,6 +12,7 @@ import { cashFlow } from './cashflow';
 import { applyChatPlan, mergeSeed, parseChatPlan, type PlanState } from './planUpdate';
 import { parseStatementText, isIncomeLine } from './pdf';
 import { weekReport, weekToClose } from './weekly';
+import { isWorkday, workdayOnOrBefore } from './workdays';
 import { draft } from './statements';
 import { parseCsv, parseText } from './statements';
 import type { Debt, Expense, PlanSeed } from './types';
@@ -115,7 +116,9 @@ describe('календарь', () => {
     const ev = eventsBetween(cal, '2027-01-01', '2027-01-31');
     expect(ev.find(e => e.key === 'pay:loan:2027-01')?.date).toBe('2027-01-11');
     expect(ev.find(e => e.key === 'pay:sber:2027-01')?.date).toBe('2027-01-31');
-    expect(ev.find(e => e.key === 'inc:salary:2027-01')).toBeTruthy();
+    // зарплата 10.01 выпадает на каникулы и приходит 30.12 — в январе её нет
+    expect(ev.find(e => e.key === 'inc:salary:2027-01')).toBeUndefined();
+    expect(eventsBetween(cal, '2026-12-28', '2026-12-31').find(e => e.key === 'inc:salary:2027-01')?.date).toBe('2026-12-30');
     expect(ev.filter(e => e.kind === 'weekly')).toHaveLength(4);
     expect(ev.find(e => e.key.startsWith('pay:inst'))).toBeUndefined(); // график рассрочки кончился в декабре
   });
@@ -339,5 +342,22 @@ describe('обмен с чатом и обновление плана', () => {
     expect(Object.keys(m.marks!).sort()).toEqual(['a', 'b']);
     expect(m.fixed).toHaveLength(1);
     expect(m.checklist![0].id).toBe('z');
+  });
+});
+
+describe('рабочие дни', () => {
+  it('выходные и праздники 2026 года', () => {
+    expect(workdayOnOrBefore('2026-10-25')).toBe('2026-10-23'); // аванс в воскресенье — в пятницу
+    expect(workdayOnOrBefore('2026-11-15')).toBe('2026-11-13');
+    expect(workdayOnOrBefore('2026-11-04')).toBe('2026-11-03'); // День народного единства
+    expect(workdayOnOrBefore('2027-01-10')).toBe('2026-12-30'); // январская зарплата — в декабре: 31.12 выходной
+    expect(isWorkday('2026-10-23')).toBe(true);
+    expect(isWorkday('2026-03-09')).toBe(false); // перенос с 8 марта
+  });
+  it('поступления в календаре сдвигаются, платежи — нет', () => {
+    const cal = { debts: [], incomes: [{ kind: 'advance' as const, name: 'Аванс', day: 25, amount: 1 }], fixed: [{ id: 'f', name: 'Связь', day: 25, amount: 1 }], oneOff: [], templateFrom: '2026-10', weeklyOverrides: [] };
+    const ev = eventsBetween(cal, '2026-10-20', '2026-10-31');
+    expect(ev.find(e => e.key === 'inc:advance:2026-10')).toMatchObject({ date: '2026-10-23', planned: '2026-10-25' });
+    expect(ev.find(e => e.key === 'fix:f:2026-10')!.date).toBe('2026-10-25');
   });
 });

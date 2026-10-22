@@ -52,6 +52,7 @@ export function EventRow({ e, mark, now, onClick, onToggle, showDate = true }: {
             {showDate ? `${whenText(e)} · ` : e.dateMode === 'until' ? 'внести до этой даты · ' : ''}
             {u === 'done' ? (g === 'income' ? 'пришло' : 'оплачено') : e.dateMode === 'month' ? 'дата не известна' : relDays(now, e.date)}
             {e.moved && u !== 'done' ? ' · дата изменена' : ''}
+            {e.planned && u !== 'done' ? `, по графику ${ddmm(e.planned)} — выходной` : ''}
           </span>
         </span>
         <Money value={mark?.done && mark.amount != null ? mark.amount : e.amount} approx={e.approx && !mark?.done} sign={g === 'income'}

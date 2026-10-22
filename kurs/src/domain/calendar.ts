@@ -2,6 +2,7 @@
 import { addDays, dayIn, monthKey, weekStart } from './dates';
 import type { CalEvent, Debt, EventMark, FixedItem, IncomeTemplate, WeeklyOverride } from './types';
 import { weeklyLimit } from './plan';
+import { workdayOnOrBefore } from './workdays';
 
 /** Ориентировочный обязательный платёж по долгу в месяце */
 export function estimatePayment(d: Debt, month: string): number {
@@ -98,6 +99,12 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
   const rank = { payment: 0, weekly: 1, income: 2 } as const;
   const ov = input.overrides ?? {};
   return out
+    // деньги приходят только в рабочий день: выходной или праздник — значит, накануне
+    .map(e => {
+      if (e.kind !== 'income' || e.dateMode === 'month' || ov[e.key]?.date) return e;
+      const date = workdayOnOrBefore(e.date);
+      return date === e.date ? e : { ...e, date, planned: e.date };
+    })
     .map(e => (ov[e.key] ? { ...e, amount: ov[e.key].amount ?? e.amount, date: ov[e.key].date ?? e.date, approx: ov[e.key].amount != null ? false : e.approx, moved: ov[e.key].date != null && ov[e.key].date !== e.date } : e))
     .filter(e => e.date >= rangeFrom && e.date <= rangeTo)
     .sort((a, b) => a.date.localeCompare(b.date) || rank[a.kind] - rank[b.kind] || a.title.localeCompare(b.title));
