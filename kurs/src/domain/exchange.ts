@@ -4,7 +4,7 @@
 // Перед применением приложение показывает разницу по разделам; присланное без изменений ничего не трогает.
 import { eventsBetween, type CalendarInput } from './calendar';
 import { categorize } from './categorize';
-import { addDays, ddmm, plural } from './dates';
+import { addDays, daysBetween, ddmm, plural } from './dates';
 import { rub } from './money';
 import { CATEGORIES, CATEGORY, currentPhase, DEFAULT_PLAN, reserveNeed, totalDebt, type BonusRule, type PlanConfig } from './plan';
 import { weekSummary } from './summary';
@@ -59,7 +59,8 @@ export interface ExchangeFile {
   /** шаблон поступлений — полный список */
   incomes?: IncomeTemplate[];
   /** события календаря по key: amount и date — плановые, paid — фактически оплачено или пришло */
-  calendar?: { key: string; date?: string; title?: string; kind?: string; amount?: number; done?: boolean; paid?: number; reset?: boolean; approx?: boolean; dateMode?: string }[];
+  /** событие ищется по key, а без него — по названию, дате (±7 дней) и сумме */
+  calendar?: { key?: string; date?: string; title?: string; kind?: string; amount?: number; done?: boolean; paid?: number; reset?: boolean; approx?: boolean; dateMode?: string }[];
   /** разовые платежи и поступления */
   events?: ({ key?: string; date?: string; title?: string; amount?: number; kind?: 'payment' | 'income'; dateMode?: CalEvent['dateMode']; note?: string; debtId?: string } & Del)[];
   expensesFrom?: string;
@@ -419,16 +420,43 @@ const stepEvents: Step = (f, s) => {
   return { lines, patch: lines.length ? { oneOff: list.sort((a, b) => a.date.localeCompare(b.date)) } : {} };
 };
 
+const stems = (t: string) => t.toLowerCase().replace(/ё/g, 'е').split(/[^a-zа-я0-9]+/).filter(w => w.length >= 4).map(w => w.slice(0, 5));
+
+/** Событие календаря по key, а если чат key не знает — по словам названия, дате (±7 дней) и сумме */
+function findEvent(p: NonNullable<ExchangeFile['calendar']>[number], list: CalEvent[], byKey: Map<string, CalEvent>): CalEvent | undefined {
+  if (p.key && byKey.has(p.key)) return byKey.get(p.key);
+  const want = p.title ? stems(p.title) : [];
+  const sum = isNum(p.paid) ? p.paid : p.amount;
+  if (!want.length && !isNum(sum)) return undefined;
+  let best: CalEvent | undefined, bestScore = 0;
+  for (const e of list) {
+    if (e.kind === 'weekly' || (p.kind && p.kind !== e.kind)) continue;
+    const far = isDate(p.date) ? Math.abs(daysBetween(e.date, p.date)) : 0;
+    if (far > 7) continue;
+    const have = stems(e.title);
+    const words = want.filter(w => have.includes(w)).length;
+    const sameSum = isNum(sum) && Math.abs(e.amount - sum) < 1;
+    if (want.length ? !words : !sameSum) continue;
+    const score = words * 10 + (sameSum ? 5 : 0) - far * 0.5 + 4;
+    if (score > bestScore) { best = e; bestScore = score; }
+  }
+  return best;
+}
+
 const stepCalendar: Step = (f, s, ctx) => {
   const lines: string[] = [];
   if (!f.calendar) return { lines, patch: {} };
-  const known = new Map(eventsBetween(s, addDays(ctx.now, -120), addDays(ctx.now, 400)).map(e => [e.key, e]));
+  const list = eventsBetween(s, addDays(ctx.now, -120), addDays(ctx.now, 400));
+  const known = new Map(list.map(e => [e.key, e]));
   const marks = { ...s.marks };
   const overrides = { ...s.overrides };
   let mc = false, oc = false;
   for (const p of f.calendar) {
-    const e = p.key ? known.get(p.key) : undefined;
-    if (!e) continue;
+    const e = findEvent(p, list, known);
+    if (!e) {
+      if (p.key || p.title) lines.push(`Не нашёл в календаре: ${p.title ?? p.key}${isDate(p.date) ? ` ${ddmm(p.date)}` : ''}, пропускаю`);
+      continue;
+    }
     const name = `${e.title} ${ddmm(e.date)}`;
     if (p.reset) {
       if (overrides[e.key]) { delete overrides[e.key]; oc = true; lines.push(`${name}: вернуть расчётные сумму и дату`); }

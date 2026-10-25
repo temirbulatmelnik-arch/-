@@ -422,6 +422,17 @@ describe('файл обмена с чатом', () => {
     expect(patch.checklist!.map(c => c.id)).toEqual(['acc', 'ins']);
   });
 
+  it('отметка в календаре без key: по названию и дате', () => {
+    const f = normalize(parseExchange(JSON.stringify({ app: 'kurs-exchange', version: 2, calendar: [
+      { title: 'Подарок', date: '2026-11-15', done: true, paid: 15_000 },
+      { title: 'Чего нет в плане', date: '2026-11-15', done: true },
+    ] }))!, base);
+    const sections = previewExchange(f, base, NOW);
+    expect(sections[0].lines.map(l => l.replace(/\s/g, ' '))).toEqual(['Подарок 16.11: оплачено 15 000 ₽', 'Не нашёл в календаре: Чего нет в плане 15.11, пропускаю']);
+    const patch = applyExchange(f, base, NOW, new Set(['calendar']), id);
+    expect(patch.marks!.gift).toMatchObject({ done: true, amount: 15_000 });
+  });
+
   it('применяется только выбранное', () => {
     const f = normalize(parseExchange(JSON.stringify({ app: 'kurs-exchange', version: 2, reserve: 1, expenses: [{ id: 'e2', delete: true }] }))!, base);
     const patch = applyExchange(f, base, NOW, new Set(['expenses']), id);
