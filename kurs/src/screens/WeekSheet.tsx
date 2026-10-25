@@ -1,4 +1,4 @@
-// Итог недели: траты по категориям против лимита и перевод остатка на счёт остатков.
+// Итог недели: траты по категориям против лимита и воскресное пополнение карты жизни из резерва до лимита.
 import { FileUp, Undo2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
@@ -24,20 +24,20 @@ function Body({ monday }: { monday: string }) {
   const [expenses, debts, overrides, closure, closeWeek, reopenWeek] = useStore(useShallow(s => [s.expenses, s.debts, s.weeklyOverrides, s.closures[monday], s.closeWeek, s.reopenWeek] as const));
   const set = useUi(s => s.set);
   const r = useMemo(() => weekReport(expenses, debts, overrides, monday), [expenses, debts, overrides, monday]);
-  const [amount, setAmount] = useState(String(Math.max(0, Math.round(r.left))));
+  const [amount, setAmount] = useState(String(Math.round(r.topUp)));
   const value = parseAmount(amount) ?? 0;
   const max = Math.max(...r.byCategory.map(c => c.spent), 1);
 
-  const close = (transferred: number) => {
-    closeWeek({ monday, limit: r.limit, spent: r.spent, left: r.left, transferred });
-    toast(transferred > 0 ? 'Неделя закрыта, остаток — в копилке' : 'Неделя закрыта');
+  const close = (topUp: number) => {
+    closeWeek({ monday, limit: r.limit, spent: r.spent, left: r.left, transferred: 0, topUp });
+    toast(topUp > 0 ? 'Неделя закрыта, карта жизни долита' : 'Неделя закрыта');
     set({ week: null });
   };
 
   return (
     <div className="space-y-4 pt-1">
       <section className="deep-card px-6 py-5">
-        <div className="text-[13px] text-card-muted">{r.left >= 0 ? 'Осталось от лимита' : 'Перерасход'}</div>
+        <div className="text-[13px] text-card-muted">{r.left >= 0 ? 'Осталось на карте жизни' : 'Перерасход'}</div>
         <Money value={Math.abs(r.left)} className={`figure mt-1 block text-[48px] leading-none ${r.left < 0 ? 'text-[#f2a596]' : ''}`} />
         <Bar value={r.limit ? r.spent / r.limit : 0} tone={r.left < 0 ? 'neg' : 'card'} onCard className="mt-5" />
         <div className="mt-3 flex justify-between text-[12.5px] text-card-muted">
@@ -70,20 +70,24 @@ function Body({ monday }: { monday: string }) {
 
       {closure ? (
         <>
-          <p className="rounded-2xl bg-pos/10 px-4 py-3 text-[14px] text-pos">Неделя закрыта{closure.transferred > 0 ? <>, в копилку <Money value={closure.transferred} /></> : ''}.</p>
+          <p className="rounded-2xl bg-pos/10 px-4 py-3 text-[14px] text-pos">
+            Неделя закрыта{closure.topUp ? <>, из резерва долито <Money value={closure.topUp} /></> : closure.transferred > 0 ? <>, в копилку <Money value={closure.transferred} /></> : ''}.
+          </p>
           <SecondaryButton onClick={() => reopenWeek(monday)} className="w-full"><Undo2 size={16} strokeWidth={1.5} /> Открыть заново</SecondaryButton>
         </>
-      ) : r.left > 0 ? (
-        <div className="card space-y-3 p-4">
-          <div className="text-[14px] leading-snug">Переведите остаток на <b className="font-medium">отдельный счёт остатков</b> и отметьте здесь. Сумму можно поправить, если перевели другую.</div>
-          <AmountInput value={amount} onChange={setAmount} size="md" />
-          <PrimaryButton onClick={() => close(value)} disabled={value <= 0}>Перевёл в копилку</PrimaryButton>
-          <button type="button" onClick={() => close(0)} className="w-full py-1 text-[13px] text-muted">Закрыть без перевода</button>
-        </div>
       ) : (
-        <div className="space-y-2">
-          <p className="text-[13px] leading-snug text-muted">{r.left < 0 ? 'Остатка нет. Перерасход не переносится на следующую неделю — лимит в понедельник придёт тот же.' : 'Ровно в лимит.'}</p>
-          <PrimaryButton tone="ink" onClick={() => close(0)}>Закрыть неделю</PrimaryButton>
+        <div className="card space-y-3 p-4">
+          <div className="text-[14px] leading-snug">
+            В воскресенье вечером долейте карту жизни <b className="font-medium">из резерва</b> до лимита следующей недели — <Money value={r.nextLimit} />.{' '}
+            {r.leftover > 0
+              ? <>На карте осталось <Money value={r.leftover} />, они остаются там, поэтому долить нужно меньше.</>
+              : r.left < 0 ? <>Остатка нет: перерасход <Money value={-r.left} /> не переносится, долить нужно весь лимит.</>
+                : <>Остатка нет — долить весь лимит.</>}
+          </div>
+          <AmountInput value={amount} onChange={setAmount} size="md" />
+          <p className="text-[12px] leading-snug text-muted">Перевели другую сумму — поправьте. Резерв уменьшится на неё, а в календаре пополнение отметится сделанным.</p>
+          <PrimaryButton onClick={() => close(value)} disabled={value <= 0}>Долил из резерва</PrimaryButton>
+          <button type="button" onClick={() => close(0)} className="w-full py-1 text-[13px] text-muted">Закрыть без пополнения</button>
         </div>
       )}
     </div>

@@ -1,4 +1,4 @@
-// Календарь платежей и поступлений: разовые события из плана + ежемесячный шаблон + понедельники.
+// Календарь платежей и поступлений: разовые события из плана + ежемесячный шаблон + воскресные пополнения карты жизни.
 import { addDays, dayIn, monthKey, weekStart } from './dates';
 import type { CalEvent, Debt, EventMark, FixedItem, IncomeTemplate, WeeklyOverride } from './types';
 import { weeklyLimit } from './plan';
@@ -88,10 +88,12 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
     }
   }
 
-  // понедельники: перевести недельный лимит на карту жизни
-  for (let mon = weekStart(from) < from ? addDays(weekStart(from), 7) : weekStart(from); mon <= to; mon = addDays(mon, 7)) {
+  // воскресенье вечером: долить карту жизни из резерва до лимита следующей недели (ключ — по её понедельнику).
+  // В календаре — полный лимит как оценка; сколько долито на самом деле, записывает закрытие недели.
+  for (let sun = addDays(weekStart(from), 6); sun <= to; sun = addDays(sun, 7)) {
+    const mon = addDays(sun, 1);
     out.push({
-      key: `wk:${mon}`, date: mon, dateMode: 'exact', kind: 'weekly', title: 'Недельный лимит на карту жизни',
+      key: `wk:${mon}`, date: sun, dateMode: 'exact', kind: 'weekly', title: 'Долить карту жизни до лимита',
       amount: weeklyLimit(input.debts, mon, input.weeklyOverrides),
     });
   }
@@ -117,7 +119,7 @@ const nextMonth = (m: string) => {
 
 export type EventGroup = 'debt' | 'fixed' | 'income' | 'weekly' | 'other';
 
-/** К какой группе относится строка календаря: кредиты, обязательные, поступления, понедельники, разовые */
+/** К какой группе относится строка календаря: кредиты, обязательные, поступления, пополнения карты, разовые */
 export function eventGroup(e: CalEvent): EventGroup {
   if (e.kind === 'income') return 'income';
   if (e.kind === 'weekly') return 'weekly';

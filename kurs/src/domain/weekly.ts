@@ -1,4 +1,5 @@
-// Итог недели: сколько потрачено из лимита, по категориям, и сколько остатка перевести на счёт остатков.
+// Итог недели: сколько потрачено из лимита, по категориям, и сколько долить на карту жизни из резерва в воскресенье.
+// Остаток недели остаётся на карте и уменьшает пополнение: долить = лимит следующей недели − остаток.
 import { addDays, fromKey, weekStart } from './dates';
 import { CATEGORIES, weeklyLimit } from './plan';
 import { countsWeekly } from './summary';
@@ -23,6 +24,12 @@ export interface WeekReport {
   count: number;
   /** траты с кредиток за неделю — нарушения */
   credit: number;
+  /** лимит следующей недели */
+  nextLimit: number;
+  /** сколько осталось на карте жизни (перерасход — 0: его покрыли другими деньгами) */
+  leftover: number;
+  /** сколько долить из резерва в воскресенье */
+  topUp: number;
 }
 
 export function weekReport(expenses: Expense[], debts: Debt[], overrides: WeeklyOverride[], monday: string): WeekReport {
@@ -31,8 +38,10 @@ export function weekReport(expenses: Expense[], debts: Debt[], overrides: Weekly
   const counted = list.filter(countsWeekly);
   const spent = counted.reduce((s, e) => s + e.amount, 0);
   const limit = weeklyLimit(debts, monday, overrides);
+  const nextLimit = weeklyLimit(debts, addDays(monday, 7), overrides);
+  const leftover = Math.max(0, limit - spent);
   return {
-    monday, sunday, limit, spent, left: limit - spent, count: list.length,
+    monday, sunday, limit, spent, left: limit - spent, count: list.length, nextLimit, leftover, topUp: Math.max(0, nextLimit - leftover),
     credit: list.filter(e => e.source === 'credit').reduce((s, e) => s + e.amount, 0),
     byCategory: CATEGORIES.map(c => ({ id: c.id, spent: counted.filter(e => e.category === c.id).reduce((s, e) => s + e.amount, 0) }))
       .filter(r => r.spent > 0).sort((a, b) => b.spent - a.spent),

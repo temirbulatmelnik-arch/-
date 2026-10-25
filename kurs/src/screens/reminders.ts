@@ -6,7 +6,7 @@ import { alerts } from '../domain/summary';
 import { useStore } from '../store/store';
 import { toast } from '../store/ui';
 
-/** Платежи, поступления и понедельники на полгода вперёд — одним файлом */
+/** Платежи, поступления и воскресные пополнения карты жизни на полгода вперёд — одним файлом */
 export function exportCalendar(months = 6) {
   const s = useStore.getState();
   const from = today();

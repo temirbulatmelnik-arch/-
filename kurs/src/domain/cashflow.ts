@@ -37,7 +37,8 @@ export function cashFlow(cal: CalendarInput, marks: Record<string, EventMark>, s
   }
   for (const e of ahead) {
     const sign = e.kind === 'income' ? 1 : -1;
-    const delta = sign * amountOf(e, marks[e.key]);
+    // пополнение карты жизни отмечено — деньги уже ушли из резерва (его остаток уменьшен), с карты не вычитаем
+    const delta = e.kind === 'weekly' && marks[e.key]?.done ? 0 : sign * amountOf(e, marks[e.key]);
     balance += delta;
     points.push({ event: e, delta, balance });
     byDay[e.date] = balance;

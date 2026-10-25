@@ -113,14 +113,16 @@ describe('план', () => {
 
 describe('календарь', () => {
   const cal = { debts: DEBTS, incomes: [{ kind: 'salary' as const, name: 'Зарплата', day: 10, amount: 48_648 }], fixed: [{ id: 'tel', name: 'Связь', day: 1, amount: 1000 }], oneOff: [], templateFrom: '2027-01', weeklyOverrides: [] };
-  it('шаблон месяца: платежи, поступления, понедельники', () => {
+  it('шаблон месяца: платежи, поступления, воскресные пополнения', () => {
     const ev = eventsBetween(cal, '2027-01-01', '2027-01-31');
     expect(ev.find(e => e.key === 'pay:loan:2027-01')?.date).toBe('2027-01-11');
     expect(ev.find(e => e.key === 'pay:sber:2027-01')?.date).toBe('2027-01-31');
     // зарплата 10.01 выпадает на каникулы и приходит 30.12 — в январе её нет
     expect(ev.find(e => e.key === 'inc:salary:2027-01')).toBeUndefined();
     expect(eventsBetween(cal, '2026-12-28', '2026-12-31').find(e => e.key === 'inc:salary:2027-01')?.date).toBe('2026-12-30');
-    expect(ev.filter(e => e.kind === 'weekly')).toHaveLength(4);
+    // карту жизни доливаем в воскресенье вечером — ключ по понедельнику недели, на которую пополнение
+    expect(ev.filter(e => e.kind === 'weekly').map(e => e.date)).toEqual(['2027-01-03', '2027-01-10', '2027-01-17', '2027-01-24', '2027-01-31']);
+    expect(ev.find(e => e.date === '2027-01-03' && e.kind === 'weekly')!.key).toBe('wk:2027-01-04');
     expect(ev.find(e => e.key.startsWith('pay:inst'))).toBeUndefined(); // график рассрочки кончился в декабре
   });
   it('Т-Банк: проценты + 1,7% долга', () => {
@@ -256,29 +258,40 @@ describe('обязательные платежи по датам и прогн�
   it('баланс карты по дням: минимум перед зарплатой', () => {
     const paid = { 'fix:sub:2026-10': { done: true, amount: 2400, at: '' } };
     const f = cashFlow(cal, paid, { amount: 5000, date: '2026-11-01', source: 'manual' }, '2026-11-30');
-    // пн 02.11 −10 000 недельного лимита, 08.11 −1 000 связь, пн 09.11 −10 000, 10.11 +50 000 зарплата
-    expect(f.byDay['2026-11-02']).toBe(-5000);
+    // вс 01.11 пополнение уже в балансе этого дня; вс 08.11 −1 000 связь и −10 000 пополнение карты жизни, 10.11 +50 000 зарплата
+    expect(f.byDay['2026-11-02']).toBeUndefined();
     expect(f.byDay['2026-11-08']).toBe(-6000);
-    expect(f.byDay['2026-11-10']).toBe(34_000);
-    expect(f.min!.balance).toBe(-16_000);
-    expect(f.min!.event.date).toBe('2026-11-09');
+    expect(f.byDay['2026-11-10']).toBe(44_000);
+    expect(f.min!.balance).toBe(-6000);
+    expect(f.min!.event.date).toBe('2026-11-08');
+    // пополнение отмечено при закрытии недели — оно уже вычтено из резерва, с карты его не вычитаем
+    const topped = cashFlow(cal, { ...paid, 'wk:2026-11-09': { done: true, amount: 7000, at: '' } }, { amount: 5000, date: '2026-11-01', source: 'manual' }, '2026-11-30');
+    expect(topped.byDay['2026-11-08']).toBe(4000);
     // неоплаченная подписка прошлого месяца учитывается как платёж к оплате
     expect(cashFlow(cal, {}, { amount: 5000, date: '2026-11-01', source: 'manual' }, '2026-11-30').points[0]).toMatchObject({ overdue: true, delta: -2400 });
   });
   it('деньги по дням для календаря: карта + резерв, между событиями — как накануне, назад — по календарю', () => {
     const t = dailyLevels(cal, {}, { amount: 5000, date: '2026-11-01', source: 'manual' }, 20_000, '2026-10-20', '2026-11-11');
-    expect(t['2026-10-31']).toBe(5000 + 20_000); // 1-го ничего не было — накануне столько же
-    expect(t['2026-10-21']).toBe(5000 + 2400 + 20_000); // до подписки 22-го денег было больше
+    expect(t['2026-10-31']).toBe(5000 + 10_000 + 20_000); // до воскресного пополнения 01.11 денег было больше
+    expect(t['2026-10-21']).toBe(5000 + 10_000 + 2400 + 20_000); // и до подписки 22-го (пополнение 25.10 — на неделю этапа 0, лимит 0)
     expect(t['2026-11-01']).toBe(5000 - 2400 + 20_000); // неоплаченная подписка уже вычтена
-    expect(t['2026-11-02']).toBe(-7400 + 20_000);
-    expect(t['2026-11-05']).toBe(t['2026-11-02']);
-    expect(t['2026-11-10']).toBe(-18_400 + 50_000 + 20_000);
+    expect(t['2026-11-05']).toBe(t['2026-11-01']); // между событиями — как накануне
+    expect(t['2026-11-10']).toBe(2600 - 1000 - 10_000 + 50_000 + 20_000);
     expect(Object.keys(t).sort()).toEqual(expect.arrayContaining(['2026-10-20', '2026-11-11']));
     expect(t['2026-11-12']).toBeUndefined();
   });
 });
 
 describe('неделя', () => {
+  it('воскресное пополнение: лимит следующей недели минус остаток на карте', () => {
+    const exp = (date: string, amount: number): Expense => ({ id: date + amount, date, amount, category: 'groceries', source: 'life', createdAt: '' });
+    const ov = [{ from: '2026-11-09', to: '2026-11-15', amount: 8000 }, { from: '2026-11-16', to: '2026-11-22', amount: 9000 }];
+    // лимит 8 000, потрачено 2 260 → на карте 5 740, долить 2 260
+    expect(weekReport([exp('2026-11-10', 2260)], DEBTS, ov, '2026-11-09')).toMatchObject({ limit: 8000, leftover: 5740, nextLimit: 9000, topUp: 9000 - 5740 });
+    // ничего не осталось — долить весь лимит; перерасход не уменьшает пополнение
+    expect(weekReport([exp('2026-11-10', 8000)], DEBTS, ov, '2026-11-09')).toMatchObject({ leftover: 0, topUp: 9000 });
+    expect(weekReport([exp('2026-11-10', 9500)], DEBTS, ov, '2026-11-09')).toMatchObject({ left: -1500, leftover: 0, topUp: 9000 });
+  });
   it('какую неделю закрывать', () => {
     expect(weekToClose('2026-10-25', {})).toBe('2026-10-19'); // вс — текущую
     expect(weekToClose('2026-10-26', {})).toBe('2026-10-19'); // пн — прошлую

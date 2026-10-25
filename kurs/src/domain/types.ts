@@ -193,13 +193,16 @@ export interface StrategySection {
   text: string;
 }
 
-/** Итог недели: сколько потрачено из лимита и сколько остатка переведено в копилку */
+/** Итог недели: сколько потрачено из лимита и сколько долито из резерва в воскресенье (transferred — копилка старой схемы) */
 export interface WeekClosure {
   monday: string;
   limit: number;
   spent: number;
   left: number;
+  /** прежняя схема: перевод остатка на отдельный счёт остатков */
   transferred: number;
+  /** сколько долито на карту жизни из резерва в воскресенье */
+  topUp?: number;
   at: string;
 }
 

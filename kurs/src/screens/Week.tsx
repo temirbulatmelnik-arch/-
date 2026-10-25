@@ -17,8 +17,8 @@ import { useCal, useToday, useUi } from '../store/ui';
 export function Week() {
   const now = useToday();
   const cal = useCal();
-  const [expenses, debts, marks, wishes, reserve, savings, settings, overrides, startTotal, closures, checklist, checks] = useStore(useShallow(s => [
-    s.expenses, s.debts, s.marks, s.wishes, s.reserve, s.savings, s.settings, s.weeklyOverrides, s.planTrajectory[0]?.[1] ?? 0, s.closures, s.checklist, s.checks,
+  const [expenses, debts, marks, wishes, reserve, settings, overrides, startTotal, closures, checklist, checks] = useStore(useShallow(s => [
+    s.expenses, s.debts, s.marks, s.wishes, s.reserve, s.settings, s.weeklyOverrides, s.planTrajectory[0]?.[1] ?? 0, s.closures, s.checklist, s.checks,
   ] as const));
   const ui = useUi();
   const week = useMemo(() => weekSummary(expenses, debts, overrides, now), [expenses, debts, overrides, now]);
@@ -32,7 +32,9 @@ export function Week() {
   const over = week.left < 0;
   const shown = useCountUp(Math.abs(week.left));
   const { need, next } = reserveNeed(now, debts);
-  const weeksSaved = Object.values(closures).filter(c => c.transferred > 0).length;
+  // воскресное пополнение карты жизни: лимит следующей недели минус то, что на ней осталось
+  const current = useMemo(() => weekReport(expenses, debts, overrides, week.monday), [expenses, debts, overrides, week.monday]);
+  const topped = closures[week.monday]?.topUp;
 
   // в выходные и в начале недели — предложить закрыть неделю
   const closeMonday = weekToClose(now, closures);
@@ -76,10 +78,12 @@ export function Week() {
           <Money value={reserve} className="figure mt-1 block text-[21px] leading-tight" />
           <span className={`mt-1 block text-[12px] leading-snug ${reserve < need ? 'text-warn' : 'text-muted'}`}>держит <Money value={need} /> до премии {monthIn(next)}</span>
         </button>
-        <button type="button" onClick={() => ui.set({ savings: true })} className="pl-4 text-left">
-          <span className="text-[13px] text-muted">Остатки недель</span>
-          <Money value={savings} className="figure mt-1 block text-[21px] leading-tight" />
-          <span className="mt-1 block text-[12px] leading-snug text-muted">{weeksSaved ? `${weeksSaved} ${plural(weeksSaved, 'неделя', 'недели', 'недель')} с остатком` : 'пополняется, когда закрываете неделю'}</span>
+        <button type="button" onClick={() => ui.set({ week: week.monday })} className="pl-4 text-left">
+          <span className="text-[13px] text-muted">{topped != null ? 'Долито в воскресенье' : 'Долить в воскресенье'}</span>
+          <Money value={topped ?? current.topUp} className="figure mt-1 block text-[21px] leading-tight" />
+          <span className="mt-1 block text-[12px] leading-snug text-muted">
+            {topped != null ? 'из резерва на карту жизни' : current.leftover > 0 ? <>из резерва; <Money value={current.leftover} /> останется на карте</> : 'из резерва, до полного лимита'}
+          </span>
         </button>
       </div>
 
@@ -99,9 +103,10 @@ export function Week() {
           <span className="grid size-10 shrink-0 place-items-center rounded-full bg-sea/12 text-sea"><PiggyBank size={18} strokeWidth={1.5} /></span>
           <span className="min-w-0 flex-1">
             <span className="block text-[14.5px] font-medium">Закрыть неделю {ddmm(closeMonday)}–{ddmm(addDays(closeMonday, 6))}</span>
-            <span className="block text-[12.5px] text-muted">
-              {closing.left > 0 ? <>Остаток <Money value={closing.left} /> — на счёт остатков. </> : closing.left < 0 ? <>Перерасход <Money value={-closing.left} />. </> : null}
-              Сначала загрузите выписку.
+            <span className="block text-[12.5px] leading-snug text-muted">
+              Долить на карту жизни из резерва <Money value={closing.topUp} className="text-ink" />
+              {closing.leftover > 0 ? <>: остаток <Money value={closing.leftover} /> уже на ней</> : closing.left < 0 ? <>: перерасход <Money value={-closing.left} /></> : ''}.
+              {' '}Сначала загрузите выписку.
             </span>
           </span>
           <ChevronRight size={16} className="text-faint" />

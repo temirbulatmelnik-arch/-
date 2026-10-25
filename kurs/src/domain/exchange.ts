@@ -92,9 +92,10 @@ export function buildExchange(s: ExchangeState, now: string): ExchangeFile {
   const phase = currentPhase(s.debts, now);
   const need = reserveNeed(now, s.debts);
   const from = addDays(now, -EXPENSE_DAYS);
-  // окно −45…+75 дней и, дальше него, всё, что поправлено в приложении вручную: точные суммы и даты будущих платежей
+  // окно −45…+75 дней и, дальше него, всё, что поправлено в приложении вручную: точные суммы и даты будущих платежей;
+  // воскресные пополнения карты — только прошедшие и ближайшее, чтобы сверить их с переводами из резерва
   const calendar = eventsBetween(s, addDays(now, -45), addDays(now, 400))
-    .filter(e => e.kind !== 'weekly' && (e.date <= addDays(now, 75) || s.overrides[e.key] || s.marks[e.key]));
+    .filter(e => (e.kind === 'weekly' ? e.date <= addDays(now, 7) : e.date <= addDays(now, 75) || s.overrides[e.key] || s.marks[e.key]));
   return {
     app: EXCHANGE_APP, version: 2, from: 'app', date: now,
     about: 'Файл обмена приложения «Курс». status — сводка только для чтения. Остальные разделы можно менять: в ответ присылай этот же формат только с изменениями.',
@@ -132,7 +133,7 @@ export function buildExchange(s: ExchangeState, now: string): ExchangeFile {
     savings: r0(s.savings),
     card: s.cardBalance ? { amount: r0(s.cardBalance.amount), date: s.cardBalance.date } : null,
     weeks: Object.values(s.closures).sort((a, b) => b.monday.localeCompare(a.monday)).slice(0, 8)
-      .map(w => ({ monday: w.monday, limit: r0(w.limit), spent: r0(w.spent), left: r0(w.left), transferred: r0(w.transferred) })),
+      .map(w => ({ monday: w.monday, limit: r0(w.limit), spent: r0(w.spent), left: r0(w.left), ...(w.topUp ? { topUp: r0(w.topUp) } : {}), ...(w.transferred ? { transferred: r0(w.transferred) } : {}) })),
     checklist: s.checklist.map(c => ({ ...c, done: s.checks[c.id]?.done ?? !!c.done })),
     strategy: s.strategy,
     rules: s.rules,

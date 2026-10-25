@@ -4,7 +4,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { DEFAULT_MODEL } from '../domain/models';
 import { annuity } from '../domain/calendar';
-import { monthKey, monthsBetween, today } from '../domain/dates';
+import { addDays, monthKey, monthsBetween, today } from '../domain/dates';
 import { setPlanSource, totalDebt, type PlanConfig } from '../domain/plan';
 import { mergeSeed } from '../domain/planUpdate';
 import type { CalEvent, CardBalance, ChecklistItem, Debt, DebtSnapshot, EventMark, Expense, FixedItem, IncomeTemplate, PlanSeed, ReserveMove, Settings, StrategySection, WeekClosure, WeeklyOverride, WishItem } from '../domain/types';
@@ -115,6 +115,14 @@ function withSnapshot(debts: Debt[], snapshots: DebtSnapshot[]): { debts: Debt[]
 }
 
 /** Применить изменение к долгу: закрыт при нуле, аннуитету (Сплит) пересчитать платёж после досрочки */
+// Пополнение карты жизни берётся из резерва: отметка в календаре сдвигает резерв на разницу с прежней отметкой.
+function topUpMove(s: Data, key: string, amount: number, note = 'Долил карту жизни до недельного лимита'): Partial<Pick<Data, 'reserve' | 'reserveLog'>> {
+  const prev = s.marks[key]?.done ? s.marks[key].amount ?? 0 : 0;
+  const diff = amount - prev;
+  if (!diff) return {};
+  return { reserve: s.reserve - diff, reserveLog: [...s.reserveLog, { id: uid(), date: today(), amount: -diff, note }] };
+}
+
 function patchDebt(d: Debt, balance: number, recalc = false): Debt {
   const b = Math.max(0, Math.round(balance * 100) / 100);
   const closed = b <= 0.5;
@@ -174,18 +182,28 @@ export const useStore = create<State>()(
         const cur = s.checks[id]?.done ?? base;
         return { checks: { ...s.checks, [id]: { done: !cur, at: nowIso() } } };
       }),
-      closeWeek: c => set(s => ({
-        closures: { ...s.closures, [c.monday]: { ...c, at: nowIso() } },
-        ...(c.transferred > 0 ? { savings: s.savings + c.transferred, savingsLog: [...s.savingsLog, { id: uid(), date: today(), amount: c.transferred, note: 'Остаток недели' }] } : {}),
-      })),
+      closeWeek: c => set(s => {
+        // воскресное пополнение: из резерва на карту жизни; в календаре отмечается пополнение следующей недели
+        const top = c.topUp ?? 0;
+        const key = `wk:${addDays(c.monday, 7)}`;
+        return {
+          closures: { ...s.closures, [c.monday]: { ...c, at: nowIso() } },
+          ...(c.transferred > 0 ? { savings: s.savings + c.transferred, savingsLog: [...s.savingsLog, { id: uid(), date: today(), amount: c.transferred, note: 'Остаток недели' }] } : {}),
+          ...(top > 0 ? { ...topUpMove(s, key, top), marks: { ...s.marks, [key]: { done: true, amount: top, at: nowIso() } } } : {}),
+        };
+      }),
       reopenWeek: monday => set(s => {
         const c = s.closures[monday];
         if (!c) return {};
         const closures = { ...s.closures };
         delete closures[monday];
+        const key = `wk:${addDays(monday, 7)}`;
+        const marks = { ...s.marks };
+        delete marks[key];
         return {
           closures,
           ...(c.transferred > 0 ? { savings: s.savings - c.transferred, savingsLog: [...s.savingsLog, { id: uid(), date: today(), amount: -c.transferred, note: 'Неделя открыта заново' }] } : {}),
+          ...(s.marks[key]?.done ? { marks, ...topUpMove(s, key, 0, 'Неделя открыта заново: пополнение отменено') } : {}),
         };
       }),
       moveSavings: (amount, note) => set(s => ({ savings: s.savings + amount, savingsLog: [...s.savingsLog, { id: uid(), date: today(), amount, note }] })),
@@ -211,6 +229,7 @@ export const useStore = create<State>()(
         if (done) {
           const paid = amount ?? e.amount;
           marks[e.key] = { done: true, amount: paid, at: nowIso(), prevBalance: debt?.balance };
+          if (e.kind === 'weekly') return { marks, ...topUpMove(s, e.key, paid) };
           if (debt && e.kind === 'payment' && !prev?.done) {
             // погашение основного долга ≈ платёж минус проценты за месяц; закрывающий платёж обнуляет долг
             const interest = debt.rule.type === 'schedule' ? 0 : (debt.balance * debt.rate) / 12;
@@ -219,6 +238,7 @@ export const useStore = create<State>()(
           }
         } else {
           delete marks[e.key];
+          if (e.kind === 'weekly') return { marks, ...topUpMove(s, e.key, 0, 'Пополнение карты отменено') };
           if (debt && prev?.prevBalance != null) debts = s.debts.map(d => (d.id === debt.id ? { ...patchDebt(d, prev.prevBalance!), closedOn: undefined } : d));
         }
         return { marks, ...withSnapshot(debts, s.snapshots) };

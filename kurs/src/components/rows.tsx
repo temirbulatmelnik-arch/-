@@ -27,7 +27,7 @@ export function ExpenseRow({ e, onClick }: { e: Expense; onClick?: () => void })
 }
 
 export const GROUP_ICON: Record<EventGroup, typeof Wallet> = { debt: CreditCard, fixed: Repeat, income: ArrowDownLeft, weekly: Wallet, other: Receipt };
-export const GROUP_LABEL: Record<EventGroup, string> = { debt: 'кредит', fixed: 'обязательный', income: 'поступление', weekly: 'недельный лимит', other: 'разовый' };
+export const GROUP_LABEL: Record<EventGroup, string> = { debt: 'кредит', fixed: 'обязательный', income: 'поступление', weekly: 'пополнение карты', other: 'разовый' };
 
 export function whenText(e: CalEvent) {
   return e.dateMode === 'until' ? `до ${ddmm(e.date)}` : e.dateMode === 'approx' ? `~${ddmm(e.date)}` : e.dateMode === 'month' ? 'в течение месяца' : ddmm(e.date);
@@ -41,7 +41,7 @@ export function EventRow({ e, mark, now, onClick, onToggle, showDate = true }: {
   const hot = u === 'overdue' || u === 'soon';
   return (
     <div className={`flex items-center gap-3 px-4 py-3 ${u === 'done' ? 'opacity-55' : ''}`}>
-      <button type="button" onClick={onToggle ?? onClick} aria-label={mark?.done ? 'Снять отметку' : g === 'income' ? 'Отметить: пришло' : 'Отметить: оплачено'}
+      <button type="button" onClick={onToggle ?? onClick} aria-label={mark?.done ? 'Снять отметку' : g === 'income' ? 'Отметить: пришло' : g === 'weekly' ? 'Отметить: долито' : 'Отметить: оплачено'}
         className={`grid size-10 shrink-0 place-items-center rounded-full border transition ${mark?.done ? 'border-transparent bg-pos/15 text-pos' : hot ? 'border-neg/50 text-neg' : 'border-line text-muted'}`}>
         {mark?.done ? <Check size={17} strokeWidth={2} /> : <Icon size={17} strokeWidth={1.5} />}
       </button>
@@ -50,7 +50,7 @@ export function EventRow({ e, mark, now, onClick, onToggle, showDate = true }: {
           <span className={`block truncate text-[14.5px] font-medium ${u === 'done' ? 'line-through decoration-1' : ''}`}>{e.title}</span>
           <span className={`block text-[12px] ${hot ? 'text-neg' : 'text-muted'}`}>
             {showDate ? `${whenText(e)}, ` : e.dateMode === 'until' ? 'внести до этой даты, ' : ''}
-            {u === 'done' ? (g === 'income' ? 'пришло' : 'оплачено') : e.dateMode === 'month' ? 'дата не известна' : relDays(now, e.date)}
+            {u === 'done' ? (g === 'income' ? 'пришло' : g === 'weekly' ? 'долито' : 'оплачено') : e.dateMode === 'month' ? 'дата не известна' : relDays(now, e.date)}
             {e.moved && u !== 'done' ? ', дата изменена' : ''}
             {e.planned && u !== 'done' ? `, по графику ${ddmm(e.planned)} — выходной` : ''}
           </span>

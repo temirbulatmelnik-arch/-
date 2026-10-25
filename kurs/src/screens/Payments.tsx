@@ -26,7 +26,7 @@ export function Payments() {
   const set = useUi(s => s.set);
   const [month, setMonth] = useState(monthKey(now));
   const [filter, setFilter] = useState<Filter>('all');
-  const [mondays, setMondays] = useState(false);
+  const [topUps, setTopUps] = useState(false);
 
   const from = `${month}-01`, to = `${month}-${String(lastDay(month)).padStart(2, '0')}`;
   const events = useMemo(() => eventsBetween(cal, from, to), [cal, from, to]);
@@ -77,7 +77,7 @@ export function Payments() {
     .reduce<typeof flow.points[number] | null>((m, p) => (!m || p.balance < m.balance ? p : m), null);
 
   const dayEvents = events.filter(e => e.date === selected);
-  const visible = events.filter(e => matches(filter, eventGroup(e)) || (mondays && e.kind === 'weekly' && filter === 'all'));
+  const visible = events.filter(e => matches(filter, eventGroup(e)) || (topUps && e.kind === 'weekly' && filter === 'all'));
   const byDate = useMemo(() => {
     const map = new Map<string, CalEvent[]>();
     for (const e of visible) map.set(e.date, [...(map.get(e.date) ?? []), e]);
@@ -180,8 +180,8 @@ export function Payments() {
             className={`shrink-0 rounded-full border px-3.5 py-1.5 text-[13px] font-medium transition-colors ${filter === f.id ? 'border-ink bg-ink text-bg' : 'border-line text-muted'}`}>{f.label}</button>
         ))}
         {filter === 'all' && (
-          <button type="button" onClick={() => setMondays(!mondays)}
-            className={`shrink-0 rounded-full border px-3.5 py-1.5 text-[13px] font-medium ${mondays ? 'border-sea text-sea' : 'border-line text-muted'}`}>Понедельники</button>
+          <button type="button" onClick={() => setTopUps(!topUps)}
+            className={`shrink-0 rounded-full border px-3.5 py-1.5 text-[13px] font-medium ${topUps ? 'border-sea text-sea' : 'border-line text-muted'}`}>Пополнения карты</button>
         )}
       </div>
 

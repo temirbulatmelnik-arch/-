@@ -1,12 +1,13 @@
-// Платёж, поступление или понедельник: отметить, поправить сумму и дату (у кредиток они плавают), распределить премию.
+// Платёж, поступление или воскресное пополнение карты: отметить, поправить сумму и дату (у кредиток они плавают), распределить премию.
 import { CalendarDays, Undo2 } from 'lucide-react';
 import { useState } from 'react';
 import { AmountInput, Money, PrimaryButton, Row, SecondaryButton, Sheet } from '../components/ui';
 import { GROUP_LABEL, whenText } from '../components/rows';
 import { eventGroup } from '../domain/calendar';
-import { dayMonth, relDays, weekdayFull } from '../domain/dates';
+import { addDays, dayMonth, relDays, weekdayFull } from '../domain/dates';
 import { parseAmount, rub } from '../domain/money';
 import type { CalEvent } from '../domain/types';
+import { weekReport } from '../domain/weekly';
 import { useStore } from '../store/store';
 import { toast, useToday, useUi } from '../store/ui';
 
@@ -31,7 +32,12 @@ function Body({ e }: { e: CalEvent }) {
   const { markEvent, setOverride, clearOverride, updateDebt } = useStore.getState();
   const set = useUi(s => s.set);
   const group = eventGroup(e);
-  const [amount, setAmount] = useState(String(Math.round((mark?.amount ?? e.amount) * 100) / 100));
+  // пополнение по воскресеньям: до лимита следующей недели минус остаток уходящей
+  const monday = e.kind === 'weekly' ? addDays(e.date, -6) : '';
+  const [amount, setAmount] = useState(() => {
+    if (mark?.amount == null && e.kind === 'weekly') { const s = useStore.getState(); return String(Math.round(weekReport(s.expenses, s.debts, s.weeklyOverrides, monday).topUp)); }
+    return String(Math.round((mark?.amount ?? e.amount) * 100) / 100);
+  });
   const [editing, setEditing] = useState(false);
   const [newAmount, setNewAmount] = useState(String(e.amount));
   const [newDate, setNewDate] = useState(e.date);
@@ -41,7 +47,7 @@ function Body({ e }: { e: CalEvent }) {
   const done = () => {
     if (isBonus(e)) { set({ event: null, bonus: { event: { ...e, amount: value } } }); return; }
     markEvent(e, true, value);
-    toast(e.kind === 'income' ? 'Отмечено: пришло' : e.kind === 'weekly' ? 'Отмечено: лимит переведён' : debt ? `Оплачено. Остаток ${debt.short} пересчитан` : 'Отмечено: оплачено');
+    toast(e.kind === 'income' ? 'Отмечено: пришло' : e.kind === 'weekly' ? 'Отмечено: карта долита из резерва' : debt ? `Оплачено. Остаток ${debt.short} пересчитан` : 'Отмечено: оплачено');
     close();
   };
 
@@ -69,7 +75,7 @@ function Body({ e }: { e: CalEvent }) {
       {mark?.done ? (
         <>
           <p className="rounded-2xl bg-pos/10 px-4 py-3 text-[14px] text-pos">
-            {e.kind === 'income' ? 'Пришло' : e.kind === 'weekly' ? 'Лимит переведён' : 'Оплачено'}: {rub(mark.amount ?? e.amount)}
+            {e.kind === 'income' ? 'Пришло' : e.kind === 'weekly' ? 'Долито' : 'Оплачено'}: {rub(mark.amount ?? e.amount)}
           </p>
           <SecondaryButton onClick={() => { markEvent(e, false); toast('Отметка снята'); close(); }} className="w-full"><Undo2 size={16} strokeWidth={1.5} /> Снять отметку</SecondaryButton>
         </>
@@ -87,7 +93,7 @@ function Body({ e }: { e: CalEvent }) {
       ) : (
         <>
           <div>
-            <div className="mb-1.5 text-[12.5px] font-medium text-muted">{e.kind === 'income' ? 'Сколько пришло' : e.kind === 'weekly' ? 'Сколько перевели' : 'Сколько заплатили'}</div>
+            <div className="mb-1.5 text-[12.5px] font-medium text-muted">{e.kind === 'income' ? 'Сколько пришло' : e.kind === 'weekly' ? 'Сколько долили' : 'Сколько заплатили'}</div>
             <AmountInput value={amount} onChange={setAmount} size="md" />
           </div>
           {e.kind === 'payment' && debt && debt.rule.type !== 'schedule' && (
@@ -95,9 +101,14 @@ function Body({ e }: { e: CalEvent }) {
           )}
           {isBonus(e) && <p className="text-[12.5px] leading-snug text-muted">Дальше — распределение премии: резерв до следующей премии, остальное сегодня же в долг.</p>}
           <PrimaryButton onClick={done} disabled={value <= 0}>
-            {e.kind === 'income' ? (isBonus(e) ? 'Пришла — распределить' : 'Пришло') : e.kind === 'weekly' ? 'Перевёл' : 'Оплачено'}
+            {e.kind === 'income' ? (isBonus(e) ? 'Пришла — распределить' : 'Пришло') : e.kind === 'weekly' ? 'Долил' : 'Оплачено'}
           </PrimaryButton>
-          {e.kind !== 'weekly' && (
+          {e.kind === 'weekly' ? (
+            <>
+              <p className="text-[12.5px] leading-snug text-muted">Сумма спишется с резерва. Удобнее закрыть неделю: приложение само посчитает, сколько осталось на карте и сколько долить.</p>
+              <SecondaryButton onClick={() => set({ event: null, week: monday })} className="w-full">Закрыть неделю</SecondaryButton>
+            </>
+          ) : (
             <SecondaryButton onClick={() => (group === 'fixed' ? set({ event: null, fixed: true }) : setEditing(true))} className="w-full">
               <CalendarDays size={16} strokeWidth={1.5} /> {group === 'fixed' ? 'Изменить сумму или число месяца' : `Изменить сумму или дату${e.dateMode !== 'month' ? ` (${dayMonth(e.date)})` : ''}`}
             </SecondaryButton>

@@ -36,11 +36,11 @@ export function buildIcs(events: CalEvent[], o: IcsOptions): string {
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Kurs//RU', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'X-WR-CALNAME:Курс'];
   for (const e of events) {
     const money = o.hideAmounts ? '' : ` ${rub(e.amount, { approx: e.approx })}`;
-    const title = e.kind === 'payment' ? `Курс: ${e.title}${money}` : e.kind === 'weekly' ? `Курс: недельный лимит${money}` : `Курс: ожидается ${e.title.toLowerCase()}${money}`;
+    const title = e.kind === 'payment' ? `Курс: ${e.title}${money}` : e.kind === 'weekly' ? `Курс: долить карту жизни` : `Курс: ожидается ${e.title.toLowerCase()}${money}`;
     const start = e.date.replace(/-/g, '');
     const desc = e.kind === 'payment'
       ? `${e.dateMode === 'until' ? 'Внести до этой даты' : 'Дата платежа'}. Просрочка недопустима ни на день. Отметьте оплату в «Курсе».`
-      : e.kind === 'weekly' ? 'Перевести недельный лимит на карту жизни. Кончится раньше — ждём следующего понедельника.'
+      : e.kind === 'weekly' ? 'Вечером долить карту жизни из резерва до недельного лимита: остаток недели остаётся на карте. Откройте «Курс» → «Закрыть неделю» — он посчитает сумму.'
       : 'Если это премия — в тот же день распределите её в «Курсе»: резерв, остальное в долг.';
     lines.push(
       'BEGIN:VEVENT',

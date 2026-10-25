@@ -80,9 +80,6 @@ export function alerts(opts: {
         text: u === 'overdue' ? 'Если уже оплатили — отметьте. Если нет — оплатите сегодня: просрочка недопустима.' : undefined,
       });
     }
-    if (e.kind === 'weekly' && e.date === opts.now && !opts.marks[e.key]?.done) {
-      out.push({ id: e.key, tone: 'info', event: e, action: 'weekly', title: 'Понедельник: перевести недельный лимит', text: 'С зарплатной карты на карту жизни — и ни рублём больше до следующего понедельника.' });
-    }
     if (e.kind === 'income' && e.date <= opts.now && e.date >= addDays(opts.now, -10) && !opts.marks[e.key]?.done && (e.incomeKind === 'bonusQuarter' || e.incomeKind === 'bonusYear' || e.incomeKind === 'vacation' || e.incomeKind === 'thirteenth')) {
       out.push({ id: e.key, tone: 'good', event: e, action: 'income', title: `Ожидается: ${e.title}`, text: 'Пришла? В тот же день распределите: резерв по формуле, остальное — досрочно в долг.' });
     }

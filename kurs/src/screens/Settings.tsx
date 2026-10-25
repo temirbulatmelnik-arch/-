@@ -74,7 +74,7 @@ function Body() {
       </Section>
 
       <Section title="Напоминания" id="reminders">
-        <p className="text-[13.5px] leading-snug text-muted">Веб-приложение не может само будить телефон по расписанию, поэтому напоминания идут через календарь iPhone: один файл — все платежи, поступления и понедельники на полгода, с будильниками.</p>
+        <p className="text-[13.5px] leading-snug text-muted">Веб-приложение не может само будить телефон по расписанию, поэтому напоминания идут через календарь iPhone: один файл — все платежи, поступления и воскресные пополнения карты на полгода, с будильниками.</p>
         <div className="grid grid-cols-3 gap-2">
           {[3, 1, 0].map(d => {
             const on = st.remindDays.includes(d);
