@@ -62,7 +62,8 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // новая версия ставится, когда приложение уходит в фон (main.tsx), а не перезагружает его на глазах
+      registerType: 'prompt',
       injectRegister: false,
       includeAssets: ['favicon.svg', 'apple-touch-icon-180x180.png'],
       manifest: {

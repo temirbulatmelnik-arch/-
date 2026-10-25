@@ -93,10 +93,12 @@ function Pier({ x, lampX }: { x: number; lampX: number }) {
 /** Плавный переход значения по кадрам: Safari на iPhone не всегда анимирует CSS-переходы на элементах SVG,
  *  поэтому мост и солнце двигаются через атрибут transform, который понимают все браузеры */
 function tween(from: number, to: number, ms: number, ease: (k: number) => number, frame: (v: number) => void): () => void {
-  let raf = 0;
-  const t0 = performance.now();
+  let raf = 0, last = 0, done = 0;
   const step = (t: number) => {
-    const k = Math.min(1, (t - t0) / ms);
+    // если телефон на миг притормозил, анимация не перескакивает вперёд: за кадр — не больше 50 мс пути
+    done += last ? Math.min(t - last, 50) : 0;
+    last = t;
+    const k = Math.min(1, done / ms);
     frame(from + (to - from) * ease(k));
     if (k < 1) raf = requestAnimationFrame(step);
   };
@@ -143,15 +145,17 @@ function useLift() {
   useLayoutEffect(() => {
     // при входе в приложение секунду мост стоит сведённым, потом разводится — около 12 секунд, вместе с закатом;
     // при переходах между вкладками он уже разведён
-    const open = () => {
-      if (!fresh) { draw(OPEN); return; }
+    const start = () => {
       fresh = false;
-      draw(0);
+      stop.current();
       clearTimeout(timer.current);
+      draw(0);
       timer.current = window.setTimeout(() => moveTo(OPEN, 6), 1000);
     };
-    open();
-    const onVisible = () => { if (document.visibilityState === 'visible') open(); };
+    if (fresh) start(); else draw(OPEN);
+    // iPhone при запуске присылает «страница видна», даже если она не пряталась: разводим заново,
+    // только если приложение действительно уходило в фон, иначе не трогаем идущий развод
+    const onVisible = () => { if (document.visibilityState === 'visible' && fresh) start(); };
     document.addEventListener('visibilitychange', onVisible);
     return () => { document.removeEventListener('visibilitychange', onVisible); clearTimeout(timer.current); stop.current(); };
   }, []);
