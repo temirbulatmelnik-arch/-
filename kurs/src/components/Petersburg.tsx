@@ -1,7 +1,7 @@
 // Иллюстрация «Петербург»: закат над Невой, Петропавловка, Исаакий, Адмиралтейство и Дворцовый мост.
-// Мост на «Неделе» разводится по мере трат, фонари набережной — дни недели. Цвета — из index.css (--sky-*, --city-*),
+// Мост на «Неделе» при входе разводится полностью, фонари набережной — дни недели. Цвета — из index.css (--sky-*, --city-*),
 // поэтому тёмная тема превращает закат в поздние сумерки без отдельной картинки.
-import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 
 const f = (v: string): CSSProperties => ({ fill: `var(${v})` });
 const stop = (v: string, opacity?: number): CSSProperties => ({ stopColor: `var(${v})`, stopOpacity: opacity });
@@ -117,41 +117,49 @@ function useSunset(rise: number, ms: number) {
   return { sun, warm };
 }
 
-/** Угол пролётов растёт с тратами; поднимаются плавно, с постоянной скоростью, чтобы движение было видно */
-function useLift(target: number) {
+/** Мост при входе разводится полностью: медленно, с плавным началом и концом, и остаётся разведённым */
+const OPEN = 72;
+/** вход в приложение: первый запуск или возвращение из фона — тогда мост разводится заново */
+let fresh = true;
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') fresh = true; });
+function useLift() {
   const left = useRef<SVGGElement>(null);
   const right = useRef<SVGGElement>(null);
   const angle = useRef(0);
   const stop = useRef<() => void>(() => {});
-  const timers = useRef<number[]>([]);
-  const clear = () => { stop.current(); timers.current.forEach(clearTimeout); timers.current = []; };
+  const timer = useRef(0);
   const draw = (a: number) => {
     angle.current = a;
     left.current?.setAttribute('transform', `rotate(${(-a).toFixed(2)} 88 386)`);
     right.current?.setAttribute('transform', `rotate(${a.toFixed(2)} 302 386)`);
   };
   /** повернуть пролёты к углу a со скоростью speed градусов в секунду; возвращает длительность, с */
-  const moveTo = (a: number, speed = 4.5) => {
+  const moveTo = (a: number, speed: number) => {
     stop.current();
-    const dur = Math.max(speed > 10 ? 1.2 : 3, Math.abs(a - angle.current) / speed);
+    const dur = Math.max(1.2, Math.abs(a - angle.current) / speed);
     stop.current = tween(angle.current, a, dur * 1000, easeInOut, draw);
     return dur;
   };
-  useEffect(() => {
-    clear();
-    // при открытии мост секунду стоит сведённым, потом разводится до уровня трат
-    timers.current.push(window.setTimeout(() => moveTo(target), angle.current === 0 && target > 0 ? 1200 : 0));
-    return clear;
-  }, [target]);
-  /** нажатие на сцену: мост сводится и разводится заново; без трат — показывает, как разводится, и сводится обратно */
+  useLayoutEffect(() => {
+    // при входе в приложение секунду мост стоит сведённым, потом разводится — около 12 секунд, вместе с закатом;
+    // при переходах между вкладками он уже разведён
+    const open = () => {
+      if (!fresh) { draw(OPEN); return; }
+      fresh = false;
+      draw(0);
+      clearTimeout(timer.current);
+      timer.current = window.setTimeout(() => moveTo(OPEN, 6), 1000);
+    };
+    open();
+    const onVisible = () => { if (document.visibilityState === 'visible') open(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { document.removeEventListener('visibilitychange', onVisible); clearTimeout(timer.current); stop.current(); };
+  }, []);
+  /** нажатие на сцену: мост сводится и разводится заново */
   const replay = () => {
-    clear();
-    const down = moveTo(0, 20);
-    const up = target > 2 ? target : 20;
-    timers.current.push(window.setTimeout(() => {
-      const d = moveTo(up);
-      if (up !== target) timers.current.push(window.setTimeout(() => moveTo(target), d * 1000 + 700));
-    }, down * 1000 + 400));
+    clearTimeout(timer.current);
+    const down = moveTo(0, 24);
+    timer.current = window.setTimeout(() => moveTo(OPEN, 6), down * 1000 + 500);
   };
   return { left, right, replay };
 }
@@ -159,17 +167,15 @@ function useLift(target: number) {
 const DAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
 
 /**
- * Сцена «Недели». spent — доля недельного лимита (0…1, больше — перерасход), today — индекс дня недели (пн = 0).
- * children — текст поверх неба (дата, остаток).
+ * Сцена «Недели»: today — индекс дня недели (пн = 0), children — текст поверх неба (дата, остаток).
  */
-export function WeekScene({ spent, today, children }: { spent: number; today: number; children: ReactNode }) {
-  const target = 72 * Math.sqrt(Math.min(1, Math.max(0, spent)));
-  const { left, right, replay } = useLift(target);
+export function WeekScene({ today, children }: { today: number; children: ReactNode }) {
+  const { left, right, replay } = useLift();
   const { sun, warm } = useSunset(130, 16_000);
   return (
     <div className="relative">
       <svg viewBox="0 34 390 478" className="block h-auto w-full" role="img"
-        aria-label={`Дворцовый мост ${target < 2 ? 'сведён' : target > 65 ? 'разведён полностью' : 'разведён наполовину'}: потрачено ${Math.round(Math.min(1, spent) * 100)}% недели`}>
+        aria-label="Закат над Невой, Дворцовый мост разводится">
         <defs>
           <SkyGradients id="ws" />
           <linearGradient id="ws-path" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#FFD9B0" stopOpacity=".9" /><stop offset="1" stopColor="#FFD9B0" stopOpacity="0" /></linearGradient>

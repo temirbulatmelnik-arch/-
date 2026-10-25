@@ -51,7 +51,7 @@ export function Week() {
 
   return (
     <div>
-      <WeekScene spent={week.limit ? week.spent / week.limit : 0} today={(fromKey(now).getDay() + 6) % 7}>
+      <WeekScene today={(fromKey(now).getDay() + 6) % 7}>
         <div className="flex items-start justify-between gap-3 px-5 pt-2.5">
           <div style={{ color: 'var(--scene-ink)' }}>
             <div className="text-[14px] first-letter:uppercase" style={{ color: 'var(--scene-muted)' }}>{weekdayFull(now)}, {dayMonth(now)}</div>
