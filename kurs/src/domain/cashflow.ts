@@ -50,15 +50,30 @@ export function cashFlow(cal: CalendarInput, marks: Record<string, EventMark>, s
 export const LOW_WATER = 30_000;
 
 /**
- * Деньги на карте и в резерве на конец каждого дня [from, to]. Дни раньше даты баланса не считаются:
- * о них прогноз ничего не знает. Между событиями баланс переносится с предыдущего дня.
+ * Деньги на карте и в резерве на конец каждого дня [from, to] от известного остатка карты (anchor).
+ * Вперёд — по прогнозу (неоплаченные прошлые платежи вычитаются сразу); назад — восстановлено по календарю:
+ * накануне было столько же, сколько в этот день, минус то, что в этот день пришло, плюс то, что ушло.
  */
-export function dailyTotals(flow: CashFlow, reserve: number, from: string, to: string): Record<string, number> {
+export function dailyLevels(cal: CalendarInput, marks: Record<string, EventMark>, anchor: CardBalance, reserve: number, from: string, to: string): Record<string, number> {
   const out: Record<string, number> = {};
-  let balance = flow.points.filter(p => p.overdue).reduce((b, p) => b + p.delta, flow.start.amount);
-  for (let d = flow.start.date; d <= to; d = addDays(d, 1)) {
+  const flow = cashFlow(cal, marks, anchor, to > anchor.date ? to : anchor.date);
+  let balance = flow.points.filter(p => p.overdue).reduce((b, p) => b + p.delta, anchor.amount);
+  for (let d = anchor.date; d <= to; d = addDays(d, 1)) {
     if (flow.byDay[d] != null) balance = flow.byDay[d];
     if (d >= from) out[d] = balance + reserve;
+  }
+  if (from < anchor.date) {
+    const delta: Record<string, number> = {};
+    for (const e of eventsBetween(cal, from, anchor.date)) {
+      const a = amountOf(e, marks[e.key]);
+      delta[e.date] = (delta[e.date] ?? 0) + (e.kind === 'income' ? a : -a);
+    }
+    let b = anchor.amount;
+    for (let d = anchor.date; d > from;) {
+      b -= delta[d] ?? 0;
+      d = addDays(d, -1);
+      if (d <= to) out[d] = b + reserve;
+    }
   }
   return out;
 }

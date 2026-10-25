@@ -12,8 +12,10 @@ export interface DayMoney {
   in: number;
   /** все платежи дня отмечены оплаченными */
   paid: boolean;
-  /** деньги на карте и в резерве к вечеру; нет — день раньше известного баланса */
+  /** деньги на карте и в резерве к вечеру */
   total?: number;
+  /** день уже прошёл: вода бледнее, в вывод не идёт */
+  past?: boolean;
 }
 
 /** −14,7к / +450 */
@@ -56,7 +58,7 @@ export function MonthGrid({ month, days, top, now, selected, onSelect, onSwipe }
               className="relative flex h-[46px] flex-col items-start gap-px overflow-hidden rounded-t-[15px] rounded-b-[5px] border border-line bg-surface px-[5px] pt-1 text-left [text-shadow:0_0_3px_var(--surface),0_0_2px_var(--surface)]">
               {level > 0 && (
                 <span className="sc-fill absolute inset-x-0 bottom-0" style={{
-                  height: `${level}%`, animationDelay: `${0.1 + i * 0.03}s`,
+                  height: `${level}%`, animationDelay: `${0.1 + i * 0.03}s`, opacity: d.past ? 0.5 : 1,
                   background: `linear-gradient(180deg, var(${low ? '--water-low-a' : '--water-a'}), var(${low ? '--water-low-b' : '--water-b'}))`,
                 }}>
                   <svg className="sc-wave absolute -top-1 left-0 h-1.5 w-[200%]" viewBox="0 0 120 8" preserveAspectRatio="none" aria-hidden="true">
@@ -117,7 +119,8 @@ export function LevelChart({ month, days, top, selected, onSelect }: {
   });
   const area = `${line} V${BASE} H${x0(first)} Z`;
   const low = known.filter(d => d.total < LOW_WATER).map(d => `M${x0(Number(d.date.slice(8)))} ${y(d.total)} H${x0(Number(d.date.slice(8)) + 1)}`).join(' ');
-  const min = known.reduce((m, d) => (d.total < m.total ? d : m), known[0]);
+  const ahead = known.filter(d => !d.past);
+  const min = (ahead.length ? ahead : known).reduce((m, d) => (d.total < m.total ? d : m), (ahead.length ? ahead : known)[0]);
   const tri = (d: DayMoney) => {
     const c = cx(Number(d.date.slice(8)));
     const both = d.out > 0 && d.in > 0;
@@ -167,7 +170,7 @@ export function LevelChart({ month, days, top, selected, onSelect }: {
 
 /** Вывод словами по дням, которые ещё впереди */
 export function verdict(days: DayMoney[]): string | null {
-  const known = days.filter(d => d.total != null) as (DayMoney & { total: number })[];
+  const known = days.filter(d => d.total != null && !d.past) as (DayMoney & { total: number })[];
   if (!known.length) return null;
   const minV = Math.min(...known.map(d => d.total));
   const at = known.filter(d => d.total === minV).map(d => Number(d.date.slice(8)));

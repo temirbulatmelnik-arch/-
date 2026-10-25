@@ -8,7 +8,7 @@ import { buildIcs } from './ics';
 import { rub, parseAmount } from './money';
 import { categoryLimit, currentPhase, DEFAULT_PLAN, setPlanSource, splitBonus, targetDebt, weeklyLimit, type PlanConfig } from './plan';
 import { fromAi, fromDrafts } from './proposals';
-import { cashFlow, dailyTotals } from './cashflow';
+import { cashFlow, dailyLevels } from './cashflow';
 import { mergeSeed, type PlanState } from './planUpdate';
 import { applyExchange, buildExchange, normalize, parseExchange, previewExchange, type ExchangeState } from './exchange';
 import { parseStatementText, isIncomeLine } from './pdf';
@@ -265,15 +265,16 @@ describe('обязательные платежи по датам и прогн�
     // неоплаченная подписка прошлого месяца учитывается как платёж к оплате
     expect(cashFlow(cal, {}, { amount: 5000, date: '2026-11-01', source: 'manual' }, '2026-11-30').points[0]).toMatchObject({ overdue: true, delta: -2400 });
   });
-  it('деньги по дням для календаря: карта + резерв, между событиями — как накануне', () => {
-    const f = cashFlow(cal, {}, { amount: 5000, date: '2026-11-01', source: 'manual' }, '2026-11-30');
-    const t = dailyTotals(f, 20_000, '2026-10-30', '2026-11-11');
-    expect(t['2026-10-31']).toBeUndefined(); // до даты баланса прогноза нет
+  it('деньги по дням для календаря: карта + резерв, между событиями — как накануне, назад — по календарю', () => {
+    const t = dailyLevels(cal, {}, { amount: 5000, date: '2026-11-01', source: 'manual' }, 20_000, '2026-10-20', '2026-11-11');
+    expect(t['2026-10-31']).toBe(5000 + 20_000); // 1-го ничего не было — накануне столько же
+    expect(t['2026-10-21']).toBe(5000 + 2400 + 20_000); // до подписки 22-го денег было больше
     expect(t['2026-11-01']).toBe(5000 - 2400 + 20_000); // неоплаченная подписка уже вычтена
     expect(t['2026-11-02']).toBe(-7400 + 20_000);
     expect(t['2026-11-05']).toBe(t['2026-11-02']);
     expect(t['2026-11-10']).toBe(-18_400 + 50_000 + 20_000);
-    expect(Object.keys(t).at(-1)).toBe('2026-11-11');
+    expect(Object.keys(t).sort()).toEqual(expect.arrayContaining(['2026-10-20', '2026-11-11']));
+    expect(t['2026-11-12']).toBeUndefined();
   });
 });
 

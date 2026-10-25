@@ -5,7 +5,7 @@ import { LevelChart, MonthGrid, verdict, type DayMoney } from '../components/Mon
 import { SkyButton, SkyHeader } from '../components/Petersburg';
 import { EventRow } from '../components/rows';
 import { Bar, Empty, IconButton, Money } from '../components/ui';
-import { cashFlow, dailyTotals, LOW_WATER } from '../domain/cashflow';
+import { cashFlow, dailyLevels, LOW_WATER } from '../domain/cashflow';
 import { eventGroup, eventsBetween, type EventGroup } from '../domain/calendar';
 import { addDays, addMonths, dayMonth, ddmm, lastDay, monthKey, monthName, weekday, weekdayFull } from '../domain/dates';
 import type { CalEvent } from '../domain/types';
@@ -51,9 +51,10 @@ export function Payments() {
   const incomes = events.filter(e => e.kind === 'income').reduce((s, e) => s + amount(e), 0);
   const byGroup = (g: EventGroup) => payments.filter(e => eventGroup(e) === g).reduce((s, e) => s + amount(e), 0);
 
-  // день за днём: что уходит, что приходит, сколько остаётся на карте и в резерве (только впереди)
+  // день за днём: что уходит, что приходит, сколько на карте и в резерве к вечеру.
+  // Остаток карты не указан — считаем от нуля на сегодня: вода всё равно показывает, где тонко.
   const days = useMemo<DayMoney[]>(() => {
-    const totals = flow ? dailyTotals(flow, reserve, now > from ? now : from, to) : {};
+    const totals = dailyLevels(cal, marks, cardBalance ?? { amount: 0, date: now, source: 'manual' }, reserve, from, to);
     return Array.from({ length: lastDay(month) }, (_, i) => {
       const date = `${month}-${String(i + 1).padStart(2, '0')}`;
       const list = events.filter(e => e.date === date);
@@ -64,9 +65,10 @@ export function Payments() {
         in: list.filter(e => e.kind === 'income').reduce((s, e) => s + amount(e), 0),
         paid: pays.length > 0 && pays.every(e => marks[e.key]?.done),
         total: totals[date],
+        past: date < now,
       };
     });
-  }, [flow, reserve, now, from, to, month, events, marks]);
+  }, [cal, cardBalance, reserve, now, from, to, month, events, marks]);
   const top = Math.max(LOW_WATER * 1.25, ...days.map(d => d.total ?? 0));
   const said = verdict(days);
   const sel = days.find(d => d.date === selected);
@@ -102,16 +104,16 @@ export function Payments() {
       </section>
 
       <section className="mx-4 mt-5">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="text-[14px] font-medium">Деньги на карте и в резерве</span>
+          {sel?.total != null && <span className="font-display text-[13px] font-medium whitespace-nowrap">{Number(selected.slice(8))}-го <Money value={sel.total} /></span>}
+        </div>
+        <p className={`mt-0.5 text-[13px] leading-snug ${said?.startsWith('Не хватит') ? 'text-neg' : 'text-muted'}`}>
+          {said ?? 'Месяц прошёл: так было по календарю.'}
+        </p>
+        <div className="mt-2"><LevelChart month={month} days={days} top={top} selected={selected} onSelect={setSelected} /></div>
         {cardBalance ? (
           <>
-            <div className="flex items-baseline justify-between gap-3">
-              <span className="text-[14px] font-medium">Деньги на карте и в резерве</span>
-              {sel?.total != null && <span className="font-display text-[13px] font-medium whitespace-nowrap">{Number(selected.slice(8))}-го <Money value={sel.total} /></span>}
-            </div>
-            <p className={`mt-0.5 text-[13px] leading-snug ${said?.startsWith('Не хватит') ? 'text-neg' : 'text-muted'}`}>
-              {said ?? (to < now ? 'Месяц прошёл: прогноз смотрит только вперёд.' : `Прогноз начинается с ${ddmm(cardBalance.date)}.`)}
-            </p>
-            {said && <div className="mt-2"><LevelChart month={month} days={days} top={top} selected={selected} onSelect={setSelected} /></div>}
             <button type="button" onClick={() => set({ card: true })} className="mt-2 flex w-full items-center gap-2 text-left text-[12.5px] text-muted">
               <WalletCards size={15} strokeWidth={1.5} className="shrink-0" />
               <span className="min-w-0 flex-1">
@@ -122,11 +124,11 @@ export function Payments() {
             </button>
           </>
         ) : (
-          <button type="button" onClick={() => set({ card: true })} className="card flex w-full items-center gap-3 p-4 text-left">
+          <button type="button" onClick={() => set({ card: true })} className="card mt-3 flex w-full items-center gap-3 p-4 text-left">
             <span className="grid size-10 shrink-0 place-items-center rounded-full bg-sea/12 text-sea"><WalletCards size={18} strokeWidth={1.5} /></span>
             <span className="min-w-0 flex-1">
               <span className="block text-[14.5px] font-medium">Остаток на зарплатной карте</span>
-              <span className="block text-[12.5px] leading-snug text-muted">Укажите — дни наполнятся водой, и будет видно, хватит ли денег до поступлений.</span>
+              <span className="block text-[12.5px] leading-snug text-muted">Пока считаю, что на карте 0 ₽, а вода — это резерв и всё, что придёт. Укажите остаток — расчёт станет точным.</span>
             </span>
             <ChevronRight size={16} className="shrink-0 text-faint" />
           </button>

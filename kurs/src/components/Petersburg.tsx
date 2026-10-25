@@ -94,17 +94,32 @@ function Pier({ x, lampX }: { x: number; lampX: number }) {
 function useLift(target: number) {
   const [state, setState] = useState({ angle: 0, dur: 3 });
   const shown = useRef(0);
+  const timers = useRef<number[]>([]);
+  const clear = () => { timers.current.forEach(clearTimeout); timers.current = []; };
+  /** повернуть пролёты к углу a со скоростью speed градусов в секунду; возвращает длительность, с */
+  const moveTo = (a: number, speed = 4.5) => {
+    const dur = Math.max(speed > 10 ? 1.2 : 3, Math.abs(a - shown.current) / speed);
+    shown.current = a;
+    setState({ angle: a, dur });
+    return dur;
+  };
   useEffect(() => {
-    const go = () => {
-      const dur = Math.max(3, Math.abs(target - shown.current) / 4.5);
-      shown.current = target;
-      setState({ angle: target, dur });
-    };
+    clear();
     // при открытии мост секунду стоит сведённым, потом разводится до уровня трат
-    const t = setTimeout(go, shown.current === 0 && target > 0 ? 1200 : 0);
-    return () => clearTimeout(t);
+    timers.current.push(window.setTimeout(() => moveTo(target), shown.current === 0 && target > 0 ? 1200 : 0));
+    return clear;
   }, [target]);
-  return state;
+  /** нажатие на сцену: мост сводится и разводится заново; без трат — показывает, как разводится, и сводится обратно */
+  const replay = () => {
+    clear();
+    const down = moveTo(0, 20);
+    const up = target > 2 ? target : 20;
+    timers.current.push(window.setTimeout(() => {
+      const d = moveTo(up);
+      if (up !== target) timers.current.push(window.setTimeout(() => moveTo(target), d * 1000 + 700));
+    }, down * 1000 + 400));
+  };
+  return { ...state, replay };
 }
 
 const DAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
@@ -115,7 +130,7 @@ const DAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
  */
 export function WeekScene({ spent, today, children }: { spent: number; today: number; children: ReactNode }) {
   const target = 72 * Math.sqrt(Math.min(1, Math.max(0, spent)));
-  const { angle, dur } = useLift(target);
+  const { angle, dur, replay } = useLift(target);
   const leaf = (origin: number): CSSProperties => ({
     transformBox: 'view-box', transformOrigin: `${origin}px 386px`,
     transform: `rotate(${origin < 195 ? -angle : angle}deg)`, transition: `transform ${dur}s cubic-bezier(.42,0,.4,1)`,
@@ -198,6 +213,7 @@ export function WeekScene({ spent, today, children }: { spent: number; today: nu
           );
         })}
       </svg>
+      <button type="button" onClick={replay} aria-label="Развести мост заново" className="absolute inset-x-0 top-[38%] bottom-[16%]" />
       <div className="absolute inset-x-0 top-0">{children}</div>
     </div>
   );
