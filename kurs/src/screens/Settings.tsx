@@ -70,7 +70,7 @@ function Body() {
             const on = st.remindDays.includes(d);
             return (
               <button key={d} type="button" onClick={() => s.setSettings({ remindDays: on ? st.remindDays.filter(x => x !== d) : [...st.remindDays, d] })}
-                className={`rounded-xl py-2.5 text-[13px] font-medium ${on ? 'bg-brass text-on-brass' : 'bg-surface-2 text-muted'}`}>
+                className={`rounded-xl py-2.5 text-[13px] font-medium ${on ? 'bg-sea text-on-sea' : 'bg-surface-2 text-muted'}`}>
                 {d === 0 ? 'в день' : d === 1 ? 'за день' : 'за 3 дня'}
               </button>
             );
@@ -96,15 +96,15 @@ function Body() {
         <Field label="Ключ API Anthropic" hint={<>Создаётся на console.anthropic.com → API Keys. Это отдельный платный доступ, не подписка Claude. Хранится только на этом телефоне и не попадает в резервную копию.</>}>
           <div className="flex gap-2">
             <input value={key} onChange={e => setKey(e.target.value)} type="password" placeholder="sk-ant-…" autoCapitalize="off" autoCorrect="off" spellCheck={false} className="field text-[14px]" />
-            <button type="button" onClick={() => { s.setSettings({ apiKey: key.trim() }); toast(key.trim() ? 'Ключ сохранён' : 'Ключ удалён'); }} className="shrink-0 rounded-2xl bg-brass px-4 text-on-brass" aria-label="Сохранить ключ"><KeyRound size={18} /></button>
+            <button type="button" onClick={() => { s.setSettings({ apiKey: key.trim() }); toast(key.trim() ? 'Ключ сохранён' : 'Ключ удалён'); }} className="shrink-0 rounded-2xl bg-sea px-4 text-on-sea" aria-label="Сохранить ключ"><KeyRound size={18} /></button>
           </div>
         </Field>
         <div className="space-y-1.5">
           {MODELS.map(m => (
             <button key={m.id} type="button" onClick={() => s.setSettings({ model: m.id })}
-              className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left ${st.model === m.id ? 'bg-brass/12 ring-1 ring-brass' : 'bg-surface-2'}`}>
+              className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left ${st.model === m.id ? 'bg-sea/12 ring-1 ring-sea' : 'bg-surface-2'}`}>
               <span><span className="block text-[14px] font-medium">{m.name}</span><span className="block text-[12px] text-muted">{m.note}</span></span>
-              {st.model === m.id && <span className="text-[12px] font-medium text-brass">выбрано</span>}
+              {st.model === m.id && <span className="text-[12px] font-medium text-sea">выбрано</span>}
             </button>
           ))}
         </div>

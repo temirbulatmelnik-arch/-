@@ -67,7 +67,7 @@ function Body() {
           {[...log].reverse().slice(0, 30).map(m => (
             <div key={m.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
               <span className="min-w-0"><span className="block truncate text-[14px] font-medium">{m.note}</span><span className="text-[12px] text-faint">{ddmm(m.date)}</span></span>
-              <span className={`shrink-0 text-[14px] font-medium ${m.amount >= 0 ? 'text-brass' : ''}`}>{rub(m.amount, { sign: true })}</span>
+              <span className={`shrink-0 text-[14px] font-medium ${m.amount >= 0 ? 'text-sea' : ''}`}>{rub(m.amount, { sign: true })}</span>
             </div>
           ))}
         </div>

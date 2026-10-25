@@ -64,7 +64,7 @@ function Body() {
   return (
     <div className="space-y-5 pt-1">
       <section className="card space-y-3 p-4">
-        <div className="eyebrow text-muted">1 · Приложение → чат</div>
+        <h3 className="text-[15px] font-medium">Из приложения в чат</h3>
         <p className="text-[13.5px] leading-snug">Отчёт со всеми свежими данными: остатки долгов, оплаты, поступления, итоги недель, траты по категориям, чек-лист. Добавьте его в <b className="font-medium">файлы проекта «Финансы»</b> — тогда любой чат в проекте увидит актуальное состояние. Раз в неделю, после закрытия недели, достаточно.</p>
         <PrimaryButton onClick={share}><Share2 size={17} strokeWidth={1.6} /> Поделиться отчётом</PrimaryButton>
         <div className="grid grid-cols-2 gap-2">
@@ -75,7 +75,7 @@ function Body() {
       </section>
 
       <section className="card space-y-3 p-4">
-        <div className="eyebrow text-muted">2 · Чат → приложение</div>
+        <h3 className="text-[15px] font-medium">Из чата в приложение</h3>
         {parsed ? (
           <>
             {parsed.summary && <p className="text-[14px] leading-snug font-medium">{parsed.summary}</p>}
@@ -101,10 +101,10 @@ function Body() {
       </section>
 
       <section className="card space-y-3 p-4">
-        <div className="eyebrow text-muted">Один раз · инструкция проекта</div>
+        <h3 className="text-[15px] font-medium">Один раз: инструкция проекта</h3>
         <p className="text-[13.5px] leading-snug">Чтобы чат читал отчёты и отвечал обновлением в нужном виде, вставьте этот текст в <b className="font-medium">«Инструкции проекта»</b> «Финансы».</p>
         <SecondaryButton onClick={() => void copy(PROJECT_INSTRUCTIONS)} className="w-full"><Copy size={15} strokeWidth={1.5} /> Скопировать инструкцию</SecondaryButton>
-        <button type="button" onClick={() => setShowInstr(!showInstr)} className="text-[12.5px] font-medium text-brass">{showInstr ? 'Скрыть текст' : 'Показать текст'}</button>
+        <button type="button" onClick={() => setShowInstr(!showInstr)} className="text-[12.5px] font-medium text-sea">{showInstr ? 'Скрыть текст' : 'Показать текст'}</button>
         {showInstr && <pre className="max-h-72 overflow-auto rounded-xl bg-surface-2 p-3 text-[11.5px] leading-snug whitespace-pre-wrap">{PROJECT_INSTRUCTIONS}</pre>}
       </section>
     </div>

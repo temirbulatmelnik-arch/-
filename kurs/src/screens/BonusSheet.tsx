@@ -50,7 +50,7 @@ function Body() {
         </div>
       </label>
 
-      {split.rule?.note && <p className="rounded-2xl bg-brass/10 p-4 text-[14px] leading-snug">{split.rule.note}</p>}
+      {split.rule?.note && <p className="rounded-2xl bg-sea/10 p-4 text-[14px] leading-snug">{split.rule.note}</p>}
 
       <div className="card p-4">
         <div className="text-[13px] font-medium text-muted">Оставить в резерве</div>
@@ -83,16 +83,16 @@ function Body() {
               </div>
               <div className="mt-1 text-[12.5px] leading-snug text-muted">
                 остаток {rub(a.debt.balance)}
-                {a.debt.kind === 'split' && ' · при досрочном погашении выбрать «уменьшить платёж»'}
-                {a.debt.kind === 'loan' && ' · в банке выбрать «сократить срок»'}
-                {a.debt.kind === 'card' && a.amount >= a.debt.balance - 0.5 && ' · после погашения закрыть карту вместе со счётом'}
+                {a.debt.kind === 'split' && '. При досрочном погашении выбрать «уменьшить платёж»'}
+                {a.debt.kind === 'loan' && '. В банке выбрать «сократить срок»'}
+                {a.debt.kind === 'card' && a.amount >= a.debt.balance - 0.5 && '. После погашения закрыть карту вместе со счётом'}
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      <div className="rounded-2xl bg-brass/10 p-4 text-[14px] leading-relaxed">
+      <div className="rounded-2xl bg-sea/10 p-4 text-[14px] leading-relaxed">
         <b>Резерв после распределения: {rub(reserveAfter)}</b>
         {sent > 0 && <><br />В долг уходит {rub(sent)} — это примерно {rub(alloc.reduce((s, a) => s + (a.amount * a.debt.rate) / 12, 0))} процентов, которые не придётся платить в следующем месяце.</>}
       </div>

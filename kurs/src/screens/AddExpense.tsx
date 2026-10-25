@@ -93,7 +93,7 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
           return (
             <button key={c.id} type="button" onClick={() => setCategory(c.id)}
               className={`flex aspect-square flex-col items-center justify-center gap-1.5 rounded-2xl border text-center transition active:scale-95 ${on ? 'border-ink bg-ink text-bg' : 'border-line bg-surface'}`}>
-              <Icon size={20} strokeWidth={1.5} className={on ? 'text-card-brass' : 'text-ink/75'} />
+              <Icon size={20} strokeWidth={1.5} className={on ? 'text-card-sea' : 'text-ink/75'} />
               <span className="px-0.5 text-[10px] leading-tight font-medium">{c.short}</span>
             </button>
           );

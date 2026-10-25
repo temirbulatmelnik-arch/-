@@ -48,7 +48,7 @@ function Body({ d }: { d: Debt }) {
           <span className="rounded-full bg-surface-2 px-2.5 py-1 font-medium">ставка {pct(d.rate)}</span>
           {d.limit && <span className="rounded-full bg-surface-2 px-2.5 py-1 font-medium">лимит {rub(d.limit)}</span>}
           <span className="rounded-full bg-surface-2 px-2.5 py-1 font-medium">≈ {rub(interest)} процентов в месяц</span>
-          {d.targetClose && <span className="rounded-full bg-brass/12 px-2.5 py-1 font-medium text-brass">закрыть: {monthName(d.targetClose)}</span>}
+          {d.targetClose && <span className="rounded-full bg-sea/12 px-2.5 py-1 font-medium text-sea">закрыть: {monthName(d.targetClose)}</span>}
         </div>
         {d.frozen && !d.closed && (
           <p className="mt-3 flex items-start gap-2 rounded-xl bg-neg/10 p-3 text-[13.5px] leading-snug text-neg">

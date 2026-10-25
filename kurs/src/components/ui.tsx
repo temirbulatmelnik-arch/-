@@ -41,13 +41,13 @@ export function IconButton({ onClick, label, children, className = '' }: { onCli
   );
 }
 
-export function PrimaryButton({ onClick, children, className = '', disabled, tone = 'brass' }: {
-  onClick: () => void; children: ReactNode; className?: string; disabled?: boolean; tone?: 'brass' | 'ink' | 'neg';
+export function PrimaryButton({ onClick, children, className = '', disabled, tone = 'sea' }: {
+  onClick: () => void; children: ReactNode; className?: string; disabled?: boolean; tone?: 'sea' | 'ink' | 'neg';
 }) {
-  const tones = { brass: 'bg-brass-grad text-on-brass', ink: 'bg-ink text-bg', neg: 'bg-neg text-white' };
+  const tones = { sea: 'bg-sea text-on-sea', ink: 'bg-ink text-bg', neg: 'bg-neg text-white' };
   return (
     <motion.button type="button" whileTap={{ scale: 0.98 }} onClick={onClick} disabled={disabled}
-      className={`flex h-[52px] w-full items-center justify-center gap-2 rounded-2xl text-[15.5px] font-semibold tracking-[-0.01em] disabled:opacity-35 ${tones[tone]} ${className}`}>
+      className={`flex h-[52px] w-full items-center justify-center gap-2 rounded-[18px] text-[15.5px] font-medium disabled:opacity-35 ${tones[tone]} ${className}`}>
       {children}
     </motion.button>
   );
@@ -62,10 +62,10 @@ export function SecondaryButton({ onClick, children, className = '', disabled }:
   );
 }
 
-export type Tone = 'neutral' | 'brass' | 'pos' | 'neg' | 'warn' | 'info';
+export type Tone = 'neutral' | 'sea' | 'pos' | 'neg' | 'warn' | 'info';
 const TONES: Record<Tone, string> = {
   neutral: 'bg-surface-2 text-muted',
-  brass: 'bg-brass/12 text-brass',
+  sea: 'bg-sea/12 text-sea',
   pos: 'bg-pos/12 text-pos',
   neg: 'bg-neg/12 text-neg',
   warn: 'bg-warn/14 text-warn',
@@ -101,7 +101,7 @@ export function Sheet({ open, onClose, title, subtitle, children, footer }: {
             <div className="mx-auto mt-2.5 h-1 w-9 rounded-full bg-line" />
             <div className="flex items-start justify-between gap-3 px-5 pt-3 pb-3">
               <div className="min-w-0">
-                <h2 className="text-[21px] leading-tight font-medium tracking-[-0.02em]">{title}</h2>
+                <h2 className="font-display text-[19px] leading-tight font-medium">{title}</h2>
                 {subtitle && <div className="mt-0.5 text-[13px] text-muted">{subtitle}</div>}
               </div>
               <IconButton onClick={onClose} label="Закрыть" className="size-9"><X size={17} strokeWidth={1.6} /></IconButton>
@@ -117,36 +117,24 @@ export function Sheet({ open, onClose, title, subtitle, children, footer }: {
 
 /* ---------- Заголовки ---------- */
 
-export function ScreenHeader({ title, overline, action }: { title: string; overline?: ReactNode; action?: ReactNode }) {
-  return (
-    <header className="flex items-end justify-between gap-3 px-5 pt-6 pb-5">
-      <div className="min-w-0">
-        {overline && <div className="eyebrow mb-1.5 text-muted">{overline}</div>}
-        <h1 className="text-[30px] leading-[1.05] font-medium tracking-[-0.03em]">{title}</h1>
-      </div>
-      {action}
-    </header>
-  );
-}
-
 export function SectionTitle({ children, action }: { children: ReactNode; action?: ReactNode }) {
   return (
     <div className="mt-8 mb-3 flex items-center justify-between gap-3 px-5">
-      <h2 className="eyebrow text-muted">{children}</h2>
+      <h2 className="text-[15px] font-medium">{children}</h2>
       {action}
     </div>
   );
 }
 
 export function LinkButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
-  return <button type="button" onClick={onClick} className="text-[13px] font-medium text-brass">{children}</button>;
+  return <button type="button" onClick={onClick} className="text-[13px] font-medium text-sea">{children}</button>;
 }
 
 /* ---------- Прогресс ---------- */
 
 /** Тонкая полоса: value 0..1; marker — где сейчас время (доля недели) */
-export function Bar({ value, tone = 'brass', marker, className = '', onCard }: { value: number; tone?: 'brass' | 'pos' | 'neg' | 'warn' | 'card'; marker?: number; className?: string; onCard?: boolean }) {
-  const color = { brass: 'bg-brass', pos: 'bg-pos', neg: 'bg-neg', warn: 'bg-warn', card: 'bg-card-brass' }[tone];
+export function Bar({ value, tone = 'sea', marker, className = '', onCard }: { value: number; tone?: 'sea' | 'pos' | 'neg' | 'warn' | 'card'; marker?: number; className?: string; onCard?: boolean }) {
+  const color = { sea: 'bg-sea', pos: 'bg-pos', neg: 'bg-neg', warn: 'bg-warn', card: 'bg-card-sea' }[tone];
   const dark = onCard || tone === 'card';
   return (
     <div className={`relative h-[3px] rounded-full ${dark ? 'bg-card/12' : 'bg-line'} ${className}`}>
@@ -202,7 +190,7 @@ export function Switch({ checked, onChange, label, hint }: { checked: boolean; o
         <span className="block text-[14.5px] font-medium">{label}</span>
         {hint && <span className="block text-[12.5px] leading-snug text-muted">{hint}</span>}
       </span>
-      <span className={`relative h-[30px] w-[50px] shrink-0 rounded-full transition-colors ${checked ? 'bg-brass' : 'bg-surface-2 ring-1 ring-line ring-inset'}`}>
+      <span className={`relative h-[30px] w-[50px] shrink-0 rounded-full transition-colors ${checked ? 'bg-sea' : 'bg-surface-2 ring-1 ring-line ring-inset'}`}>
         <motion.span className="absolute top-[3px] left-[3px] size-6 rounded-full bg-white shadow" animate={{ x: checked ? 20 : 0 }} transition={{ type: 'spring', stiffness: 500, damping: 32 }} />
       </span>
     </button>

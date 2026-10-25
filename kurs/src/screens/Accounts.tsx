@@ -80,7 +80,7 @@ function SavingsBody() {
 
   return (
     <div className="space-y-4 pt-1">
-      <div className="black-card px-6 py-5">
+      <div className="deep-card px-6 py-5">
         <div className="text-[13px] text-card-muted">На счёте остатков</div>
         <Money value={savings} className="figure mt-1 block text-[44px] leading-none" />
         <div className="mt-3 text-[12.5px] text-card-muted">{weeks.length ? `Закрыто недель: ${weeks.length}, с остатком: ${weeks.filter(w => w.transferred > 0).length}` : 'Закройте первую неделю в воскресенье — остаток появится здесь.'}</div>

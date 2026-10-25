@@ -45,3 +45,20 @@ export function cashFlow(cal: CalendarInput, marks: Record<string, EventMark>, s
   const min = points.reduce<FlowPoint | null>((m, p) => (!m || p.balance < m.balance ? p : m), null);
   return { start, points, min, byDay };
 }
+
+/** Ниже этого запаса (карта + резерв) день в календаре считается «мелким»: вода оранжевая */
+export const LOW_WATER = 30_000;
+
+/**
+ * Деньги на карте и в резерве на конец каждого дня [from, to]. Дни раньше даты баланса не считаются:
+ * о них прогноз ничего не знает. Между событиями баланс переносится с предыдущего дня.
+ */
+export function dailyTotals(flow: CashFlow, reserve: number, from: string, to: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  let balance = flow.points.filter(p => p.overdue).reduce((b, p) => b + p.delta, flow.start.amount);
+  for (let d = flow.start.date; d <= to; d = addDays(d, 1)) {
+    if (flow.byDay[d] != null) balance = flow.byDay[d];
+    if (d >= from) out[d] = balance + reserve;
+  }
+  return out;
+}

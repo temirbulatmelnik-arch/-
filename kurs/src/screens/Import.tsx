@@ -84,7 +84,7 @@ function Flow() {
   if (step.s === 'busy') {
     return (
       <div className="flex flex-col items-center gap-4 py-16 text-center">
-        <Loader2 size={30} strokeWidth={1.5} className="animate-spin text-brass" />
+        <Loader2 size={30} strokeWidth={1.5} className="animate-spin text-sea" />
         <div className="text-[15px] font-medium">{step.label}</div>
         <p className="max-w-[260px] text-[13px] text-muted">Обычно 10–40 секунд. Не закрывайте приложение.</p>
       </div>
@@ -111,7 +111,7 @@ function Flow() {
       <Option icon={<FileText size={19} strokeWidth={1.5} />} title="Выписка PDF" tag={apiKey ? 'Claude' : 'на телефоне'}
         text="В приложении банка: карта → «Выписка» → период «неделя» → поделиться PDF → «Сохранить в Файлы». Затем выберите файл здесь."
         onClick={() => pdf.current?.click()}>
-        {apiKey && <button type="button" onClick={e => { e.stopPropagation(); pdfLocal.current?.click(); }} className="mt-2 text-[12.5px] font-medium text-brass">Разобрать без Claude, бесплатно</button>}
+        {apiKey && <button type="button" onClick={e => { e.stopPropagation(); pdfLocal.current?.click(); }} className="mt-2 text-[12.5px] font-medium text-sea">Разобрать без Claude, бесплатно</button>}
       </Option>
 
       <Option icon={<Camera size={19} strokeWidth={1.5} />} title="Скриншоты" tag="Claude"
@@ -125,7 +125,7 @@ function Flow() {
             <div className="flex gap-2">
               <input value={keyDraft} onChange={e => setKeyDraft(e.target.value)} placeholder="sk-ant-…" autoCapitalize="off" autoCorrect="off" spellCheck={false} className="field text-[14px]" />
               <button type="button" aria-label="Сохранить ключ" onClick={() => { if (keyDraft.trim().startsWith('sk-')) { setSettings({ apiKey: keyDraft.trim() }); toast('Ключ сохранён'); } else toast('Ключ начинается с sk-ant-'); }}
-                className="bg-brass-grad grid w-12 shrink-0 place-items-center rounded-[14px] text-on-brass"><KeyRound size={17} /></button>
+                className="bg-sea-grad grid w-12 shrink-0 place-items-center rounded-[14px] text-on-sea"><KeyRound size={17} /></button>
             </div>
           </div>
         )}
@@ -236,7 +236,7 @@ function ReviewList({ review, onBack }: { review: Review; onBack: () => void }) 
           <section key={title}>
             <div className="mb-2 flex items-center justify-between px-1">
               <span className="eyebrow text-muted">{title}</span>
-              {title === 'Траты' && <button type="button" onClick={() => setItems(all => all.map(i => (i.type === 'tx' ? { ...i, on: !list.every(x => x.on) } : i)))} className="text-[12.5px] font-medium text-brass">{list.every(x => x.on) ? 'Снять все' : 'Выбрать все'}</button>}
+              {title === 'Траты' && <button type="button" onClick={() => setItems(all => all.map(i => (i.type === 'tx' ? { ...i, on: !list.every(x => x.on) } : i)))} className="text-[12.5px] font-medium text-sea">{list.every(x => x.on) ? 'Снять все' : 'Выбрать все'}</button>}
             </div>
             <div className="card divide-hair overflow-hidden">
               {list.map(i => (
@@ -253,7 +253,7 @@ function ReviewList({ review, onBack }: { review: Review; onBack: () => void }) 
 
       <div className="grid grid-cols-[auto_1fr] gap-2 pb-2">
         <SecondaryButton onClick={onBack}>Назад</SecondaryButton>
-        <PrimaryButton onClick={apply} disabled={!on.length}>Применить {on.length || ''}{spent ? <span className="font-normal opacity-70"> · трат <Money value={spent} /></span> : null}</PrimaryButton>
+        <PrimaryButton onClick={apply} disabled={!on.length}>Применить {on.length || ''}{spent ? <span className="font-normal opacity-70">, трат на <Money value={spent} /></span> : null}</PrimaryButton>
       </div>
     </div>
   );

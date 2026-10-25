@@ -1,6 +1,7 @@
 // Первый запуск: открыть личный план кодом, восстановить копию или начать с нуля.
 import { Lock, Upload } from 'lucide-react';
 import { useRef, useState } from 'react';
+import { SkyHeader } from '../components/Petersburg';
 import { PrimaryButton, SecondaryButton } from '../components/ui';
 import type { PlanSeed } from '../domain/types';
 import { open, type Sealed } from '../domain/vault';
@@ -28,16 +29,13 @@ export function Onboarding() {
   };
 
   return (
-    <div className="pt-safe pb-safe mx-auto flex min-h-dvh max-w-md flex-col px-5">
-      <div className="flex-1 pt-10">
-        <section className="black-card px-6 pt-7 pb-6">
-          <img src="./pwa-192x192.png" alt="" width={52} height={52} className="size-[52px] rounded-[15px]" />
-          <h1 className="mt-10 text-[44px] leading-none font-light tracking-[-0.04em]">Курс</h1>
-          <p className="mt-3 text-[15px] leading-snug text-card-muted">Сколько можно потратить на этой неделе, что и когда платить, куда отправить премию — и как тает долг.</p>
-        </section>
+    <div className="pt-safe pb-safe mx-auto flex min-h-dvh max-w-md flex-col">
+      <SkyHeader title="Курс" subtitle="План выхода из долгов" />
+      <div className="flex-1 px-5 pt-4">
+        <p className="text-[15px] leading-snug text-muted">Сколько можно потратить на этой неделе, что и когда платить, куда отправить премию — и как тает долг.</p>
 
         <div className="card mt-4 space-y-3 p-5">
-          <div className="flex items-center gap-2 text-[15px] font-medium"><Lock size={16} strokeWidth={1.6} className="text-brass" /> Ваш план уже внутри</div>
+          <div className="flex items-center gap-2 text-[15px] font-medium"><Lock size={16} strokeWidth={1.6} className="text-sea" /> Ваш план уже внутри</div>
           <p className="text-[13.5px] leading-snug text-muted">Долги, платежи и этапы из финансового аудита зашифрованы. Введите код — он расшифрует план прямо на телефоне.</p>
           <input value={code} onChange={e => setCode(e.target.value)} placeholder="XXXX-XXXX-XXXX" autoCapitalize="characters" autoCorrect="off" spellCheck={false}
             className="field text-center font-mono text-[20px] tracking-widest" onKeyDown={e => e.key === 'Enter' && code && void unlock()} />
@@ -45,7 +43,7 @@ export function Onboarding() {
           <PrimaryButton onClick={() => void unlock()} disabled={!code.trim() || busy}>{busy ? 'Открываю…' : 'Открыть план'}</PrimaryButton>
         </div>
       </div>
-      <div className="space-y-2 py-6">
+      <div className="space-y-2 px-5 py-6">
         <input ref={file} type="file" accept="application/json,.json" hidden onChange={async e => {
           const f = e.target.files?.[0];
           if (f) { try { if (!importData(JSON.parse(await f.text()))) setError('Это не резервная копия «Курса»'); } catch { setError('Файл не читается'); } }

@@ -90,3 +90,8 @@ export function plural(n: number, one: string, few: string, many: string): strin
   if (b === 1) return one;
   return many;
 }
+
+/** «19–25» в пределах месяца, «28.09–04.10» на стыке */
+export function weekRange(from: string, to: string): string {
+  return monthKey(from) === monthKey(to) ? `${Number(from.slice(8))}–${Number(to.slice(8))}` : `${ddmm(from)}–${ddmm(to)}`;
+}

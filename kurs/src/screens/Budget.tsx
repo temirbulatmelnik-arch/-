@@ -2,9 +2,9 @@ import { ChevronLeft, ChevronRight, CreditCard, Vault } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { ExpenseRow } from '../components/rows';
-import { Bar, CatIcon, Empty, IconButton, Money, ScreenHeader, SectionTitle } from '../components/ui';
+import { SkyButton, SkyHeader } from '../components/Petersburg';
+import { Bar, CatIcon, Empty, Money, SectionTitle } from '../components/ui';
 import { addMonths, monthKey, monthName } from '../domain/dates';
-import { rub } from '../domain/money';
 import { CATEGORY, currentPhase } from '../domain/plan';
 import { monthByCategory } from '../domain/summary';
 import { useStore } from '../store/store';
@@ -27,18 +27,20 @@ export function Budget() {
 
   return (
     <div>
-      <ScreenHeader title="Бюджет" overline={`Этап ${phase.id} · ${rub(phase.monthly || limit)} в месяц`} />
+      <SkyHeader
+        title="Бюджет"
+        subtitle={<button type="button" onClick={() => setMonth(monthKey(now))} className="text-left first-letter:uppercase">{monthName(month)}</button>}
+        action={
+          <div className="flex gap-2">
+            <SkyButton onClick={() => setMonth(addMonths(month, -1))} label="Предыдущий месяц"><ChevronLeft size={18} strokeWidth={1.7} /></SkyButton>
+            <SkyButton onClick={() => setMonth(addMonths(month, 1))} label="Следующий месяц"><ChevronRight size={18} strokeWidth={1.7} /></SkyButton>
+          </div>
+        } />
 
-      <div className="mx-4 flex items-center justify-between">
-        <IconButton onClick={() => setMonth(addMonths(month, -1))} label="Предыдущий месяц"><ChevronLeft size={18} strokeWidth={1.5} /></IconButton>
-        <button type="button" onClick={() => setMonth(monthKey(now))} className="text-[17px] font-medium capitalize">{monthName(month)}</button>
-        <IconButton onClick={() => setMonth(addMonths(month, 1))} label="Следующий месяц"><ChevronRight size={18} strokeWidth={1.5} /></IconButton>
-      </div>
-
-      <section className="black-card mx-4 mt-4 px-6 py-5">
+      <section className="deep-card mx-4 mt-3 px-6 py-5">
         <div className="flex items-baseline justify-between">
           <span className="text-[13px] text-card-muted">Потрачено за месяц</span>
-          <span className="text-[12.5px] text-card-muted">лимит <Money value={limit} className="text-card" /></span>
+          <span className="text-[12.5px] text-card-muted">лимит этапа {phase.id}: <Money value={limit} className="text-card" /></span>
         </div>
         <Money value={spent} className={`figure mt-1 block text-[44px] leading-none ${spent > limit ? 'text-[#f2a596]' : ''}`} />
         <Bar value={limit ? spent / limit : 0} tone={spent > limit ? 'neg' : 'card'} onCard className="mt-5" />
@@ -67,7 +69,7 @@ export function Budget() {
                   <span className="truncate text-[14px]">{CATEGORY[r.id].short}</span>
                   <span className="shrink-0 text-[13.5px]"><Money value={r.spent} className={over ? 'text-neg' : ''} /><span className="text-faint"> / <Money value={r.limit} /></span></span>
                 </div>
-                <Bar value={r.limit ? r.spent / r.limit : 0} tone={over ? 'neg' : r.spent > r.limit * 0.8 ? 'warn' : 'brass'} className="mt-2" />
+                <Bar value={r.limit ? r.spent / r.limit : 0} tone={over ? 'neg' : r.spent > r.limit * 0.8 ? 'warn' : 'sea'} className="mt-2" />
                 {r.baseline > 0 && <div className="mt-1.5 text-[11px] text-faint">было <Money value={r.baseline} /></div>}
               </div>
             </div>

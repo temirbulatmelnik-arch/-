@@ -16,7 +16,7 @@ export function ExpenseRow({ e, onClick }: { e: Expense; onClick?: () => void })
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[14.5px] font-medium">{e.note || c.short}</span>
         <span className="flex items-center gap-1.5 text-[12px] text-muted">
-          {weekday(e.date)}, {ddmm(e.date)} · {c.short}
+          {weekday(e.date)}, {ddmm(e.date)}, {c.short.toLowerCase()}
           {e.source === 'credit' && <span className="inline-flex items-center gap-0.5 font-medium text-neg"><CreditCard size={11} /> кредитка</span>}
           {e.source === 'reserve' && <span className="inline-flex items-center gap-0.5 text-info"><PiggyBank size={11} /> резерв</span>}
         </span>
@@ -49,9 +49,9 @@ export function EventRow({ e, mark, now, onClick, onToggle, showDate = true }: {
         <span className="min-w-0 flex-1">
           <span className={`block truncate text-[14.5px] font-medium ${u === 'done' ? 'line-through decoration-1' : ''}`}>{e.title}</span>
           <span className={`block text-[12px] ${hot ? 'text-neg' : 'text-muted'}`}>
-            {showDate ? `${whenText(e)} · ` : e.dateMode === 'until' ? 'внести до этой даты · ' : ''}
+            {showDate ? `${whenText(e)}, ` : e.dateMode === 'until' ? 'внести до этой даты, ' : ''}
             {u === 'done' ? (g === 'income' ? 'пришло' : 'оплачено') : e.dateMode === 'month' ? 'дата не известна' : relDays(now, e.date)}
-            {e.moved && u !== 'done' ? ' · дата изменена' : ''}
+            {e.moved && u !== 'done' ? ', дата изменена' : ''}
             {e.planned && u !== 'done' ? `, по графику ${ddmm(e.planned)} — выходной` : ''}
           </span>
         </span>
@@ -83,7 +83,7 @@ export function AlertRow({ a, onClick, now }: { a: Alert; onClick?: () => void; 
         <span className="block text-[14.5px] leading-snug font-medium">{a.title}</span>
         {a.event && a.action === 'pay' && (
           <span className={`mt-0.5 block text-[12.5px] ${a.tone === 'danger' ? 'text-neg' : 'text-warn'}`}>
-            <Money value={a.event.amount} approx={a.event.approx} /> · {whenText(a.event)}, {relDays(now, a.event.date)}
+            <Money value={a.event.amount} approx={a.event.approx} />, {whenText(a.event)}, {relDays(now, a.event.date)}
           </span>
         )}
         {a.text && <span className="mt-0.5 block text-[12.5px] leading-snug text-muted">{a.text}</span>}

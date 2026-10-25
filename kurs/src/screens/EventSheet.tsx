@@ -60,10 +60,10 @@ function Body({ e }: { e: CalEvent }) {
         <div className="mt-3 divide-y divide-line">
           <Row label="Когда">{e.dateMode === 'month' ? 'в течение месяца' : `${whenText(e)}, ${weekdayFull(e.date)}`}</Row>
           {e.dateMode !== 'month' && !mark?.done && <Row label="Осталось">{relDays(now, e.date)}</Row>}
-          {debt && <Row label="Остаток долга"><button type="button" onClick={() => set({ event: null, debt: debt.id })} className="text-brass"><Money value={debt.balance} /></button></Row>}
-          {override && <Row label="Изменено вручную"><button type="button" onClick={() => { clearOverride(e.key); toast('Вернул расчётные сумму и дату'); close(); }} className="text-brass">вернуть расчёт</button></Row>}
+          {debt && <Row label="Остаток долга"><button type="button" onClick={() => set({ event: null, debt: debt.id })} className="text-sea"><Money value={debt.balance} /></button></Row>}
+          {override && <Row label="Изменено вручную"><button type="button" onClick={() => { clearOverride(e.key); toast('Вернул расчётные сумму и дату'); close(); }} className="text-sea">вернуть расчёт</button></Row>}
         </div>
-        {e.note && <p className="mt-3 rounded-xl bg-brass/10 px-3 py-2.5 text-[13px] leading-snug">{e.note}</p>}
+        {e.note && <p className="mt-3 rounded-xl bg-sea/10 px-3 py-2.5 text-[13px] leading-snug">{e.note}</p>}
       </div>
 
       {mark?.done ? (
@@ -80,7 +80,7 @@ function Body({ e }: { e: CalEvent }) {
           <input type="date" value={newDate} onChange={x => setNewDate(x.target.value || e.date)} className="field" aria-label="Дата платежа" />
           {debt && typeof debt.dueDay === 'number' && newDate.slice(8) !== String(debt.dueDay).padStart(2, '0') && (
             <button type="button" onClick={() => { updateDebt(debt.id, { dueDay: Number(newDate.slice(8)) }); toast(`Теперь ${debt.short} — ${Number(newDate.slice(8))}-го каждый месяц`); }}
-              className="text-[13px] font-medium text-brass">Сделать {Number(newDate.slice(8))}-е днём платежа каждый месяц</button>
+              className="text-[13px] font-medium text-sea">Сделать {Number(newDate.slice(8))}-е днём платежа каждый месяц</button>
           )}
           <PrimaryButton onClick={saveEdit} tone="ink">Сохранить</PrimaryButton>
         </div>

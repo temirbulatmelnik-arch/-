@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { CalendarDays, Compass, PieChart, Wallet } from 'lucide-react';
-import { useEffect } from 'react';
+import { CalendarDays, PieChart } from 'lucide-react';
+import { useEffect, type ComponentType } from 'react';
+import { BridgeIcon, SpireIcon } from './components/Petersburg';
 import { Toast } from './components/ui';
 import { CardSheet, SavingsSheet } from './screens/Accounts';
 import { AddExpenseSheet } from './screens/AddExpense';
@@ -22,10 +23,10 @@ import { WeekSheet } from './screens/WeekSheet';
 import { useStore } from './store/store';
 import { useUi, type Tab } from './store/ui';
 
-const TABS: { id: Tab; label: string; icon: typeof Wallet }[] = [
-  { id: 'week', label: 'Неделя', icon: Wallet },
+const TABS: { id: Tab; label: string; icon: ComponentType<{ size?: number; strokeWidth?: number; className?: string }> }[] = [
+  { id: 'week', label: 'Неделя', icon: BridgeIcon },
   { id: 'payments', label: 'Платежи', icon: CalendarDays },
-  { id: 'plan', label: 'План', icon: Compass },
+  { id: 'plan', label: 'План', icon: SpireIcon },
   { id: 'budget', label: 'Бюджет', icon: PieChart },
 ];
 
@@ -36,7 +37,8 @@ function useTheme() {
     const apply = () => {
       const dark = theme === 'dark' || (theme === 'system' && mq.matches);
       document.documentElement.classList.toggle('dark', dark);
-      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#0a0a0b' : '#f3f0ea');
+      // цвет верха неба: строка состояния сливается с закатом в шапке
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#1a2340' : '#8a9fbe');
     };
     apply();
     mq.addEventListener('change', apply);
@@ -64,6 +66,7 @@ export default function App() {
 
   return (
     <div className="pt-safe mx-auto min-h-dvh w-full max-w-md pb-32">
+      <div aria-hidden="true" className="fixed inset-x-0 top-0 z-40 h-[env(safe-area-inset-top)]" style={{ background: 'var(--sky-1)' }} />
       <AnimatePresence mode="wait">
         <motion.main key={tab} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
           {tab === 'week' && <Week />}
@@ -81,7 +84,7 @@ export default function App() {
               <button key={t.id} type="button" onClick={() => setTab(t.id)} aria-current={active ? 'page' : undefined}
                 className={`relative flex flex-1 flex-col items-center gap-0.5 rounded-full py-2 text-[10.5px] font-medium transition-colors ${active ? 'text-ink' : 'text-faint'}`}>
                 {active && <motion.span layoutId="tab-bg" className="absolute inset-0 rounded-full bg-surface-2" transition={{ type: 'spring', stiffness: 500, damping: 40 }} />}
-                <t.icon size={20} strokeWidth={active ? 1.8 : 1.5} className={`relative ${active ? 'text-brass' : ''}`} />
+                <t.icon size={20} strokeWidth={active ? 1.8 : 1.5} className={`relative ${active ? 'text-sea' : ''}`} />
                 <span className="relative">{t.label}</span>
               </button>
             );

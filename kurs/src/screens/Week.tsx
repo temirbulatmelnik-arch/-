@@ -1,11 +1,13 @@
-import { ChevronRight, FileUp, Hourglass, PiggyBank, Plus, Settings as Cog, Vault } from 'lucide-react';
+import { ChevronRight, FileUp, Hourglass, PiggyBank, Plus, Settings as Cog } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { AlertRow, EventRow, ExpenseRow } from '../components/rows';
-import { Bar, CatIcon, Empty, IconButton, LinkButton, Money, SectionTitle } from '../components/ui';
+import { SkyButton, WeekScene } from '../components/Petersburg';
+import { CatIcon, Empty, LinkButton, Money, SectionTitle } from '../components/ui';
+import { useCountUp } from '../components/useCountUp';
 import { eventsBetween } from '../domain/calendar';
-import { addDays, dayMonth, ddmm, fromKey, monthIn, plural, weekdayFull } from '../domain/dates';
+import { addDays, dayMonth, ddmm, fromKey, monthIn, plural, weekdayFull, weekRange } from '../domain/dates';
 import { BIG_PURCHASE_HOURS, currentPhase, phaseByDate, reserveNeed, totalDebt } from '../domain/plan';
 import { alerts as buildAlerts, type Alert, weekSummary } from '../domain/summary';
 import { weekReport, weekToClose } from '../domain/weekly';
@@ -28,7 +30,7 @@ export function Week() {
   const pending = wishes.filter(w => !w.resolved);
   const debt = totalDebt(debts);
   const over = week.left < 0;
-  const spentShare = week.limit ? week.spent / week.limit : 0;
+  const shown = useCountUp(Math.abs(week.left));
   const { need, next } = reserveNeed(now, debts);
   const weeksSaved = Object.values(closures).filter(c => c.transferred > 0).length;
 
@@ -49,60 +51,51 @@ export function Week() {
 
   return (
     <div>
-      <header className="flex items-center justify-between gap-3 px-5 pt-5 pb-4">
-        <div>
-          <div className="text-[13px] text-muted first-letter:uppercase">{weekdayFull(now)}, {dayMonth(now)}</div>
-          <div className="mt-0.5 text-[15px] font-medium">
-            Этап {phase.id} · {phase.title}
-            {phase.id < planPhase.id && planPhase.id > 0 && <span className="ml-2 text-[12.5px] font-normal text-warn">по плану уже этап {planPhase.id}</span>}
+      <WeekScene spent={week.limit ? week.spent / week.limit : 0} today={(fromKey(now).getDay() + 6) % 7}>
+        <div className="flex items-start justify-between gap-3 px-5 pt-2.5">
+          <div style={{ color: 'var(--scene-ink)' }}>
+            <div className="text-[14px] first-letter:uppercase" style={{ color: 'var(--scene-muted)' }}>{weekdayFull(now)}, {dayMonth(now)}</div>
+            <div className="font-display mt-0.5 text-[19px] font-medium">Неделя {weekRange(week.monday, week.sunday)}</div>
+          </div>
+          <SkyButton onClick={() => ui.set({ settings: true })} label="Настройки"><Cog size={18} strokeWidth={1.5} /></SkyButton>
+        </div>
+        <div className="mt-3 px-5" style={{ color: over ? 'var(--neg)' : 'var(--scene-ink)' }}>
+          <div className="figure text-[52px] leading-[.95]" aria-live="polite">
+            {over && <span className="mr-1">−</span>}<Money value={shown} />
+          </div>
+          <div className="mt-1.5 text-[15px]" style={{ color: over ? 'var(--neg)' : 'var(--scene-muted)' }}>
+            {over ? 'перерасход: до понедельника только необходимое' : <>до понедельника, около <Money value={week.perDay} /> в день</>}
           </div>
         </div>
-        <IconButton onClick={() => ui.set({ settings: true })} label="Настройки"><Cog size={18} strokeWidth={1.5} /></IconButton>
-      </header>
+      </WeekScene>
 
-      <section className="black-card mx-4 px-6 pt-6 pb-5">
-        <div className="flex items-center justify-between">
-          <span className="eyebrow text-card-muted">Неделя · {ddmm(week.monday)}–{ddmm(week.sunday)}</span>
-          <span className="text-[12px] text-card-muted">из <Money value={week.limit} /></span>
-        </div>
-        <div className="mt-5 text-[13px] text-card-muted">{over ? 'Перерасход недели' : 'Можно потратить'}</div>
-        <motion.div key={Math.round(week.left)} initial={{ opacity: 0.4 }} animate={{ opacity: 1 }} className={`figure mt-1 text-[58px] leading-none ${over ? 'text-[#f2a596]' : ''}`}>
-          <Money value={Math.abs(week.left)} />
-        </motion.div>
-        <Bar value={spentShare} marker={week.timeShare} tone={over ? 'neg' : 'card'} onCard className="mt-6" />
-        <div className="mt-3 flex justify-between text-[12.5px] text-card-muted">
-          <span>{over ? 'до понедельника — только необходимое' : <>≈ <Money value={week.perDay} className="text-card" /> в день</>}</span>
-          <span>{week.daysLeft} {plural(week.daysLeft, 'день', 'дня', 'дней')} до понедельника</span>
-        </div>
-      </section>
-
-      <div className="mt-3 grid grid-cols-2 gap-3 px-4">
-        <button type="button" onClick={() => ui.set({ reserve: true })} className="card p-4 text-left">
-          <div className="flex items-center justify-between text-muted"><span className="text-[12.5px]">Резерв</span><Vault size={16} strokeWidth={1.5} /></div>
-          <Money value={reserve} className="figure mt-2 block text-[26px] leading-none" />
-          <div className={`mt-2 text-[11.5px] leading-snug ${reserve < need ? 'text-warn' : 'text-faint'}`}>держит <Money value={need} /> до премии {monthIn(next)}</div>
+      <div className="mt-1 grid grid-cols-2 px-5">
+        <button type="button" onClick={() => ui.set({ reserve: true })} className="border-r border-line pr-4 text-left">
+          <span className="text-[13px] text-muted">Резерв</span>
+          <Money value={reserve} className="figure mt-1 block text-[21px] leading-tight" />
+          <span className={`mt-1 block text-[12px] leading-snug ${reserve < need ? 'text-warn' : 'text-muted'}`}>держит <Money value={need} /> до премии {monthIn(next)}</span>
         </button>
-        <button type="button" onClick={() => ui.set({ savings: true })} className="card p-4 text-left">
-          <div className="flex items-center justify-between text-muted"><span className="text-[12.5px]">Остатки недель</span><PiggyBank size={16} strokeWidth={1.5} /></div>
-          <Money value={savings} className="figure mt-2 block text-[26px] leading-none" />
-          <div className="mt-2 text-[11.5px] leading-snug text-faint">{weeksSaved ? `${weeksSaved} ${plural(weeksSaved, 'неделя', 'недели', 'недель')} с остатком` : 'отдельный счёт'}</div>
+        <button type="button" onClick={() => ui.set({ savings: true })} className="pl-4 text-left">
+          <span className="text-[13px] text-muted">Остатки недель</span>
+          <Money value={savings} className="figure mt-1 block text-[21px] leading-tight" />
+          <span className="mt-1 block text-[12px] leading-snug text-muted">{weeksSaved ? `${weeksSaved} ${plural(weeksSaved, 'неделя', 'недели', 'недель')} с остатком` : 'пополняется, когда закрываете неделю'}</span>
         </button>
       </div>
 
-      <div className="mt-3 grid grid-cols-[1.4fr_1fr] gap-3 px-4">
+      <div className="mt-4 grid grid-cols-[1.4fr_1fr] gap-3 px-4">
         <motion.button type="button" whileTap={{ scale: 0.98 }} onClick={() => ui.set({ add: {} })}
-          className="bg-brass-grad flex h-[52px] items-center justify-center gap-2 rounded-2xl text-[15.5px] font-semibold text-on-brass">
-          <Plus size={19} strokeWidth={2} /> Трата
+          className="flex h-[54px] items-center justify-center gap-2 rounded-[18px] bg-ink text-[15.5px] font-medium text-bg">
+          <Plus size={19} strokeWidth={2} /> Записать трату
         </motion.button>
         <motion.button type="button" whileTap={{ scale: 0.98 }} onClick={() => ui.set({ scan: true })}
-          className="flex h-[52px] items-center justify-center gap-2 rounded-2xl border border-line bg-surface text-[15px] font-medium">
+          className="flex h-[54px] items-center justify-center gap-2 rounded-[18px] border-[1.5px] border-ink text-[15px] font-medium">
           <FileUp size={18} strokeWidth={1.5} /> Выписка
         </motion.button>
       </div>
 
       {closing && (
         <button type="button" onClick={() => ui.set({ week: closeMonday })} className="card mx-4 mt-3 flex w-[calc(100%-2rem)] items-center gap-4 p-4 text-left">
-          <span className="grid size-10 shrink-0 place-items-center rounded-full bg-brass/12 text-brass"><PiggyBank size={18} strokeWidth={1.5} /></span>
+          <span className="grid size-10 shrink-0 place-items-center rounded-full bg-sea/12 text-sea"><PiggyBank size={18} strokeWidth={1.5} /></span>
           <span className="min-w-0 flex-1">
             <span className="block text-[14.5px] font-medium">Закрыть неделю {ddmm(closeMonday)}–{ddmm(addDays(closeMonday, 6))}</span>
             <span className="block text-[12.5px] text-muted">
@@ -144,9 +137,13 @@ export function Week() {
         </div>
       ) : <div className="px-4"><Empty>На этой неделе трат пока нет. Записывайте по ходу или загрузите выписку в воскресенье.</Empty></div>}
 
-      <button type="button" onClick={() => ui.setTab('plan')} className="mx-4 mt-3 flex w-[calc(100%-2rem)] items-center justify-between rounded-[22px] px-4 py-3 text-left text-[13px] text-muted">
-        <span>Общий долг <Money value={debt} className="text-ink" />{startTotal > debt ? <span className="text-pos"> · −<Money value={startTotal - debt} /> с начала</span> : null}</span>
-        <ChevronRight size={15} />
+      <button type="button" onClick={() => ui.setTab('plan')} className="mx-4 mt-4 flex w-[calc(100%-2rem)] items-center justify-between gap-3 rounded-[20px] px-4 py-3 text-left text-[13px] text-muted">
+        <span className="min-w-0">
+          <span className="block text-ink">Этап {phase.id}: {phase.title}</span>
+          {phase.id < planPhase.id && planPhase.id > 0 && <span className="block text-warn">по плану уже этап {planPhase.id}</span>}
+          <span className="block">Общий долг <Money value={debt} className="text-ink" />{startTotal > debt ? <span className="text-pos">, уже −<Money value={startTotal - debt} /></span> : null}</span>
+        </span>
+        <ChevronRight size={15} className="shrink-0" />
       </button>
     </div>
   );
@@ -165,7 +162,7 @@ function WishRow({ id }: { id: string }) {
       <div className="min-w-0 flex-1">
         <div className="truncate text-[14.5px] font-medium">{w.title}</div>
         <div className={`flex items-center gap-1 text-[12px] ${ready ? 'text-pos' : 'text-muted'}`}>
-          <Hourglass size={11} /> {ready ? 'можно решать' : `ещё ${h} ${plural(h, 'час', 'часа', 'часов')}`} · <Money value={w.amount} />
+          <Hourglass size={11} /> {ready ? 'можно решать' : `ещё ${h} ${plural(h, 'час', 'часа', 'часов')}`}, <Money value={w.amount} />
         </div>
       </div>
       <div className="flex shrink-0 gap-1.5">

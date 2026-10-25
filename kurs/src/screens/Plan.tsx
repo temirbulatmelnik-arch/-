@@ -3,7 +3,8 @@ import { Check, Gift, Lock, MessagesSquare, Plus, Target } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { DebtChart } from '../components/DebtChart';
-import { Bar, Chip, Empty, IconButton, LinkButton, Money, ScreenHeader, SectionTitle, Segmented } from '../components/ui';
+import { SkyButton, SkyHeader } from '../components/Petersburg';
+import { Bar, Chip, Empty, LinkButton, Money, SectionTitle, Segmented } from '../components/ui';
 import { eventsBetween } from '../domain/calendar';
 import { addDays, addMonths, ddmm, monthIn, monthKey, monthName } from '../domain/dates';
 import { forecast } from '../domain/forecast';
@@ -35,16 +36,16 @@ export function Plan() {
 
   return (
     <div>
-      <ScreenHeader title="План" overline="Выход из долгов" action={
+      <SkyHeader title="План" subtitle="Выход из долгов" action={
         <div className="flex gap-2">
-          <IconButton onClick={() => set({ sync: true })} label="Связь с чатом «Финансы»"><MessagesSquare size={17} strokeWidth={1.5} /></IconButton>
-          <button type="button" onClick={() => set({ bonus: {} })} className="bg-brass-grad flex h-10 items-center gap-1.5 rounded-full px-4 text-[13.5px] font-semibold text-on-brass"><Gift size={15} strokeWidth={1.8} /> Премия</button>
+          <SkyButton onClick={() => set({ sync: true })} label="Связь с чатом «Финансы»"><MessagesSquare size={17} strokeWidth={1.5} /></SkyButton>
+          <button type="button" onClick={() => set({ bonus: {} })} className="flex h-10 items-center gap-1.5 rounded-full bg-ink px-4 text-[13.5px] font-medium text-bg"><Gift size={15} strokeWidth={1.8} /> Премия</button>
         </div>
       } />
-      <div className="px-4">
+      <div className="mt-3 px-4">
         <Segmented<View> value={view} onChange={setView} options={[
           { id: 'debts', label: 'Долги' },
-          { id: 'checklist', label: <>Чек-лист{open ? <span className="ml-1 text-brass">{open}</span> : null}</> },
+          { id: 'checklist', label: <>Чек-лист{open ? <span className="ml-1 text-sea">{open}</span> : null}</> },
           { id: 'strategy', label: 'Стратегия' },
         ]} />
       </div>
@@ -81,7 +82,7 @@ function DebtsView() {
 
   return (
     <>
-      <section className="black-card mx-4 mt-4 px-6 pt-6 pb-5">
+      <section className="deep-card mx-4 mt-4 px-6 pt-6 pb-5">
         <div className="text-[13px] text-card-muted">Общий долг</div>
         <Money value={total} className="figure mt-1 block text-[46px] leading-none" />
         {start > 0 && <Bar value={1 - total / start} tone="card" className="mt-5" />}
@@ -97,10 +98,10 @@ function DebtsView() {
       </section>
 
       {target && (
-        <div className="mx-4 mt-3 flex items-start gap-3 rounded-[22px] border border-brass/30 bg-brass/8 px-4 py-3.5">
-          <Target size={18} strokeWidth={1.5} className="mt-0.5 shrink-0 text-brass" />
+        <div className="mx-4 mt-3 flex items-start gap-3 rounded-[22px] border border-sea/30 bg-sea/8 px-4 py-3.5">
+          <Target size={18} strokeWidth={1.5} className="mt-0.5 shrink-0 text-sea" />
           <div className="text-[13.5px] leading-snug">
-            <span className="font-medium">Цель: {target.short}</span> <span className="text-muted">· {pct(target.rate)}</span><br />
+            <span className="font-medium">Цель: {target.short}</span> <span className="text-muted">под {pct(target.rate)}</span><br />
             <span className="text-muted">
               {target.targetClose && target.targetClose > monthKey(now)
                 ? <>Закрываем {monthIn(target.targetClose)} премией, до этого — только обязательные платежи.</>
@@ -131,7 +132,7 @@ function DebtsView() {
             {closed.map(d => (
               <button key={d.id} type="button" onClick={() => set({ debt: d.id })} className="flex w-full items-center justify-between px-4 py-3 text-left">
                 <span className="flex items-center gap-2 text-[14.5px]"><Check size={15} className="text-pos" /> {d.short}</span>
-                <span className="text-[12.5px] text-muted">{d.closedOn ? `${ddmm(d.closedOn)} · ` : ''}было <Money value={d.startBalance} /></span>
+                <span className="text-[12.5px] text-muted">{d.closedOn ? `закрыт ${ddmm(d.closedOn)}, ` : ''}было <Money value={d.startBalance} /></span>
               </button>
             ))}
           </div>
@@ -146,7 +147,7 @@ function DebtCard({ d, next, closeMonth, target, onClick }: { d: Debt; next?: { 
   const progress = d.startBalance ? 1 - d.balance / d.startBalance : 0;
   const late = closeMonth && d.targetClose && closeMonth > d.targetClose;
   return (
-    <button type="button" onClick={onClick} className={`card block w-full p-4 text-left ${target ? 'border-brass/50' : ''}`}>
+    <button type="button" onClick={onClick} className={`card block w-full p-4 text-left ${target ? 'border-sea/50' : ''}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-1.5">
@@ -158,7 +159,7 @@ function DebtCard({ d, next, closeMonth, target, onClick }: { d: Debt; next?: { 
         </div>
         <Money value={d.balance} className="figure shrink-0 text-[22px] leading-none" />
       </div>
-      <Bar value={progress} tone={target ? 'brass' : 'pos'} className="mt-4" />
+      <Bar value={progress} tone={target ? 'sea' : 'pos'} className="mt-4" />
       <div className="mt-2.5 flex flex-wrap justify-between gap-x-3 gap-y-0.5 text-[12px] text-muted">
         <span>{next ? <>платёж {next.dateMode === 'until' ? 'до ' : ''}{ddmm(next.date)}: <Money value={next.amount} approx={next.approx} className="text-ink" /></> : 'платежей в 45 дней нет'}</span>
         <span className={late ? 'text-warn' : ''}>{closeMonth ? `закроется ~${monthName(closeMonth)}` : 'срок не виден'}{late ? ` (план — ${monthName(d.targetClose!)})` : ''}</span>
@@ -188,7 +189,7 @@ function ChecklistView() {
                   <span className={`block text-[14.5px] leading-snug ${done ? 'line-through decoration-1' : ''}`}>{c.title}</span>
                   {c.note && !done && <span className="mt-0.5 block text-[12.5px] leading-snug text-muted">{c.note}</span>}
                 </span>
-                {c.due && !done && <Chip tone={due === 'overdue' ? 'warn' : due === 'soon' ? 'brass' : 'neutral'} className="mt-0.5">{c.due.length === 7 ? monthName(c.due).split(' ')[0] : ddmm(c.due)}</Chip>}
+                {c.due && !done && <Chip tone={due === 'overdue' ? 'warn' : due === 'soon' ? 'sea' : 'neutral'} className="mt-0.5">{c.due.length === 7 ? monthName(c.due).split(' ')[0] : ddmm(c.due)}</Chip>}
               </button>
             );
           })}
@@ -214,13 +215,13 @@ function StrategyView() {
           return (
             <div key={p.id} className="relative flex gap-4 py-3">
               {i < phases.length - 1 && <span className="absolute top-9 bottom-[-12px] left-[11px] w-px bg-line" />}
-              <span className={`relative mt-0.5 grid size-6 shrink-0 place-items-center rounded-full border text-[11px] ${done ? 'border-transparent bg-pos text-white' : active ? 'border-brass bg-brass text-on-brass' : 'border-line bg-surface text-muted'}`}>{done ? <Check size={12} strokeWidth={2.5} /> : p.id}</span>
+              <span className={`relative mt-0.5 grid size-6 shrink-0 place-items-center rounded-full border text-[11px] ${done ? 'border-transparent bg-pos text-white' : active ? 'border-sea bg-sea text-on-sea' : 'border-line bg-surface text-muted'}`}>{done ? <Check size={12} strokeWidth={2.5} /> : p.id}</span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className={`text-[14.5px] font-medium ${active ? 'text-brass' : ''}`}>{p.title}</span>
+                  <span className={`text-[14.5px] font-medium ${active ? 'text-sea' : ''}`}>{p.title}</span>
                   <span className="text-[12px] text-muted">{monthName(p.from).split(' ')[0].slice(0, 3)} {p.from.slice(2, 4)} – {monthName(p.to).split(' ')[0].slice(0, 3)} {p.to.slice(2, 4)}</span>
                 </div>
-                {p.weekly > 0 && <div className="mt-0.5 text-[12.5px] text-muted"><Money value={p.weekly} /> в неделю · <Money value={p.monthly} /> в месяц</div>}
+                {p.weekly > 0 && <div className="mt-0.5 text-[12.5px] text-muted"><Money value={p.weekly} /> в неделю, <Money value={p.monthly} /> в месяц</div>}
                 {p.closes.length > 0 && <div className="mt-0.5 text-[12.5px] text-muted">Закрываем: {p.closes.join(', ')}</div>}
                 {active && p.premiums && <div className="mt-1.5 text-[12.5px] leading-snug">{p.premiums}</div>}
               </div>
@@ -234,7 +235,7 @@ function StrategyView() {
           <SectionTitle>{s.title}</SectionTitle>
           <div className="card mx-4 space-y-2.5 px-5 py-4 text-[14px] leading-relaxed">
             {s.text.split(/\n\n+/).map((block, k) => block.trim().startsWith('- ') ? (
-              <ul key={k} className="space-y-1.5">{block.split('\n').map(l => l.replace(/^-\s*/, '')).filter(Boolean).map(l => <li key={l} className="flex gap-2.5"><span className="mt-[9px] size-1 shrink-0 rounded-full bg-brass" />{l}</li>)}</ul>
+              <ul key={k} className="space-y-1.5">{block.split('\n').map(l => l.replace(/^-\s*/, '')).filter(Boolean).map(l => <li key={l} className="flex gap-2.5"><span className="mt-[9px] size-1 shrink-0 rounded-full bg-sea" />{l}</li>)}</ul>
             ) : <p key={k}>{block}</p>)}
           </div>
         </div>
@@ -243,7 +244,7 @@ function StrategyView() {
       <SectionTitle>Правила</SectionTitle>
       <ol className="card mx-4 space-y-3 px-5 py-4">
         {(rules.length ? rules : DEFAULT_RULES).map((r, i) => (
-          <li key={i} className="flex gap-3 text-[14px] leading-snug"><span className="w-4 shrink-0 text-right text-[13px] text-brass">{i + 1}</span>{r}</li>
+          <li key={i} className="flex gap-3 text-[14px] leading-snug"><span className="w-4 shrink-0 text-right text-[13px] text-sea">{i + 1}</span>{r}</li>
         ))}
       </ol>
     </>

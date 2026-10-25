@@ -1,6 +1,7 @@
 // Страница установки «Курса» без магазина приложений: подсказывает способ под устройство,
 // собирает профиль Web Clip для iPhone прямо в браузере и показывает QR-код для компьютера.
-import '@fontsource-variable/onest';
+import '@fontsource-variable/geologica';
+import '@fontsource-variable/unbounded';
 
 import '../index.css';
 import { renderSVG } from 'uqr';
@@ -17,13 +18,13 @@ function applyTheme() {
   document.documentElement.classList.toggle('dark', dark);
 }
 
-const SHARE_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="inline -mt-1 text-brass"><path d="M12 3v12"/><path d="m8 7 4-4 4 4"/><path d="M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1"/></svg>`;
+const SHARE_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="inline -mt-1 text-sea"><path d="M12 3v12"/><path d="m8 7 4-4 4 4"/><path d="M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1"/></svg>`;
 
 const card = (title: string, badge: string, body: string) => `
   <section class="card p-5">
     <div class="flex items-center justify-between gap-3">
       <h2 class="text-[17px] font-medium">${title}</h2>
-      ${badge ? `<span class="shrink-0 rounded-full bg-brass/12 px-2.5 py-1 text-[12px] font-medium whitespace-nowrap">${badge}</span>` : ''}
+      ${badge ? `<span class="shrink-0 rounded-full bg-sea/12 px-2.5 py-1 text-[12px] font-medium whitespace-nowrap">${badge}</span>` : ''}
     </div>
     <div class="mt-3 space-y-3 text-[15px] leading-relaxed">${body}</div>
   </section>`;
@@ -43,7 +44,7 @@ const HOME_SCREEN = card('На экран «Домой»', '', `
 
 const PROFILE = card('Профилем конфигурации', '', `
   <p class="text-muted">Значок с иконкой и названием появится сам. Так же ставятся «Тонус» и «Линия».</p>
-  <button type="button" data-profile class="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-brass-grad text-[16px] font-medium text-on-brass">Скачать профиль</button>
+  <button type="button" data-profile class="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-sea-grad text-[16px] font-medium text-on-sea">Скачать профиль</button>
   ${steps([
     'Safari спросит, разрешить ли загрузку профиля, — нажмите «Разрешить».',
     'Откройте «Настройки»: вверху появится «Профиль загружен». Нажмите «Установить» и введите код-пароль телефона.',
@@ -58,7 +59,7 @@ const OTHER_IOS_BROWSER = card('Откройте страницу в Safari', ''
   <p class="text-muted">Добавить на экран «Домой» можно и из этого браузера: меню «Поделиться» → «На экран „Домой“».</p>`);
 
 const ANDROID = card('Android', '', `
-  <button type="button" data-android hidden class="flex h-12 w-full items-center justify-center rounded-2xl bg-brass-grad text-[16px] font-medium text-on-brass">Установить приложение</button>
+  <button type="button" data-android hidden class="flex h-12 w-full items-center justify-center rounded-2xl bg-sea-grad text-[16px] font-medium text-on-sea">Установить приложение</button>
   ${steps(['Откройте страницу в Chrome.', 'Меню ⋮ → «Установить приложение» или «Добавить на главный экран».', 'Подтвердите установку — значок появится среди приложений.'])}`);
 
 const DESKTOP = () => card('Откройте на телефоне', '', `
@@ -117,7 +118,7 @@ function render() {
         <p class="text-[15px] text-muted">Без App Store, прямо с сайта</p>
       </div>
     </header>
-    ${installed ? `<p class="mt-6 rounded-3xl bg-brass/12 p-4 text-[15px]">Приложение уже установлено и открыто с экрана «Домой».</p>` : ''}
+    ${installed ? `<p class="mt-6 rounded-3xl bg-sea/12 p-4 text-[15px]">Приложение уже установлено и открыто с экрана «Домой».</p>` : ''}
     <div class="mt-6 space-y-3">${main.join('')}</div>
     <div class="mt-3">${IMPORTANT}</div>
     <details class="mt-3 card p-5">
