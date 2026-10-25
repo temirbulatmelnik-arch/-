@@ -9,7 +9,8 @@ import { rub, parseAmount } from './money';
 import { categoryLimit, currentPhase, DEFAULT_PLAN, setPlanSource, splitBonus, targetDebt, weeklyLimit, type PlanConfig } from './plan';
 import { fromAi, fromDrafts } from './proposals';
 import { cashFlow, dailyTotals } from './cashflow';
-import { applyChatPlan, mergeSeed, parseChatPlan, type PlanState } from './planUpdate';
+import { mergeSeed, type PlanState } from './planUpdate';
+import { applyExchange, buildExchange, normalize, parseExchange, previewExchange, type ExchangeState } from './exchange';
 import { parseStatementText, isIncomeLine } from './pdf';
 import { weekReport, weekToClose } from './weekly';
 import { isWorkday, workdayOnOrBefore } from './workdays';
@@ -323,25 +324,11 @@ describe('выписка PDF (текст)', () => {
   });
 });
 
-describe('обмен с чатом и обновление плана', () => {
+describe('новая редакция плана', () => {
   const state: PlanState = {
     debts: DEBTS, incomes: [], fixed: [], oneOff: [], templateFrom: '2027-01', weeklyOverrides: [], planTrajectory: [], baselineTrajectory: [],
     plan: PLAN, marks: { a: { done: true, at: '' } }, overrides: {}, checklist: [{ id: 'x', title: 'Старое' }], strategy: [], rules: [], reserve: 100_000,
   };
-  it('находит JSON в ответе чата и применяет только присланное', () => {
-    const answer = 'Вот обновление:\n```json\n{"app":"kurs-plan","version":1,"checklist":[{"id":"y","title":"Новое","due":"2027-01-31"}],"debts":[{"id":"tbank","balance":280000}],"payments":[{"debtId":"sber","month":"2027-01","amount":19000,"date":"2027-01-29"}],"bonusRules":{"2027-04":{"targets":["split"]}}}\n```\nУдачи!';
-    const p = parseChatPlan(answer)!;
-    expect(p.app).toBe('kurs-plan');
-    const patch = applyChatPlan(p, state);
-    expect(patch.checklist).toEqual([{ id: 'y', title: 'Новое', due: '2027-01-31' }]);
-    expect(patch.debts!.find(d => d.id === 'tbank')!.balance).toBe(280_000);
-    expect(patch.debts!.find(d => d.id === 'sber')!.balance).toBe(400_000);
-    expect(patch.overrides!['pay:sber:2027-01']).toEqual({ amount: 19_000, date: '2027-01-29' });
-    expect(patch.plan!.bonusRules!['2026-12']).toBeTruthy(); // старые решения сохранились
-    expect(patch.plan!.bonusRules!['2027-04']).toEqual({ targets: ['split'] });
-    expect(patch.marks).toBeUndefined();
-    expect(parseChatPlan('просто текст')).toBeNull();
-  });
   it('новая редакция плана: остатки и отметки с телефона остаются', () => {
     const local = { ...state, debts: DEBTS.map(d => (d.id === 'alfa' ? { ...d, balance: 70_000 } : d)) };
     const seed = { asOf: '2026-10-22', debts: DEBTS.map(d => (d.id === 'alfa' ? { ...d, note: 'новая заметка' } : d)), incomes: [], fixed: [{ id: 'tel', name: 'Связь', day: 8, amount: 1000 }], oneOff: [], templateFrom: '2027-01', reserve: 0, plan: PLAN, weeklyOverrides: [], planTrajectory: [], baselineTrajectory: [], marks: { b: { done: true, at: '' } }, checklist: [{ id: 'z', title: 'Из аудита' }] };
@@ -369,5 +356,86 @@ describe('рабочие дни', () => {
     const ev = eventsBetween(cal, '2026-10-20', '2026-10-31');
     expect(ev.find(e => e.key === 'inc:advance:2026-10')).toMatchObject({ date: '2026-10-23', planned: '2026-10-25' });
     expect(ev.find(e => e.key === 'fix:f:2026-10')!.date).toBe('2026-10-25');
+  });
+});
+
+describe('файл обмена с чатом', () => {
+  const NOW = '2026-11-04';
+  const base: ExchangeState = {
+    debts: DEBTS, incomes: [{ kind: 'salary', name: 'Зарплата', day: 10, amount: 50_000 }],
+    fixed: [{ id: 'tel', name: 'Связь', day: 8, amount: 1000 }, { id: 'gym', name: 'Спортзал', day: 12, amount: 3000 }],
+    oneOff: [{ key: 'gift', date: '2026-11-16', dateMode: 'exact', kind: 'payment', title: 'Подарок', amount: 15_000 }],
+    templateFrom: '2026-11', weeklyOverrides: [], overrides: {}, marks: {}, plan: PLAN,
+    expenses: [
+      { id: 'e1', date: '2026-11-02', amount: 450, category: 'taxi', note: 'Такси', source: 'life', createdAt: '' },
+      { id: 'e2', date: '2026-11-03', amount: 600, category: 'fun', note: 'Кафе', source: 'life', createdAt: '' },
+    ],
+    reserve: 100_000, savings: 0, cardBalance: { amount: 5000, date: '2026-11-01', source: 'manual' },
+    checklist: [{ id: 'acc', title: 'Открыть счёт' }], checks: {}, strategy: [{ title: 'Суть', text: 'Текст' }], rules: ['Правило'], closures: {},
+  };
+  let n = 0;
+  const id = () => `new${++n}`;
+
+  it('выгрузка и тот же файл обратно — ничего не меняется', () => {
+    const file = buildExchange(base, NOW);
+    expect(file.expenses!.map(e => e.id)).toEqual(['e1', 'e2']);
+    expect(file.calendar!.some(e => e.key === 'fix:tel:2026-11')).toBe(true);
+    expect(previewExchange(normalize(parseExchange(JSON.stringify(file))!, base), base, NOW)).toEqual([]);
+  });
+
+  it('ответ чата: лимиты, обязательные, траты, отметки, долги, резерв, чек-лист', () => {
+    const answer = 'Меняем:\n```json\n' + JSON.stringify({
+      app: 'kurs-exchange', version: 2, from: 'chat', summary: 'Сверка недели',
+      limits: { weekly: [{ from: '2026-11-09', to: '2026-11-15', amount: 9000 }], phases: [{ id: 1, weekly: 11_000 }], categories: { groceries: { limit: 9000 } } },
+      fixed: [{ id: 'tel', amount: 1100 }, { id: 'gym', delete: true }, { id: 'music', name: 'Музыка', day: 20, amount: 300 }],
+      expenses: [
+        { date: '2026-11-02', amount: 450, category: 'taxi', note: 'Такси' },
+        { date: '2026-11-03', amount: 1234.5, category: 'groceries', note: 'Пятёрочка' },
+        { id: 'e1', amount: 500 },
+        { id: 'e2', delete: true },
+      ],
+      calendar: [{ key: 'fix:tel:2026-11', done: true, paid: 1100 }, { key: 'pay:tbank:2026-11', amount: 18_000 }],
+      events: [{ key: 'gift', amount: 20_000 }, { date: '2026-11-25', title: 'Вернули долг', amount: 3000, kind: 'income' }],
+      debts: [{ id: 'alfa', balance: 70_000 }],
+      reserve: 95_000, savings: 2500,
+      checklist: [{ id: 'acc', done: true }, { id: 'ins', title: 'Отказаться от страховки', due: '2026-11-30' }],
+    }) + '\n```';
+    const f = normalize(parseExchange(answer)!, base);
+    const sections = previewExchange(f, base, NOW);
+    expect(sections.map(s => s.id)).toEqual(['limits', 'fixed', 'debts', 'events', 'calendar', 'expenses', 'money', 'checklist']);
+    expect(sections.find(s => s.id === 'expenses')!.lines[0]).toMatch(/^Уже есть/);
+    const patch = applyExchange(f, base, NOW, new Set(sections.map(s => s.id)), id);
+    expect(patch.weeklyOverrides).toEqual([{ from: '2026-11-09', to: '2026-11-15', amount: 9000 }]);
+    expect(patch.plan!.phases.find(x => x.id === 1)!.weekly).toBe(11_000);
+    expect(patch.plan!.categories.groceries.limit).toBe(9000);
+    expect(patch.plan!.bonusRules).toEqual(PLAN.bonusRules);
+    expect(patch.fixed!.map(x => [x.id, x.amount])).toEqual([['tel', 1100], ['music', 300]]);
+    expect(patch.expenses!.map(e => [e.date, e.amount, e.category])).toEqual([['2026-11-02', 500, 'taxi'], ['2026-11-03', 1234.5, 'groceries']]);
+    expect(patch.marks!['fix:tel:2026-11']).toMatchObject({ done: true, amount: 1100 });
+    expect(patch.overrides!['pay:tbank:2026-11']).toEqual({ amount: 18_000 });
+    expect(patch.oneOff!.find(e => e.key === 'gift')!.amount).toBe(20_000);
+    expect(patch.oneOff!.some(e => e.kind === 'income' && e.amount === 3000)).toBe(true);
+    expect(patch.debts!.find(d => d.id === 'alfa')!.balance).toBe(70_000);
+    expect([patch.reserve, patch.savings]).toEqual([95_000, 2500]);
+    expect(patch.checks!.acc.done).toBe(true);
+    expect(patch.checklist!.map(c => c.id)).toEqual(['acc', 'ins']);
+  });
+
+  it('применяется только выбранное', () => {
+    const f = normalize(parseExchange(JSON.stringify({ app: 'kurs-exchange', version: 2, reserve: 1, expenses: [{ id: 'e2', delete: true }] }))!, base);
+    const patch = applyExchange(f, base, NOW, new Set(['expenses']), id);
+    expect(patch.reserve).toBeUndefined();
+    expect(patch.expenses!.map(e => e.id)).toEqual(['e1']);
+  });
+
+  it('прежний формат «kurs-plan» тоже понимается', () => {
+    const p = parseExchange('```json\n{"app":"kurs-plan","version":1,"checklist":[{"id":"y","title":"Новое"}],"payments":[{"debtId":"sber","month":"2026-11","amount":19000}],"bonusRules":{"2027-04":{"targets":["split"]}}}\n```')!;
+    expect(p.kind).toBe('v1');
+    const patch = applyExchange(normalize(p, base), base, NOW, new Set(['limits', 'calendar', 'checklist']), id);
+    expect(patch.checklist).toEqual([{ id: 'y', title: 'Новое' }]);
+    expect(patch.overrides!['pay:sber:2026-11']).toEqual({ amount: 19_000 });
+    expect(patch.plan!.bonusRules!['2026-12']).toBeTruthy();
+    expect(patch.plan!.bonusRules!['2027-04']).toEqual({ targets: ['split'] });
+    expect(parseExchange('просто текст')).toBeNull();
   });
 });

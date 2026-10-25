@@ -58,7 +58,7 @@ export interface Expense {
   note?: string;
   source: Source;
   /** откуда пришла: вручную, выписка, скриншот */
-  origin?: 'manual' | 'csv' | 'text' | 'ai' | 'pdf';
+  origin?: 'manual' | 'csv' | 'text' | 'ai' | 'pdf' | 'chat';
   /** для поиска дублей при импорте */
   fingerprint?: string;
   createdAt: string;

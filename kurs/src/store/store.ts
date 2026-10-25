@@ -6,7 +6,7 @@ import { DEFAULT_MODEL } from '../domain/models';
 import { annuity } from '../domain/calendar';
 import { monthKey, monthsBetween, today } from '../domain/dates';
 import { setPlanSource, totalDebt, type PlanConfig } from '../domain/plan';
-import { mergeSeed, type PlanState } from '../domain/planUpdate';
+import { mergeSeed } from '../domain/planUpdate';
 import type { CalEvent, CardBalance, ChecklistItem, Debt, DebtSnapshot, EventMark, Expense, FixedItem, IncomeTemplate, PlanSeed, ReserveMove, Settings, StrategySection, WeekClosure, WeeklyOverride, WishItem } from '../domain/types';
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -62,7 +62,8 @@ interface Actions {
   /** новая редакция плана: стратегия меняется, данные остаются */
   updateFromSeed: (seed: PlanSeed, code: string) => void;
   /** обновление плана из чата «Финансы» */
-  applyPlanPatch: (patch: Partial<PlanState>) => void;
+  /** изменения из файла обмена с чатом: резерв и копилка пишутся в журнал, долги — в снимок месяца */
+  applySync: (patch: Partial<Data>) => void;
   toggleCheck: (id: string) => void;
   closeWeek: (c: Omit<WeekClosure, 'at'>) => void;
   reopenWeek: (monday: string) => void;
@@ -97,7 +98,7 @@ interface Actions {
 
 export type State = Data & Actions;
 
-const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 const nowIso = () => new Date().toISOString();
 
 const EMPTY: Data = {
@@ -158,10 +159,13 @@ export const useStore = create<State>()(
       startEmpty: () => set(s => ({ ...EMPTY, settings: s.settings, ready: true })),
 
       updateFromSeed: (seed, code) => set(s => ({ ...mergeSeed(s, seed), planRev: seed.rev ?? s.planRev, planCode: code })),
-      applyPlanPatch: patch => set(s => {
+      applySync: patch => set(s => {
         const next: Partial<Data> = { ...patch };
         if (patch.reserve != null && patch.reserve !== s.reserve) {
           next.reserveLog = [...s.reserveLog, { id: uid(), date: today(), amount: patch.reserve - s.reserve, note: 'Сверка из чата «Финансы»' }];
+        }
+        if (patch.savings != null && patch.savings !== s.savings) {
+          next.savingsLog = [...s.savingsLog, { id: uid(), date: today(), amount: patch.savings - s.savings, note: 'Сверка из чата «Финансы»' }];
         }
         return patch.debts ? { ...next, ...withSnapshot(patch.debts, s.snapshots) } : next;
       }),
