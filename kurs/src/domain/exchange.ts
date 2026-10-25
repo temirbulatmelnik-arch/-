@@ -60,7 +60,7 @@ export interface ExchangeFile {
   incomes?: IncomeTemplate[];
   /** события календаря по key: amount и date — плановые, paid — фактически оплачено или пришло */
   /** событие ищется по key, а без него — по названию, дате (±7 дней) и сумме */
-  calendar?: { key?: string; date?: string; title?: string; kind?: string; amount?: number; done?: boolean; paid?: number; reset?: boolean; approx?: boolean; dateMode?: string }[];
+  calendar?: { key?: string; date?: string; title?: string; kind?: string; amount?: number; done?: boolean; paid?: number; reset?: boolean; approx?: boolean; exact?: boolean; planned?: string; dateMode?: string }[];
   /** разовые платежи и поступления */
   events?: ({ key?: string; date?: string; title?: string; amount?: number; kind?: 'payment' | 'income'; dateMode?: CalEvent['dateMode']; note?: string; debtId?: string } & Del)[];
   expensesFrom?: string;
@@ -92,7 +92,9 @@ export function buildExchange(s: ExchangeState, now: string): ExchangeFile {
   const phase = currentPhase(s.debts, now);
   const need = reserveNeed(now, s.debts);
   const from = addDays(now, -EXPENSE_DAYS);
-  const calendar = eventsBetween(s, addDays(now, -45), addDays(now, 75)).filter(e => e.kind !== 'weekly');
+  // окно −45…+75 дней и, дальше него, всё, что поправлено в приложении вручную: точные суммы и даты будущих платежей
+  const calendar = eventsBetween(s, addDays(now, -45), addDays(now, 400))
+    .filter(e => e.kind !== 'weekly' && (e.date <= addDays(now, 75) || s.overrides[e.key] || s.marks[e.key]));
   return {
     app: EXCHANGE_APP, version: 2, from: 'app', date: now,
     about: 'Файл обмена приложения «Курс». status — сводка только для чтения. Остальные разделы можно менять: в ответ присылай этот же формат только с изменениями.',
@@ -106,7 +108,7 @@ export function buildExchange(s: ExchangeState, now: string): ExchangeFile {
     debts: s.debts.map(d => ({
       id: d.id, name: d.name, short: d.short, kind: d.kind, balance: r0(d.balance), rate: d.rate, dueDay: d.dueDay, order: d.order,
       ...(d.phase != null ? { phase: d.phase } : {}), ...(d.targetClose ? { targetClose: d.targetClose } : {}), ...(d.note ? { note: d.note } : {}),
-      closed: d.closed, ...(d.closedOn ? { closedOn: d.closedOn } : {}),
+      ...(d.limit != null ? { limit: d.limit } : {}), closed: d.closed, ...(d.closedOn ? { closedOn: d.closedOn } : {}),
     })),
     fixed: s.fixed,
     incomes: s.incomes,
@@ -115,6 +117,8 @@ export function buildExchange(s: ExchangeState, now: string): ExchangeFile {
       return {
         key: e.key, date: e.date, title: e.title, kind: e.kind, amount: r0(e.amount),
         ...(e.approx ? { approx: true } : {}), ...(e.dateMode !== 'exact' ? { dateMode: e.dateMode } : {}),
+        // сумма или дата внесены в приложении вручную — это не оценка
+        ...(s.overrides[e.key] ? { exact: true } : {}), ...(e.planned ? { planned: e.planned } : {}),
         done: !!m?.done, ...(m?.done && m.amount != null ? { paid: r0(m.amount) } : {}),
       };
     }),

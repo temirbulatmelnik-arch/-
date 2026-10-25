@@ -8,6 +8,7 @@ import type { CalEvent, CategoryId, Expense } from '../domain/types';
 import { useStore } from './store';
 
 export type Tab = 'week' | 'payments' | 'plan' | 'budget';
+export type PlanView = 'debts' | 'checklist' | 'strategy';
 
 export interface AddPrefill {
   amount?: number;
@@ -40,6 +41,12 @@ interface Ui {
   card: boolean;
   /** код для новой редакции плана */
   unlock: boolean;
+  /** раздел «Плана»: долги, чек-лист, стратегия */
+  planView: PlanView;
+  /** пункт, к которому перейти и подсветить (чек-лист) */
+  focus: string | null;
+  /** раздел настроек, к которому прокрутить */
+  settingsFocus: 'reminders' | 'backup' | null;
   toast: string | null;
   setTab: (t: Tab) => void;
   set: (p: Partial<Omit<Ui, 'set' | 'setTab'>>) => void;
@@ -47,7 +54,7 @@ interface Ui {
 
 export const useUi = create<Ui>()(set => ({
   tab: 'week', add: null, scan: false, settings: false, event: null, bonus: null, debt: null, reserve: false,
-  week: null, savings: false, sync: false, fixed: false, card: false, unlock: false, toast: null,
+  week: null, savings: false, sync: false, fixed: false, card: false, unlock: false, planView: 'debts', focus: null, settingsFocus: null, toast: null,
   setTab: tab => { set({ tab }); window.scrollTo({ top: 0 }); },
   set: p => set(p),
 }));

@@ -422,6 +422,14 @@ describe('файл обмена с чатом', () => {
     expect(patch.checklist!.map(c => c.id)).toEqual(['acc', 'ins']);
   });
 
+  it('поправленное в приложении уходит в чат: дальние точные суммы и даты, отметки — и возвращается без изменений', () => {
+    const s2: ExchangeState = { ...base, overrides: { 'pay:tbank:2027-03': { amount: 17_000, date: '2027-03-14' } }, marks: { 'fix:tel:2026-11': { done: true, amount: 1000, at: '' } } };
+    const file = buildExchange(s2, NOW);
+    expect(file.calendar!.find(e => e.key === 'pay:tbank:2027-03')).toMatchObject({ amount: 17_000, date: '2027-03-14', exact: true });
+    expect(file.calendar!.find(e => e.key === 'fix:tel:2026-11')).toMatchObject({ done: true, paid: 1000 });
+    expect(previewExchange(normalize(parseExchange(JSON.stringify(file))!, s2), s2, NOW)).toEqual([]);
+  });
+
   it('отметка в календаре без key: по названию и дате', () => {
     const f = normalize(parseExchange(JSON.stringify({ app: 'kurs-exchange', version: 2, calendar: [
       { title: 'Подарок', date: '2026-11-15', done: true, paid: 15_000 },

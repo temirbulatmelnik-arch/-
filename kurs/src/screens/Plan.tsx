@@ -1,6 +1,6 @@
 // План: долги и прогноз, чек-лист и стратегия из аудита, этапы и правила.
 import { Check, Gift, Lock, MessagesSquare, Plus, Target } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { DebtChart } from '../components/DebtChart';
 import { SkyButton, SkyHeader } from '../components/Petersburg';
@@ -13,7 +13,7 @@ import { currentPhase, monthlyInterest, planConfig, targetDebt, totalDebt } from
 import { checklistDue } from '../domain/planUpdate';
 import type { ChecklistItem, Debt } from '../domain/types';
 import { useStore } from '../store/store';
-import { useCal, useToday, useUi } from '../store/ui';
+import { useCal, useToday, useUi, type PlanView } from '../store/ui';
 import { NewDebtSheet } from './DebtSheet';
 
 export const DEFAULT_RULES = [
@@ -26,13 +26,11 @@ export const DEFAULT_RULES = [
   'Резерв — только на нехватку по плану, здоровье и срочное. Просрочки недопустимы ни на день.',
 ];
 
-type View = 'debts' | 'checklist' | 'strategy';
-
 export function Plan() {
   const [checklist, checks] = useStore(useShallow(s => [s.checklist, s.checks] as const));
   const set = useUi(s => s.set);
+  const view = useUi(s => s.planView);
   const open = checklist.filter(c => !(checks[c.id]?.done ?? c.done)).length;
-  const [view, setView] = useState<View>('debts');
 
   return (
     <div>
@@ -43,7 +41,7 @@ export function Plan() {
         </div>
       } />
       <div className="mt-3 px-4">
-        <Segmented<View> value={view} onChange={setView} options={[
+        <Segmented<PlanView> value={view} onChange={v => set({ planView: v })} options={[
           { id: 'debts', label: 'Долги' },
           { id: 'checklist', label: <>Чек-лист{open ? <span className="ml-1 text-sea">{open}</span> : null}</> },
           { id: 'strategy', label: 'Стратегия' },
@@ -174,6 +172,15 @@ function ChecklistView() {
   const set = useUi(s => s.set);
   const isDone = (c: ChecklistItem) => checks[c.id]?.done ?? !!c.done;
   const sorted = [...checklist].sort((a, b) => Number(isDone(a)) - Number(isDone(b)) || (a.due ?? '9999').localeCompare(b.due ?? '9999'));
+  // пришли из «Внимания» — прокрутить к пункту и подсветить его
+  const focus = useUi(s => s.focus);
+  const focused = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!focus) return;
+    focused.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const t = setTimeout(() => set({ focus: null }), 2600);
+    return () => clearTimeout(t);
+  }, [focus, set]);
   return (
     <>
       <SectionTitle action={<LinkButton onClick={() => set({ sync: true })}>Обновить из чата</LinkButton>}>Из аудита</SectionTitle>
@@ -183,7 +190,8 @@ function ChecklistView() {
             const done = isDone(c);
             const due = done ? null : checklistDue(c, now);
             return (
-              <button key={c.id} type="button" onClick={() => toggleCheck(c.id)} className={`flex w-full items-start gap-3 px-4 py-3.5 text-left ${done ? 'opacity-50' : ''}`}>
+              <button key={c.id} ref={c.id === focus ? focused : undefined} type="button" onClick={() => toggleCheck(c.id)} aria-pressed={done}
+                className={`flex w-full items-start gap-3 px-4 py-3.5 text-left transition-colors duration-700 ${done ? 'opacity-50' : ''} ${c.id === focus ? 'bg-sea/12' : ''}`}>
                 <span className={`mt-0.5 grid size-6 shrink-0 place-items-center rounded-full border ${done ? 'border-transparent bg-pos text-white' : due === 'overdue' ? 'border-warn' : 'border-line'}`}>{done && <Check size={13} strokeWidth={2.5} />}</span>
                 <span className="min-w-0 flex-1">
                   <span className={`block text-[14.5px] leading-snug ${done ? 'line-through decoration-1' : ''}`}>{c.title}</span>

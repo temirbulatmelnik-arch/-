@@ -1,5 +1,5 @@
 import { BellRing, ChevronRight, Download, KeyRound, Smartphone, Upload } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Field, PrimaryButton, SecondaryButton, Segmented, Sheet, Switch } from '../components/ui';
 import { MODELS } from '../domain/models';
 import { ddmmyyyy, today } from '../domain/dates';
@@ -19,11 +19,21 @@ export function SettingsSheet() {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, id, children }: { title: string; id?: string; children: React.ReactNode }) {
+  const focus = useUi(s => s.settingsFocus);
+  const ref = useRef<HTMLElement>(null);
+  const on = !!id && focus === id;
+  // пришли из «Внимания» — прокрутить к разделу и на миг подсветить
+  useEffect(() => {
+    if (!on) return;
+    const t = setTimeout(() => ref.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 350);
+    const u = setTimeout(() => useUi.getState().set({ settingsFocus: null }), 2600);
+    return () => { clearTimeout(t); clearTimeout(u); };
+  }, [on]);
   return (
-    <section className="mt-5">
-      <h3 className="mb-2 px-1 text-[13px] font-medium tracking-wide text-muted uppercase">{title}</h3>
-      <div className="card space-y-3 p-4">{children}</div>
+    <section ref={ref} className="mt-5 scroll-mt-3">
+      <h3 className="mb-2 px-1 text-[14px] font-medium text-muted">{title}</h3>
+      <div className={`card space-y-3 p-4 transition-shadow duration-700 ${on ? 'ring-2 ring-sea' : ''}`}>{children}</div>
     </section>
   );
 }
@@ -63,7 +73,7 @@ function Body() {
         ))}
       </Section>
 
-      <Section title="Напоминания">
+      <Section title="Напоминания" id="reminders">
         <p className="text-[13.5px] leading-snug text-muted">Веб-приложение не может само будить телефон по расписанию, поэтому напоминания идут через календарь iPhone: один файл — все платежи, поступления и понедельники на полгода, с будильниками.</p>
         <div className="grid grid-cols-3 gap-2">
           {[3, 1, 0].map(d => {
@@ -110,7 +120,7 @@ function Body() {
         </div>
       </Section>
 
-      <Section title="Данные">
+      <Section title="Данные" id="backup">
         <p className="text-[13.5px] leading-snug text-muted">Всё хранится только на этом телефоне. Удалите приложение или очистите данные сайта — пропадёт. Сохраняйте копию раз в две недели.</p>
         <input ref={file} type="file" accept="application/json,.json" hidden onChange={e => { void restore(e.target.files?.[0]); e.target.value = ''; }} />
         <div className="grid grid-cols-2 gap-2">

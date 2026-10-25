@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'motion/react';
 import { CarTaxiFront, Cigarette, Coffee, Pill, Repeat, Sandwich, Scissors, ShoppingBag, ShoppingBasket, TramFront, X, type LucideIcon } from 'lucide-react';
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { num } from '../domain/money';
 import type { CategoryId } from '../domain/types';
 
@@ -212,11 +212,14 @@ export function Row({ label, children, className = '' }: { label: ReactNode; chi
 }
 
 export function Toast({ text, onDone }: { text: string | null; onDone: () => void }) {
+  // таймер зависит только от текста: иначе каждое нажатие где угодно перезапускало бы его и сообщение висело
+  const done = useRef(onDone);
+  done.current = onDone;
   useEffect(() => {
     if (!text) return;
-    const t = setTimeout(onDone, 2600);
+    const t = setTimeout(() => done.current(), 2600);
     return () => clearTimeout(t);
-  }, [text, onDone]);
+  }, [text]);
   return (
     <AnimatePresence>
       {text && (

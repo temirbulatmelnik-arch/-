@@ -43,8 +43,9 @@ export function Week() {
   const onAlert = (a: Alert) => {
     if (a.action === 'pay' || a.action === 'weekly') ui.set({ event: a.event ?? null });
     else if (a.action === 'income') ui.set({ bonus: { event: a.event } });
-    else if (a.action === 'backup' || a.action === 'calendar') ui.set({ settings: true });
-    else if (a.action === 'check') ui.setTab('plan');
+    else if (a.action === 'backup') ui.set({ settings: true, settingsFocus: 'backup' });
+    else if (a.action === 'calendar') ui.set({ settings: true, settingsFocus: 'reminders' });
+    else if (a.action === 'check') { ui.set({ planView: 'checklist', focus: a.id.replace(/^check:/, '') }); ui.setTab('plan'); }
     else if (a.action === 'wish') document.getElementById('wishes')?.scrollIntoView({ behavior: 'smooth' });
     else if (a.id === 'credit') ui.setTab('budget');
   };
