@@ -1,7 +1,7 @@
 // Иллюстрация «Петербург»: закат над Невой, Петропавловка, Исаакий, Адмиралтейство и Дворцовый мост.
 // Мост на «Неделе» разводится по мере трат, фонари набережной — дни недели. Цвета — из index.css (--sky-*, --city-*),
 // поэтому тёмная тема превращает закат в поздние сумерки без отдельной картинки.
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 
 const f = (v: string): CSSProperties => ({ fill: `var(${v})` });
 const stop = (v: string, opacity?: number): CSSProperties => ({ stopColor: `var(${v})`, stopOpacity: opacity });
@@ -90,23 +90,57 @@ function Pier({ x, lampX }: { x: number; lampX: number }) {
   );
 }
 
+/** Плавный переход значения по кадрам: Safari на iPhone не всегда анимирует CSS-переходы на элементах SVG,
+ *  поэтому мост и солнце двигаются через атрибут transform, который понимают все браузеры */
+function tween(from: number, to: number, ms: number, ease: (k: number) => number, frame: (v: number) => void): () => void {
+  let raf = 0;
+  const t0 = performance.now();
+  const step = (t: number) => {
+    const k = Math.min(1, (t - t0) / ms);
+    frame(from + (to - from) * ease(k));
+    if (k < 1) raf = requestAnimationFrame(step);
+  };
+  raf = requestAnimationFrame(step);
+  return () => cancelAnimationFrame(raf);
+}
+const easeInOut = (k: number) => 0.5 - Math.cos(Math.PI * k) / 2;
+const easeOut = (k: number) => 1 - (1 - k) ** 3;
+
+/** Закат: солнце опускается на rise единиц за ms, небо разгорается */
+function useSunset(rise: number, ms: number) {
+  const sun = useRef<SVGGElement>(null);
+  const warm = useRef<SVGRectElement>(null);
+  useEffect(() => tween(0, 1, ms, easeOut, k => {
+    sun.current?.setAttribute('transform', `translate(0 ${(-rise * (1 - k)).toFixed(2)})`);
+    warm.current?.setAttribute('opacity', k.toFixed(3));
+  }), [rise, ms]);
+  return { sun, warm };
+}
+
 /** Угол пролётов растёт с тратами; поднимаются плавно, с постоянной скоростью, чтобы движение было видно */
 function useLift(target: number) {
-  const [state, setState] = useState({ angle: 0, dur: 3 });
-  const shown = useRef(0);
+  const left = useRef<SVGGElement>(null);
+  const right = useRef<SVGGElement>(null);
+  const angle = useRef(0);
+  const stop = useRef<() => void>(() => {});
   const timers = useRef<number[]>([]);
-  const clear = () => { timers.current.forEach(clearTimeout); timers.current = []; };
+  const clear = () => { stop.current(); timers.current.forEach(clearTimeout); timers.current = []; };
+  const draw = (a: number) => {
+    angle.current = a;
+    left.current?.setAttribute('transform', `rotate(${(-a).toFixed(2)} 88 386)`);
+    right.current?.setAttribute('transform', `rotate(${a.toFixed(2)} 302 386)`);
+  };
   /** повернуть пролёты к углу a со скоростью speed градусов в секунду; возвращает длительность, с */
   const moveTo = (a: number, speed = 4.5) => {
-    const dur = Math.max(speed > 10 ? 1.2 : 3, Math.abs(a - shown.current) / speed);
-    shown.current = a;
-    setState({ angle: a, dur });
+    stop.current();
+    const dur = Math.max(speed > 10 ? 1.2 : 3, Math.abs(a - angle.current) / speed);
+    stop.current = tween(angle.current, a, dur * 1000, easeInOut, draw);
     return dur;
   };
   useEffect(() => {
     clear();
     // при открытии мост секунду стоит сведённым, потом разводится до уровня трат
-    timers.current.push(window.setTimeout(() => moveTo(target), shown.current === 0 && target > 0 ? 1200 : 0));
+    timers.current.push(window.setTimeout(() => moveTo(target), angle.current === 0 && target > 0 ? 1200 : 0));
     return clear;
   }, [target]);
   /** нажатие на сцену: мост сводится и разводится заново; без трат — показывает, как разводится, и сводится обратно */
@@ -119,7 +153,7 @@ function useLift(target: number) {
       if (up !== target) timers.current.push(window.setTimeout(() => moveTo(target), d * 1000 + 700));
     }, down * 1000 + 400));
   };
-  return { ...state, replay };
+  return { left, right, replay };
 }
 
 const DAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
@@ -130,15 +164,12 @@ const DAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
  */
 export function WeekScene({ spent, today, children }: { spent: number; today: number; children: ReactNode }) {
   const target = 72 * Math.sqrt(Math.min(1, Math.max(0, spent)));
-  const { angle, dur, replay } = useLift(target);
-  const leaf = (origin: number): CSSProperties => ({
-    transformBox: 'view-box', transformOrigin: `${origin}px 386px`,
-    transform: `rotate(${origin < 195 ? -angle : angle}deg)`, transition: `transform ${dur}s cubic-bezier(.42,0,.4,1)`,
-  });
+  const { left, right, replay } = useLift(target);
+  const { sun, warm } = useSunset(130, 16_000);
   return (
     <div className="relative">
       <svg viewBox="0 34 390 478" className="block h-auto w-full" role="img"
-        aria-label={`Дворцовый мост ${angle < 2 ? 'сведён' : angle > 65 ? 'разведён полностью' : 'разводится'}: потрачено ${Math.round(Math.min(1, spent) * 100)}% недели`}>
+        aria-label={`Дворцовый мост ${target < 2 ? 'сведён' : target > 65 ? 'разведён полностью' : 'разведён наполовину'}: потрачено ${Math.round(Math.min(1, spent) * 100)}% недели`}>
         <defs>
           <SkyGradients id="ws" />
           <linearGradient id="ws-path" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#FFD9B0" stopOpacity=".9" /><stop offset="1" stopColor="#FFD9B0" stopOpacity="0" /></linearGradient>
@@ -149,9 +180,9 @@ export function WeekScene({ spent, today, children }: { spent: number; today: nu
         </defs>
 
         <rect width="390" height="331" fill="url(#ws-sky)" />
-        <rect className="sc-warm" width="390" height="331" fill="url(#ws-warm)" />
+        <rect ref={warm} opacity="0" width="390" height="331" fill="url(#ws-warm)" />
         <g clipPath="url(#ws-skyclip)">
-          <g className="sc-set">
+          <g ref={sun} transform="translate(0 -130)">
             <circle className="sc-halo" cx="238" cy="322" r="150" fill="url(#ws-halo)" />
             <circle cx="238" cy="322" r="20" fill="url(#ws-sun)" />
           </g>
@@ -183,8 +214,8 @@ export function WeekScene({ spent, today, children }: { spent: number; today: nu
           <g style={f('--bridge')} opacity=".3"><rect x="22" y="403" width="76" height="30" /><rect x="292" y="403" width="76" height="30" /></g>
         </g>
 
-        <g style={leaf(88)}><g transform="translate(88 352)"><Leaf /></g></g>
-        <g style={leaf(302)}><g transform="translate(302 352) scale(-1 1)"><Leaf /></g></g>
+        <g ref={left}><g transform="translate(88 352)"><Leaf /></g></g>
+        <g ref={right}><g transform="translate(302 352) scale(-1 1)"><Leaf /></g></g>
 
         <g style={f('--bridge')}>
           <rect x="-10" y="352" width="36" height="6" /><path d="M-10 358 H24 V362 Q8 372 -10 366 Z" />
@@ -221,6 +252,7 @@ export function WeekScene({ spent, today, children }: { spent: number; today: nu
 
 /** Узкая панорама для шапок «Платежей», «Плана» и «Бюджета»: закат, город, полоска воды */
 export function SkyHeader({ title, subtitle, action }: { title: ReactNode; subtitle?: ReactNode; action?: ReactNode }) {
+  const { sun, warm } = useSunset(26, 9000);
   return (
     <header className="relative">
       <svg viewBox="0 0 390 160" className="block h-auto w-full" aria-hidden="true">
@@ -229,9 +261,9 @@ export function SkyHeader({ title, subtitle, action }: { title: ReactNode; subti
           <clipPath id="sh-skyclip"><rect width="390" height="149" /></clipPath>
         </defs>
         <rect width="390" height="149" fill="url(#sh-sky)" />
-        <rect className="sc-warm" width="390" height="149" fill="url(#sh-warm)" />
+        <rect ref={warm} opacity="0" width="390" height="149" fill="url(#sh-warm)" />
         <g clipPath="url(#sh-skyclip)">
-          <g className="sc-set-short">
+          <g ref={sun} transform="translate(0 -26)">
             <circle className="sc-halo" cx="340" cy="146" r="70" fill="url(#sh-halo)" />
             <circle cx="340" cy="146" r="11" fill="url(#sh-sun)" />
           </g>

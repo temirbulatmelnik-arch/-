@@ -160,9 +160,6 @@ button:disabled { cursor: default; }
 .no-scrollbar { scrollbar-width: none; }
 
 /* ---------- сцена «Петербург» ---------- */
-@keyframes sc-set { from { transform: translateY(-130px); } to { transform: translateY(0); } }
-@keyframes sc-set-s { from { transform: translateY(-26px); } to { transform: translateY(0); } }
-@keyframes sc-warm { from { opacity: 0; } to { opacity: 1; } }
 @keyframes sc-halo { 0%, 100% { opacity: .8; transform: scale(1); } 50% { opacity: 1; transform: scale(1.08); } }
 @keyframes sc-cloud { from { transform: translateX(-14px); } to { transform: translateX(22px); } }
 @keyframes sc-gull { from { transform: translateX(-60px); } to { transform: translateX(450px); } }
@@ -177,9 +174,6 @@ button:disabled { cursor: default; }
 @keyframes sc-ring { from { transform: scale(.3); opacity: .9; } to { transform: scale(2.2); opacity: 0; } }
 @keyframes sc-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes sc-fade { from { opacity: 0; } }
-.sc-set { transform-box: view-box; animation: sc-set 16s cubic-bezier(.3, .05, .3, 1) both; }
-.sc-set-short { transform-box: view-box; animation: sc-set-s 9s cubic-bezier(.25, .1, .25, 1) both; }
-.sc-warm { animation: sc-warm 16s ease-in both; }
 .sc-halo { transform-box: fill-box; transform-origin: center; animation: sc-halo 7s ease-in-out infinite; }
 .sc-cloud { transform-box: view-box; animation: sc-cloud 26s ease-in-out infinite alternate; }
 .sc-gull { transform-box: view-box; animation: sc-gull 40s linear infinite; }
@@ -217,8 +211,8 @@ button:disabled { cursor: default; }
 .dark input[type="date"]::-webkit-calendar-picker-indicator,
 .dark input[type="time"]::-webkit-calendar-picker-indicator { filter: invert(1); }
 
-/* «Уменьшение движения» на iPhone: замирают бесконечные мелочи (чайки, облака, блики, волны), а закат, развод моста
-   и наполнение воды остаются — они медленные, без рывков и приближений, и показывают сами деньги */
+/* «Уменьшение движения» на iPhone: замирают бесконечные мелочи (чайки, облака, блики, волны), а закат и развод моста
+   (идут кадрами из Petersburg.tsx) и наполнение воды остаются — они медленные, без рывков и приближений */
 @media (prefers-reduced-motion: reduce) {
   .sc-halo, .sc-cloud, .sc-gull, .sc-flap, .sc-refl, .sc-glit, .sc-tw, .sc-glow, .sc-blink, .sc-wave, .sc-ring { animation: none !important; }
 }
