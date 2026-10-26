@@ -3,13 +3,14 @@ import { motion } from 'motion/react';
 import { useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { AlertRow, EventRow, ExpenseRow } from '../components/rows';
+import { DayRing } from '../components/DayRing';
 import { SkyButton, WeekScene } from '../components/Petersburg';
 import { CatIcon, Empty, LinkButton, Money, SectionTitle } from '../components/ui';
 import { useCountUp } from '../components/useCountUp';
 import { eventsBetween } from '../domain/calendar';
 import { addDays, dayMonth, ddmm, fromKey, monthIn, plural, weekdayFull, weekRange } from '../domain/dates';
 import { BIG_PURCHASE_HOURS, currentPhase, phaseByDate, reserveNeed, totalDebt } from '../domain/plan';
-import { alerts as buildAlerts, type Alert, weekSummary } from '../domain/summary';
+import { alerts as buildAlerts, type Alert, dayBudget, weekSummary } from '../domain/summary';
 import { weekReport, weekToClose } from '../domain/weekly';
 import { useStore } from '../store/store';
 import { useCal, useToday, useUi } from '../store/ui';
@@ -22,6 +23,7 @@ export function Week() {
   ] as const));
   const ui = useUi();
   const week = useMemo(() => weekSummary(expenses, debts, overrides, now), [expenses, debts, overrides, now]);
+  const today = useMemo(() => dayBudget(expenses, debts, overrides, now), [expenses, debts, overrides, now]);
   const phase = currentPhase(debts, now);
   const planPhase = phaseByDate(now);
   const list = useMemo(() => buildAlerts({ cal, marks, expenses, wishes, now, nowMs: Date.now(), lastBackupAt: settings.lastBackupAt, lastIcsAt: settings.lastIcsAt, checklist, checks }),
@@ -60,16 +62,31 @@ export function Week() {
             <div className="text-[14px] first-letter:uppercase" style={{ color: 'var(--scene-muted)' }}>{weekdayFull(now)}, {dayMonth(now)}</div>
             <div className="font-display mt-0.5 text-[19px] font-medium">Неделя {weekRange(week.monday, week.sunday)}</div>
           </div>
-          <SkyButton onClick={() => ui.set({ settings: true })} label="Настройки"><Cog size={18} strokeWidth={1.5} /></SkyButton>
+          <span className="pointer-events-auto"><SkyButton onClick={() => ui.set({ settings: true })} label="Настройки"><Cog size={18} strokeWidth={1.5} /></SkyButton></span>
         </div>
-        <div className="mt-3 px-5" style={{ color: over ? 'var(--neg)' : 'var(--scene-ink)' }}>
-          <div className="figure text-[52px] leading-[.95]" aria-live="polite">
-            {over && <span className="mr-1">−</span>}<Money value={shown} />
+        <div className="mt-1.5 flex items-start justify-between gap-3 pr-4 pl-5">
+          <div className="pt-3" style={{ color: over ? 'var(--neg)' : 'var(--scene-ink)' }}>
+            <div className="figure text-[36px] leading-[.95]" aria-live="polite">
+              {over && <span className="mr-0.5">−</span>}<Money value={shown} />
+            </div>
+            <div className="mt-1.5 text-[14px] leading-snug" style={{ color: over ? 'var(--neg)' : 'var(--scene-muted)' }}>
+              {over ? <>перерасход<br />за неделю</> : <>на неделю,<br />до воскресенья</>}
+            </div>
           </div>
-          <div className="mt-1.5 text-[15px]" style={{ color: over ? 'var(--neg)' : 'var(--scene-muted)' }}>
-            {over ? 'перерасход: до понедельника только необходимое' : <>до понедельника, около <Money value={week.perDay} /> в день</>}
-          </div>
+          <DayRing day={today.day} left={today.left} />
         </div>
+        {(today.left < 0 || today.exhausted) && (
+          <p className="sc-pop mx-5 mt-3 rounded-2xl border px-3.5 py-2.5 text-[14px] leading-snug backdrop-blur-md"
+            style={{ background: 'var(--pill)', borderColor: 'var(--pill-border)', color: 'var(--scene-ink)' }}>
+            {today.exhausted ? (
+              <><span className="font-medium" style={{ color: 'var(--ring-neg)' }}>Недельный лимит исчерпан,</span> до понедельника только необходимое</>
+            ) : today.nextWeek ? (
+              <><span className="font-medium" style={{ color: 'var(--ring-neg)' }}>Сегодня перерасход <Money value={-today.left} />.</span> С понедельника новая неделя: <Money value={today.tomorrow} /> в день</>
+            ) : (
+              <><span className="font-medium" style={{ color: 'var(--ring-neg)' }}>Сегодня перерасход <Money value={-today.left} />,</span> поэтому с завтра лимит <Money value={today.tomorrow} /> в день</>
+            )}
+          </p>
+        )}
       </WeekScene>
 
       <div className="mt-1 grid grid-cols-2 px-5">

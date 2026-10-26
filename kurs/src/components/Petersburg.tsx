@@ -1,15 +1,58 @@
-// Иллюстрация «Петербург»: закат над Невой, Петропавловка, Исаакий, Адмиралтейство и Дворцовый мост.
+// Иллюстрация «Петербург»: закат над Невой, Петропавловка, Исаакий, Адмиралтейство, Дворцовый мост и «Лахта» вдали.
 // Мост на «Неделе» при входе разводится полностью, фонари набережной — дни недели. Цвета — из index.css (--sky-*, --city-*),
-// поэтому тёмная тема превращает закат в поздние сумерки без отдельной картинки.
+// поэтому тёмная тема превращает закат в светлые сумерки без отдельной картинки; солнце в ней заменяет луна.
 import { useEffect, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 
 const f = (v: string): CSSProperties => ({ fill: `var(${v})` });
 const stop = (v: string, opacity?: number): CSSProperties => ({ stopColor: `var(${v})`, stopOpacity: opacity });
 
-/** Силуэты города в координатах 390×330 (горизонт — y=330), шпиль Петропавловки по центру */
-function City() {
+/* «Лахта-центр»: пять граней-кривых от основания к шпилю, по граням ряды огней. Нарисована крупно у x=142
+   и уменьшена от основания — так она дальше Петропавловки и ниже её шпиля. */
+type Pt = [number, number];
+const L_TIP: Pt = [142, 194];
+const L_EDGES: Pt[][] = [
+  [[135, 322], [134.2, 282], [136.5, 236], L_TIP],
+  [[137.8, 322], [136.8, 280], [140.6, 232], L_TIP],
+  [[141.8, 322], [143, 282], [140.8, 236], L_TIP],
+  [[145.9, 322], [147.4, 280], [143.4, 232], L_TIP],
+  [[149, 322], [149.8, 282], [147.5, 236], L_TIP],
+];
+const bezier = ([a, b, c, d]: Pt[], t: number): Pt => {
+  const u = 1 - t;
+  return [0, 1].map(i => u ** 3 * a[i] + 3 * u * u * t * b[i] + 3 * u * t * t * c[i] + t ** 3 * d[i]) as Pt;
+};
+const L_OUTLINE = 'M135 322 C134.2 282 136.5 236 142 194 C147.5 236 149.8 282 149 322 Z';
+const L_GLASS = 'M137.8 322 C136.8 280 140.6 232 142 194 C143.4 232 147.4 280 145.9 322 Z';
+const L_EDGE_D = L_EDGES.map(([a, b, c, d]) => `M${a} C${b} ${c} ${d}`).join(' ');
+// у внутренних граней верхние огни сливаются со шпилем — их нет
+const L_DOTS = L_EDGES.flatMap((e, i) => [0.07, 0.19, 0.31, 0.43, 0.55, 0.67, 0.79].filter(t => !(i % 2 === 1 && t > 0.7)).map(t => bezier(e, t)));
+
+/** still — без мигания: для отражения в воде и маленькой панорамы, чтобы не перерисовывать фильтры каждый кадр */
+function Lakhta({ id, still }: { id: string; still?: boolean }) {
+  const flash = still ? undefined : 'sc-lakhta';
+  const glow = `url(#${id}-lglow)`;
+  const edge = (op: string): CSSProperties => ({ stroke: 'var(--lakhta-edge)', strokeOpacity: `var(${op})` });
+  return (
+    <g transform="translate(126 323) scale(.72) translate(-142 -322)" style={{ opacity: 'var(--lakhta-op)' }}>
+      <path d={L_OUTLINE} style={f('--lakhta-body')} />
+      <path d={L_GLASS} style={f('--lakhta-body2')} opacity=".6" />
+      <path d={L_EDGE_D} fill="none" strokeWidth="1.5" filter={glow} style={edge('--lakhta-glow-op')} />
+      <path d={L_EDGE_D} fill="none" strokeWidth=".6" style={edge('--lakhta-edge-op')} />
+      <g className={flash} fill="#fff" fillOpacity=".55" filter={glow}>{L_DOTS.map(([x, y], i) => <circle key={i} cx={x} cy={y} r="2.4" />)}</g>
+      <g className={flash} fill="#fff" opacity={still ? 0.4 : undefined}>
+        {L_DOTS.map(([x, y], i) => <circle key={i} cx={x} cy={y} r="1.05" />)}
+        <circle cx={L_TIP[0]} cy={L_TIP[1] - 1} r="1.5" />
+      </g>
+      <circle className={flash} cx={L_TIP[0]} cy={L_TIP[1] - 1} r="3" fill="#fff" fillOpacity=".5" filter={glow} />
+    </g>
+  );
+}
+
+/** Силуэты города в координатах 390×330 (горизонт — y=330), шпиль Петропавловки по центру; id — для фильтров «Лахты» */
+function City({ id, still }: { id: string; still?: boolean }) {
   return (
     <>
+      <Lakhta id={id} still={still} />
       <g transform="matrix(.85 0 0 .85 270.5 49.5)" style={f('--city-far')} opacity=".72">
         <rect x="20" y="314" width="96" height="16" /><rect x="60" y="300" width="20" height="14" /><rect x="64" y="290" width="12" height="10" />
         <path d="M68.4 290 L70 238 L71.6 290 Z" /><circle cx="70" cy="236.5" r="1.6" />
@@ -19,7 +62,7 @@ function City() {
         <path d="M140 297 Q158 266 176 297 Z" /><rect x="156" y="272" width="4" height="10" /><rect x="157.4" y="264" width="1.2" height="8" />
         <path d="M128 311 Q132 302 136 311 Z M180 311 Q184 302 188 311 Z" />
       </g>
-      <path d="M0 330 V324 H22 V321 H34 V324 H112 V330 Z" style={f('--city-mid')} opacity=".7" />
+      <path d="M0 330 V324 H22 V321 H34 V324 H120 V330 Z" style={f('--city-mid')} opacity=".7" />
       <path d="M262 330 V325 H296 V321 H330 V325 H390 V330 Z" style={f('--city-near')} opacity=".8" />
       <g transform="matrix(.85 0 0 .85 -60 49.5)" style={f('--city-near')} opacity=".95">
         <path d="M206 330 V322 L222 317 H262 L270 322 H390 V330 Z" />
@@ -27,6 +70,9 @@ function City() {
         <rect x="292" y="290" width="16" height="14" /><rect x="294.5" y="280" width="11" height="10" /><rect x="296.5" y="272" width="7" height="8" />
         <path d="M297.6 272 L300 190 L302.4 272 Z" /><path d="M296.5 189 H303.5 L300 185 Z" /><circle cx="300" cy="182" r="1.7" />
       </g>
+      {/* набережная одной линией по всему горизонту */}
+      <path d="M0 331 V326.6 H390 V331 Z" style={f('--city-near')} />
+      <path d="M0 326.6 H390" stroke="#F1A487" strokeWidth=".8" opacity=".35" />
     </>
   );
 }
@@ -45,12 +91,39 @@ function SkyGradients({ id }: { id: string }) {
       <linearGradient id={`${id}-water`} x1="0" y1="0" x2="0" y2="1">
         <stop offset="0" style={stop('--water-1')} /><stop offset=".14" style={stop('--water-2')} /><stop offset=".38" style={stop('--water-3')} /><stop offset=".72" style={stop('--water-4')} /><stop offset="1" style={stop('--water-5')} />
       </linearGradient>
+      <radialGradient id={`${id}-moon`} cx=".4" cy=".38" r=".72"><stop offset="0" stopColor="#FFFDF4" /><stop offset=".6" stopColor="#ECE7D8" /><stop offset="1" stopColor="#CFC8B6" /></radialGradient>
+      <radialGradient id={`${id}-moonhalo`}><stop offset="0" stopColor="#F3EEF6" stopOpacity=".55" /><stop offset=".3" stopColor="#D2C6E4" stopOpacity=".2" /><stop offset="1" stopColor="#B7A9D4" stopOpacity="0" /></radialGradient>
+      <filter id={`${id}-lglow`} x="-60%" y="-10%" width="220%" height="120%"><feGaussianBlur stdDeviation="1.3" /></filter>
     </>
   );
 }
 
+/** Луна с морями и кратерами; нарисована с центром (246, 268) и радиусом 15 */
+function Moon({ id }: { id: string }) {
+  const rim = { stroke: '#FFFDF5', fill: 'none' };
+  return (
+    <>
+      <circle cx="246" cy="268" r="15" fill={`url(#${id}-moon)`} />
+      <g fill="#B8B09C">
+        <path d="M237.5 262 q3.5 -3.2 8 -0.6 q2.6 2.4 -0.8 5.2 q-4.6 2.2 -7.6 -0.6 q-1.6 -2.2 0.4 -4 Z" opacity=".42" />
+        <path d="M247.5 271 q4.6 -2.4 7 1.6 q1 3.8 -3.8 4.8 q-4 0.2 -4.4 -2.8 Z" opacity=".38" />
+        <path d="M240 274 q2.4 -1 3.6 1 q0 2 -2.4 2.2 q-2 -0.6 -1.2 -3.2 Z" opacity=".3" />
+      </g>
+      <g fill="#C2BBA7">
+        <circle cx="251.5" cy="262.5" r="2.3" /><circle cx="242" cy="270.5" r="1.7" /><circle cx="253.5" cy="270" r="1.1" />
+        <circle cx="244.5" cy="259.5" r="1" /><circle cx="248" cy="277" r="1.3" /><circle cx="238.5" cy="266.5" r=".8" />
+      </g>
+      <path d="M249.4 261.6 a2.3 2.3 0 0 1 4.2 0.5 M240.5 269.9 a1.7 1.7 0 0 1 3.1 0.4 M246.9 276.5 a1.3 1.3 0 0 1 2.3 0.3" style={rim} strokeWidth=".55" opacity=".8" />
+    </>
+  );
+}
+
+// звёзды — мимо текста и кольца дня над небом
+const STARS: [number, number][] = [[250, 52], [296, 70], [222, 120], [384, 150], [226, 196], [12, 236], [60, 262], [104, 246], [172, 228], [208, 252], [318, 262], [378, 246]];
+const HEADER_STARS: [number, number][] = [[36, 96], [92, 118], [150, 84], [214, 104], [262, 78], [310, 96], [372, 84], [128, 124]];
+
 const GLITTER: [number, number, number][] = [[226, 337, 22], [220, 346, 14], [240, 352, 18], [214, 364, 24], [246, 374, 16], [206, 388, 20], [238, 400, 26], [200, 416, 18], [252, 430, 22], [210, 446, 28], [260, 460, 18]];
-const WINDOWS: [number, number][] = [[40, 318], [76, 318], [132, 325], [152, 325], [258, 325], [318, 324], [352, 327]];
+const WINDOWS: [number, number][] = [[40, 318], [76, 318], [132, 325], [152, 325], [258, 325], [318, 324], [352, 327], [20, 326], [58, 322], [96, 327], [176, 327], [214, 325], [236, 327], [290, 326], [336, 327], [372, 326]];
 
 /** Пролёт моста: решётчатая ферма, у опоры глубже, к середине реки тоньше. Начало координат — верх настила у опоры. */
 function Leaf() {
@@ -108,15 +181,17 @@ function tween(from: number, to: number, ms: number, ease: (k: number) => number
 const easeInOut = (k: number) => 0.5 - Math.cos(Math.PI * k) / 2;
 const easeOut = (k: number) => 1 - (1 - k) ** 3;
 
-/** Закат: солнце опускается на rise единиц за ms, небо разгорается */
-function useSunset(rise: number, ms: number) {
+/** Закат: солнце опускается на rise единиц за ms, небо разгорается; в тёмной теме за то же время поднимается луна */
+function useSunset(rise: number, ms: number, moonRise: number) {
   const sun = useRef<SVGGElement>(null);
+  const moon = useRef<SVGGElement>(null);
   const warm = useRef<SVGRectElement>(null);
   useEffect(() => tween(0, 1, ms, easeOut, k => {
     sun.current?.setAttribute('transform', `translate(0 ${(-rise * (1 - k)).toFixed(2)})`);
+    moon.current?.setAttribute('transform', `translate(0 ${(moonRise * (1 - k)).toFixed(2)})`);
     warm.current?.setAttribute('opacity', k.toFixed(3));
-  }), [rise, ms]);
-  return { sun, warm };
+  }), [rise, ms, moonRise]);
+  return { sun, moon, warm };
 }
 
 /** Мост при входе разводится полностью: медленно, с плавным началом и концом, и остаётся разведённым */
@@ -175,14 +250,14 @@ const DAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
  */
 export function WeekScene({ today, children }: { today: number; children: ReactNode }) {
   const { left, right, replay } = useLift();
-  const { sun, warm } = useSunset(130, 16_000);
+  const { sun, moon, warm } = useSunset(130, 16_000, 34);
   return (
     <div className="relative">
       <svg viewBox="0 34 390 478" className="block h-auto w-full" role="img"
-        aria-label="Закат над Невой, Дворцовый мост разводится">
+        aria-label="Нева на закате, Дворцовый мост разводится">
         <defs>
           <SkyGradients id="ws" />
-          <linearGradient id="ws-path" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#FFD9B0" stopOpacity=".9" /><stop offset="1" stopColor="#FFD9B0" stopOpacity="0" /></linearGradient>
+          <linearGradient id="ws-path" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style={stop('--path', 0.9)} /><stop offset="1" style={stop('--path', 0)} /></linearGradient>
           <linearGradient id="ws-cloud" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style={stop('--cloud-1')} /><stop offset="1" style={stop('--cloud-2')} /></linearGradient>
           <clipPath id="ws-skyclip"><rect y="0" width="390" height="331" /></clipPath>
           <clipPath id="ws-river"><rect x="0" y="330" width="390" height="140" /></clipPath>
@@ -191,10 +266,17 @@ export function WeekScene({ today, children }: { today: number; children: ReactN
 
         <rect width="390" height="331" fill="url(#ws-sky)" />
         <rect ref={warm} opacity="0" width="390" height="331" fill="url(#ws-warm)" />
+        <g className="scene-night" fill="#fff">
+          {STARS.map(([x, y], i) => <circle key={i} className="sc-tw" style={{ animationDelay: `${-(i * 0.47) % 3.5}s` }} cx={x} cy={y} r={i % 3 ? 0.9 : 1.1} opacity={y < 160 ? 0.55 : 0.3} />)}
+        </g>
         <g clipPath="url(#ws-skyclip)">
-          <g ref={sun} transform="translate(0 -130)">
+          <g ref={sun} className="scene-day" transform="translate(0 -130)">
             <circle className="sc-halo" cx="238" cy="322" r="150" fill="url(#ws-halo)" />
             <circle cx="238" cy="322" r="20" fill="url(#ws-sun)" />
+          </g>
+          <g ref={moon} className="scene-night" transform="translate(0 34)">
+            <circle className="sc-halo" cx="246" cy="268" r="95" fill="url(#ws-moonhalo)" />
+            <Moon id="ws" />
           </g>
         </g>
 
@@ -211,14 +293,14 @@ export function WeekScene({ today, children }: { today: number; children: ReactN
           <g transform="translate(26 248) scale(.75)"><path className="sc-flap" style={{ animationDelay: '-.4s' }} d="M0 4 Q4 0 8 4 Q12 0 16 4" strokeWidth="1.6" /></g>
         </g>
 
-        <City />
+        <City id="ws" />
         <g fill="#FFD9A0">{WINDOWS.map(([x, y], i) => <circle key={i} className="sc-tw" style={{ animationDelay: `${-i * 0.7}s` }} cx={x} cy={y} r="1" />)}</g>
 
         <rect y="330" width="390" height="140" fill="url(#ws-water)" />
         <g clipPath="url(#ws-river)">
-          <g className="sc-refl"><g filter="url(#ws-rip)" opacity=".34" transform="translate(0 660) scale(1 -1)"><City /></g></g>
+          <g className="sc-refl"><g filter="url(#ws-rip)" opacity=".34" transform="translate(0 660) scale(1 -1)"><City id="ws" still /></g></g>
           <path d="M218 331 L258 331 L300 470 L176 470 Z" fill="url(#ws-path)" opacity=".35" />
-          <g stroke="#FFE0BE" strokeWidth="1.6" strokeLinecap="round">
+          <g style={{ stroke: 'var(--glint)' }} strokeWidth="1.6" strokeLinecap="round">
             {GLITTER.map(([x, y, w], i) => <path key={i} className="sc-glit" style={{ animationDelay: `${-i * 0.37}s` }} d={`M${x} ${y} h${w}`} />)}
           </g>
           <g style={f('--bridge')} opacity=".3"><rect x="22" y="403" width="76" height="30" /><rect x="292" y="403" width="76" height="30" /></g>
@@ -255,14 +337,15 @@ export function WeekScene({ today, children }: { today: number; children: ReactN
         })}
       </svg>
       <button type="button" onClick={replay} aria-label="Развести мост заново" className="absolute inset-x-0 top-[38%] bottom-[16%]" />
-      <div className="absolute inset-x-0 top-0">{children}</div>
+      {/* текст над небом не перехватывает нажатия: сцена под ним разводит мост заново */}
+      <div className="pointer-events-none absolute inset-x-0 top-0">{children}</div>
     </div>
   );
 }
 
 /** Узкая панорама для шапок «Платежей», «Плана» и «Бюджета»: закат, город, полоска воды */
 export function SkyHeader({ title, subtitle, action }: { title: ReactNode; subtitle?: ReactNode; action?: ReactNode }) {
-  const { sun, warm } = useSunset(26, 9000);
+  const { sun, moon, warm } = useSunset(26, 9000, 10);
   return (
     <header className="relative">
       <svg viewBox="0 0 390 160" className="block h-auto w-full" aria-hidden="true">
@@ -272,19 +355,26 @@ export function SkyHeader({ title, subtitle, action }: { title: ReactNode; subti
         </defs>
         <rect width="390" height="149" fill="url(#sh-sky)" />
         <rect ref={warm} opacity="0" width="390" height="149" fill="url(#sh-warm)" />
+        <g className="scene-night" fill="#fff">
+          {HEADER_STARS.map(([x, y], i) => <circle key={i} className="sc-tw" style={{ animationDelay: `${-(i * 0.47) % 3.5}s` }} cx={x} cy={y} r=".8" opacity=".5" />)}
+        </g>
         <g clipPath="url(#sh-skyclip)">
-          <g ref={sun} transform="translate(0 -26)">
+          <g ref={sun} className="scene-day" transform="translate(0 -26)">
             <circle className="sc-halo" cx="340" cy="146" r="70" fill="url(#sh-halo)" />
             <circle cx="340" cy="146" r="11" fill="url(#sh-sun)" />
+          </g>
+          <g ref={moon} className="scene-night" transform="translate(0 10)">
+            <circle className="sc-halo" cx="340" cy="112" r="55" fill="url(#sh-moonhalo)" />
+            <g transform="translate(340 112) scale(.7) translate(-246 -268)"><Moon id="sh" /></g>
           </g>
         </g>
         <g className="sc-gull" style={{ stroke: 'var(--city-near)', animationDuration: '32s' }} fill="none" strokeLinecap="round">
           <path d="M0 122 Q3.5 118.5 7 122 Q10.5 118.5 14 122" strokeWidth="1.3" />
         </g>
         <rect x="0" y="145" width="390" height="4" style={f('--city-far')} opacity=".55" />
-        <g transform="translate(186 9.4) scale(.42)"><City /></g>
+        <g transform="translate(186 9.4) scale(.42)"><City id="sh" still /></g>
         <rect y="148" width="390" height="12" fill="url(#sh-water)" />
-        <g stroke="#FFE0BE" strokeWidth="1.2" strokeLinecap="round">
+        <g style={{ stroke: 'var(--glint)' }} strokeWidth="1.2" strokeLinecap="round">
           <path className="sc-glit" d="M330 151 h18" /><path className="sc-glit" style={{ animationDelay: '-.9s' }} d="M322 155 h12" /><path className="sc-glit" style={{ animationDelay: '-1.7s' }} d="M344 157 h16" />
         </g>
       </svg>

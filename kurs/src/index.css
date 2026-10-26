@@ -64,10 +64,19 @@
   --bridge: #1b2b3b; --pier: #3a4855; --pier-top: #47565f; --pier-line: #30404c;
   --parapet: #b7c6ce; --parapet-line: #8fa6b3;
   --scene-ink: #0a2433; --scene-muted: #1e3344;
+  /* «Лахта» вдали в дымке; солнечная дорожка */
+  --lakhta-body: #8290ae; --lakhta-body2: #99a5c0; --lakhta-edge: #ffe4be; --lakhta-edge-op: .55; --lakhta-glow-op: .2; --lakhta-op: .8;
+  --glint: #ffe0be; --path: #ffd9b0;
+  /* кольцо дня и полоса пересчёта — стекло над небом */
+  --glass: rgba(255, 255, 255, .28); --glass-over: rgba(255, 214, 196, .42); --glass-border: rgba(255, 255, 255, .6);
+  --glass-shadow: 0 10px 30px rgba(60, 50, 90, .18), inset 0 1px 0 rgba(255, 255, 255, .7);
+  --ring-1: #2f86a8; --ring-2: #7c8fc0; --ring-3: #f08a62; --ring-track: .5; --ring-over: #d93a16;
+  --ring-ink: #0a2433; --ring-label: #3a4e62; --ring-neg: #a8320f;
+  --pill: rgba(255, 248, 242, .42); --pill-border: rgba(255, 255, 255, .6);
   color-scheme: light;
 }
 
-/* «Ночная Нева»: поздние сумерки, вода и гранит темнеют, фонари ярче */
+/* «Ночная Нева»: светлые сумерки с зарёй у горизонта, вместо солнца луна, вода и гранит темнеют, фонари ярче */
 .dark {
   --bg: #07161f;
   --surface: #0d2230;
@@ -94,14 +103,21 @@
   --water-b: rgba(69, 169, 203, 0.38);
   --water-low-a: rgba(255, 123, 66, 0.16);
   --water-low-b: rgba(255, 123, 66, 0.32);
-  --sky-1: #1a2340; --sky-2: #3a3358; --sky-3: #7b4a62; --sky-4: #b8664f;
-  --skyw-1: #1c2244; --skyw-2: #463560; --skyw-3: #a2525a; --skyw-4: #d9774a;
-  --cloud-1: #2e2c4a; --cloud-2: #9a4f55;
-  --water-1: #8a4f55; --water-2: #4b3e5c; --water-3: #24334f; --water-4: #10243a; --water-5: #0a1a2a;
-  --city-far: #2b3550; --city-mid: #232c44; --city-near: #141c2e;
-  --bridge: #0c1420; --pier: #1a2533; --pier-top: #26323f; --pier-line: #141e29;
+  --sky-1: #28335e; --sky-2: #4b4878; --sky-3: #8a6386; --sky-4: #c47c70;
+  --skyw-1: #2a3360; --skyw-2: #514a7a; --skyw-3: #946286; --skyw-4: #cc8270;
+  --cloud-1: #7b6e9c; --cloud-2: #c98589;
+  --water-1: #a56e78; --water-2: #6e5c82; --water-3: #3d4769; --water-4: #24385b; --water-5: #172a47;
+  --city-far: #46527a; --city-mid: #3b4670; --city-near: #222c48;
+  --bridge: #141d30; --pier: #2a3550; --pier-top: #37435e; --pier-line: #222c44;
   --parapet: #1f3443; --parapet-line: #2b4656;
   --scene-ink: #f2f6f8; --scene-muted: #d5dbe6;
+  --lakhta-body: #4a5784; --lakhta-body2: #6a78a2; --lakhta-edge: #ffd08c; --lakhta-edge-op: .9; --lakhta-glow-op: .4; --lakhta-op: .95;
+  --glint: #eef4fc; --path: #f4eef6;
+  --glass: rgba(22, 34, 60, .4); --glass-over: rgba(96, 34, 26, .42); --glass-border: rgba(255, 255, 255, .2);
+  --glass-shadow: 0 10px 30px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(255, 255, 255, .18);
+  --ring-1: #45a9cb; --ring-2: #a9b8ea; --ring-3: #f08a62; --ring-track: .16; --ring-over: #ff6b3d;
+  --ring-ink: #f2f6f8; --ring-label: #b9c6d6; --ring-neg: #ff9a70;
+  --pill: rgba(14, 26, 48, .55); --pill-border: rgba(255, 255, 255, .18);
   color-scheme: dark;
 }
 
@@ -174,6 +190,8 @@ button:disabled { cursor: default; }
 @keyframes sc-ring { from { transform: scale(.3); opacity: .9; } to { transform: scale(2.2); opacity: 0; } }
 @keyframes sc-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes sc-fade { from { opacity: 0; } }
+@keyframes sc-lakhta { 0%, 100% { opacity: .3; } 3% { opacity: 1; } 11% { opacity: .3; } }
+@keyframes sc-pop { from { opacity: 0; transform: translateY(-8px) scale(.97); } }
 .sc-halo { transform-box: fill-box; transform-origin: center; animation: sc-halo 7s ease-in-out infinite; }
 .sc-cloud { transform-box: view-box; animation: sc-cloud 26s ease-in-out infinite alternate; }
 .sc-gull { transform-box: view-box; animation: sc-gull 40s linear infinite; }
@@ -188,6 +206,13 @@ button:disabled { cursor: default; }
 .sc-ring { animation: sc-ring .8s ease-out both; }
 .sc-draw { stroke-dasharray: 1; animation: sc-draw 1.6s .4s cubic-bezier(.4, 0, .2, 1) both; }
 .sc-fade { animation: sc-fade 1s .8s ease-out both; }
+/* огни «Лахты» вспыхивают все вместе, как заградительные огни высоток */
+.sc-lakhta { animation: sc-lakhta 1.6s linear infinite; }
+.sc-pop { animation: sc-pop .6s cubic-bezier(.2, .8, .2, 1) both; }
+/* солнце и закат — в светлой теме, луна и звёзды — в тёмной */
+.scene-night { display: none; }
+.dark .scene-night { display: inline; }
+.dark .scene-day { display: none; }
 
 /* в слоях: иначе эти правила перебивают классы Tailwind */
 @layer base {
@@ -214,5 +239,5 @@ button:disabled { cursor: default; }
 /* «Уменьшение движения» на iPhone: замирают бесконечные мелочи (чайки, облака, блики, волны), а закат и развод моста
    (идут кадрами из Petersburg.tsx) и наполнение воды остаются — они медленные, без рывков и приближений */
 @media (prefers-reduced-motion: reduce) {
-  .sc-halo, .sc-cloud, .sc-gull, .sc-flap, .sc-refl, .sc-glit, .sc-tw, .sc-glow, .sc-blink, .sc-wave, .sc-ring { animation: none !important; }
+  .sc-halo, .sc-cloud, .sc-gull, .sc-flap, .sc-refl, .sc-glit, .sc-tw, .sc-glow, .sc-blink, .sc-wave, .sc-ring, .sc-lakhta { animation: none !important; }
 }

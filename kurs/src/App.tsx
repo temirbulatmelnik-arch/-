@@ -38,7 +38,7 @@ function useTheme() {
       const dark = theme === 'dark' || (theme === 'system' && mq.matches);
       document.documentElement.classList.toggle('dark', dark);
       // цвет верха неба: строка состояния сливается с закатом в шапке
-      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#1a2340' : '#8a9fbe');
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#28335e' : '#8a9fbe');
     };
     apply();
     mq.addEventListener('change', apply);

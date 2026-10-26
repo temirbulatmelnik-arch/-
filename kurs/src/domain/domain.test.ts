@@ -13,6 +13,7 @@ import { mergeSeed, type PlanState } from './planUpdate';
 import { applyExchange, buildExchange, normalize, parseExchange, previewExchange, type ExchangeState } from './exchange';
 import { parseStatementText, isIncomeLine } from './pdf';
 import { weekReport, weekToClose } from './weekly';
+import { dayBudget } from './summary';
 import { isWorkday, workdayOnOrBefore } from './workdays';
 import { draft } from './statements';
 import { parseCsv, parseText } from './statements';
@@ -291,6 +292,20 @@ describe('неделя', () => {
     // ничего не осталось — долить весь лимит; перерасход не уменьшает пополнение
     expect(weekReport([exp('2026-11-10', 8000)], DEBTS, ov, '2026-11-09')).toMatchObject({ leftover: 0, topUp: 9000 });
     expect(weekReport([exp('2026-11-10', 9500)], DEBTS, ov, '2026-11-09')).toMatchObject({ left: -1500, leftover: 0, topUp: 9000 });
+  });
+  it('кольцо дня: лимит на сегодня, перерасход и пересчёт на завтра', () => {
+    const exp = (date: string, amount: number, source: Expense['source'] = 'life'): Expense => ({ id: date + amount, date, amount, category: 'groceries', source, createdAt: '' });
+    const ov = [{ from: '2026-11-09', to: '2026-11-15', amount: 8000 }, { from: '2026-11-16', to: '2026-11-22', amount: 9000 }];
+    // понедельник: 8 000 на 7 дней → 1 140 на сегодня
+    expect(dayBudget([exp('2026-11-09', 760)], DEBTS, ov, '2026-11-09')).toMatchObject({ day: 1140, spentToday: 760, left: 380, nextWeek: false });
+    // перерасход 220 → с завтра (8 000 − 1 360) / 6 = 1 100
+    expect(dayBudget([exp('2026-11-09', 1360)], DEBTS, ov, '2026-11-09')).toMatchObject({ left: -220, tomorrow: 1100 });
+    // вторник: вчерашние траты уменьшают утренний остаток, траты из резерва не считаются
+    expect(dayBudget([exp('2026-11-09', 1360), exp('2026-11-10', 500, 'reserve')], DEBTS, ov, '2026-11-10')).toMatchObject({ day: 1100, spentToday: 0, left: 1100 });
+    // воскресенье: завтра — новая неделя со своим лимитом
+    expect(dayBudget([exp('2026-11-15', 300)], DEBTS, ov, '2026-11-15')).toMatchObject({ nextWeek: true, tomorrow: 1280 });
+    // неделя кончилась раньше — на сегодня ноль
+    expect(dayBudget([exp('2026-11-10', 8200), exp('2026-11-12', 100)], DEBTS, ov, '2026-11-12')).toMatchObject({ day: 0, left: -100, exhausted: true, tomorrow: 0 });
   });
   it('какую неделю закрывать', () => {
     expect(weekToClose('2026-10-25', {})).toBe('2026-10-19'); // вс — текущую
