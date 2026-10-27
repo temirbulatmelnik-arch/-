@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { categorize, isNotSpending } from './categorize';
+import { categorize, fixDefaultCategories, isNotSpending } from './categorize';
 import { eventsBetween, estimatePayment, urgency } from './calendar';
 import { addMonths, dayIn, monthsBetween, weekStart } from './dates';
 import { forecast } from './forecast';
@@ -13,7 +13,7 @@ import { mergeSeed, type PlanState } from './planUpdate';
 import { applyExchange, buildExchange, dropChatTwins, normalize, parseExchange, previewExchange, type ExchangeState } from './exchange';
 import { parseStatementText, isIncomeLine } from './pdf';
 import { weekReport, weekToClose } from './weekly';
-import { dayBudget } from './summary';
+import { dayBudget, weekSummary } from './summary';
 import { isWorkday, workdayOnOrBefore } from './workdays';
 import { draft } from './statements';
 import { parseCsv, parseText } from './statements';
@@ -307,19 +307,34 @@ describe('неделя', () => {
     // неделя кончилась раньше — на сегодня ноль
     expect(dayBudget([exp('2026-11-10', 8200), exp('2026-11-12', 100)], DEBTS, ov, '2026-11-12')).toMatchObject({ day: 0, left: -100, exhausted: true, tomorrow: 0 });
   });
+  it('остаток недели совпадает с картой жизни: связь с карты тоже в лимите, анализы из резерва — нет', () => {
+    const exp = (date: string, amount: number, category: Expense['category'], source: Expense['source'] = 'life'): Expense => ({ id: date + amount + category, date, amount, category, source, createdAt: '' });
+    const ov = [{ from: '2026-11-09', to: '2026-11-15', amount: 8000 }];
+    const list = [exp('2026-11-09', 1382.96, 'groceries'), exp('2026-11-10', 893, 'transport'), exp('2026-11-10', 50, 'fixed'), exp('2026-11-10', 8737, 'health', 'reserve')];
+    expect(weekSummary(list, DEBTS, ov, '2026-11-10').left).toBeCloseTo(5674.04, 2);
+    expect(dayBudget(list, DEBTS, ov, '2026-11-10').spentToday).toBe(943);
+  });
+  it('подписи банка: «Транспорт», «Супермаркеты»; разовая правка категорий из выписок', () => {
+    expect(categorize('Транспорт · Транспорт')).toBe('transport');
+    expect(categorize('Іранспорт')).toBe('transport');
+    expect(categorize('MAGAZIN MURINO · Супермаркеты')).toBe('groceries');
+    const e = (note: string, origin: Expense['origin'], category: Expense['category'] = 'fun'): Expense => ({ id: note + origin, date: '2026-10-26', amount: 95, category, note, source: 'life', origin, createdAt: '' });
+    expect(fixDefaultCategories([e('Транспорт · Транспорт', 'text'), e('Транспорт', 'manual'), e('Транспорт', 'chat'), e('Cofix', 'text'), e('Метро', 'ai', 'transport')]).map(x => x.category))
+      .toEqual(['transport', 'fun', 'fun', 'fun', 'transport']);
+  });
   it('какую неделю закрывать', () => {
     expect(weekToClose('2026-10-25', {})).toBe('2026-10-19'); // вс — текущую
     expect(weekToClose('2026-10-26', {})).toBe('2026-10-19'); // пн — прошлую
     expect(weekToClose('2026-10-26', { '2026-10-19': { monday: '2026-10-19', limit: 0, spent: 0, left: 0, transferred: 0, at: '' } })).toBe('2026-10-26');
     expect(weekToClose('2026-10-22', {})).toBe('2026-10-19');
   });
-  it('итог: лимит, траты по категориям, фикс и резерв не считаются', () => {
+  it('итог: всё с карты жизни в лимите, даже обязательные; из резерва — нет', () => {
     const e = (amount: number, category: Expense['category'], source: Expense['source'] = 'life') => ({ id: String(amount), date: '2026-11-03', amount, category, source, createdAt: '' });
     const r = weekReport([e(1000, 'groceries'), e(500, 'taxi'), e(2400, 'fixed'), e(3000, 'health', 'reserve')], DEBTS, [], '2026-11-02');
     expect(r.limit).toBe(10_000);
-    expect(r.spent).toBe(1500);
-    expect(r.left).toBe(8500);
-    expect(r.byCategory.map(c => c.id)).toEqual(['groceries', 'taxi']);
+    expect(r.spent).toBe(3900);
+    expect(r.left).toBe(6100);
+    expect(r.byCategory.map(c => c.id)).toEqual(['fixed', 'groceries', 'taxi']);
   });
 });
 

@@ -7,6 +7,7 @@ import { annuity } from '../domain/calendar';
 import { addDays, monthKey, monthsBetween, today } from '../domain/dates';
 import { setPlanSource, totalDebt, type PlanConfig } from '../domain/plan';
 import { mergeSeed } from '../domain/planUpdate';
+import { fixDefaultCategories } from '../domain/categorize';
 import { dropChatTwins } from '../domain/exchange';
 import type { CalEvent, CardBalance, ChecklistItem, Debt, DebtSnapshot, EventMark, Expense, FixedItem, IncomeTemplate, PlanSeed, ReserveMove, Settings, StrategySection, WeekClosure, WeeklyOverride, WishItem } from '../domain/types';
 
@@ -310,10 +311,11 @@ export const useStore = create<State>()(
     }),
     {
       name: 'kurs',
-      version: 3,
+      version: 4,
       partialize: s => pickData(s),
       // версия 1: обязательные платежи без id — добавляем, остальное новые поля берут значения по умолчанию;
-      // версия 2: файл из чата задваивал траты, уже внесённые под другим названием, — убираем копии один раз
+      // версия 2: файл из чата задваивал траты, уже внесённые под другим названием, — убираем копии один раз;
+      // версия 3: подпись банка «Транспорт» записывалась в «кафе и досуг» — поправляем категорию
       migrate: (persisted, version) => {
         const p = persisted as Partial<Data>;
         let expenses = p.expenses;
@@ -322,6 +324,7 @@ export const useStore = create<State>()(
           expenses = r.expenses;
           cleanedTwins = r.removed.length;
         }
+        if (version < 4 && expenses) expenses = fixDefaultCategories(expenses);
         return { ...p, expenses, fixed: withIds(p.fixed ?? []) } as State;
       },
       merge: (persisted, current) => {

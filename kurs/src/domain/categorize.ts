@@ -5,12 +5,12 @@ import type { CategoryId } from './types';
 /** Порядок важен: BARBER раньше BAR, GOLD APPLE раньше APPLE, доставка раньше кафе */
 const RULES: [CategoryId, string[]][] = [
   ['taxi', ['4121', 'TAXI', 'FASTEN', 'ТАКСИ', 'YANDEX.GO', 'ЯНДЕКС GO', 'ЯНДЕКС ТАКСИ', 'CITYMOBIL', 'СИТИМОБИЛ']],
-  ['transport', ['7299', 'BERIZAR', 'RUNCHARGE', 'WHOOSH', 'URENT', 'METRO', 'МЕТРО', 'BAS_AVTO', 'AVTOBUS', 'АВТОБУС', 'VEST-SERVIS', 'RASP.EL', 'TPP', 'ПОДОРОЖНИК', 'ЭЛЕКТРИЧК', 'ЦППК', 'СЗППК', 'ЮРЕНТ', 'ВУШ']],
+  ['transport', ['РАНСПОРТ', '7299', 'BERIZAR', 'RUNCHARGE', 'WHOOSH', 'URENT', 'METRO', 'МЕТРО', 'BAS_AVTO', 'AVTOBUS', 'АВТОБУС', 'VEST-SERVIS', 'RASP.EL', 'TPP', 'ПОДОРОЖНИК', 'ЭЛЕКТРИЧК', 'ЦППК', 'СЗППК', 'ЮРЕНТ', 'ВУШ']],
   ['beauty', ['GOLD APPLE', 'ЗОЛОТОЕ ЯБЛОКО', 'LETUAL', 'ЛЭТУАЛЬ', 'BARBER', 'БАРБЕР', 'SALON', 'САЛОН', 'ОПТИК', 'OPTIC']],
   ['fun', ['5814*EDA', 'EDA.YANDEX', 'DOSTAVKA', 'ДОСТАВКА', 'YAMIYAMI', 'ЯМИ ЯМИ', 'SAMOKAT', 'САМОКАТ', 'LAVKA', 'ЛАВКА', 'EDARIT', 'KUPER', 'КУПЕР', 'DOSTAEVSKY', 'ДОСТАЕВСКИЙ', 'ЯНДЕКС ЕДА',
     'COFFEE', 'КОФЕ', 'CAFE', 'КАФЕ', 'PUB', 'ПАБ', 'BURGER', 'БУРГЕР', 'VKUSNOITOCHKA', 'ВКУСНО И ТОЧКА', 'SHAVERMA', 'ШАВЕРМ', 'KHACHAPURI', 'ХАЧАПУРИ', 'SUSHI', 'СУШИ',
     'DODO', 'ДОДО', 'DRINKIT', 'PEKARNYA', 'ПЕКАРН', 'RESTORAN', 'РЕСТОРАН', 'HOOKAH', 'КАЛЬЯН', 'BAR', 'БАР', 'КИНО', 'CINEMA', 'TICKET', 'БИЛЕТ']],
-  ['groceries', ['PYATEROCHKA', 'ПЯТЕРОЧКА', 'ПЯТЁРОЧКА', 'MAGNIT', 'МАГНИТ', 'LENTA', 'ЛЕНТА', 'AUCHAN', 'АШАН', 'PEREKRESTOK', 'ПЕРЕКРЕСТОК', 'ПЕРЕКРЁСТОК', 'DIXY', 'ДИКСИ', 'VKUSVILL', 'ВКУСВИЛЛ', 'MAGAZIN', 'МАГАЗИН', 'NEBO', 'ПРОДУКТ', 'SPAR', 'ОКЕЙ', "O'KEY"]],
+  ['groceries', ['СУПЕРМАРКЕТ', 'PYATEROCHKA', 'ПЯТЕРОЧКА', 'ПЯТЁРОЧКА', 'MAGNIT', 'МАГНИТ', 'LENTA', 'ЛЕНТА', 'AUCHAN', 'АШАН', 'PEREKRESTOK', 'ПЕРЕКРЕСТОК', 'ПЕРЕКРЁСТОК', 'DIXY', 'ДИКСИ', 'VKUSVILL', 'ВКУСВИЛЛ', 'MAGAZIN', 'МАГАЗИН', 'NEBO', 'ПРОДУКТ', 'SPAR', 'ОКЕЙ', "O'KEY"]],
   ['tobacco', ['TABAK', 'TOBAK', 'ТАБАК', 'KRASNOE&BELOE', 'КРАСНОЕ&БЕЛОЕ', 'КРАСНОЕ И БЕЛОЕ', 'WINELAB', 'ВИНЛАБ', 'NAPITKI', 'НАПИТКИ', 'GRADUSY', 'ГРАДУСЫ', 'БРИСТОЛЬ', 'ALCO', 'АЛКО']],
   ['health', ['APTEK', 'APTECH', 'АПТЕК', 'FARMA', 'ФАРМА', '5912', 'INTRAMED', 'KLINIK', 'КЛИНИК', 'МЕДИЦ', 'ЗДРАВСИТИ', 'СТОМАТ', 'ДОКТОР']],
   ['shopping', ['OZON', 'ОЗОН', 'WILDBERR', 'ВАЙЛДБЕРР', 'WB*', 'LAMODA', 'ЛАМОДА', 'LIME', 'MARKET', 'МАРКЕТ', 'ЛЕРУА', 'LEROY', 'IKEA', 'ФИКС ПРАЙС', 'FIX PRICE', 'DNS']],
@@ -20,6 +20,16 @@ const RULES: [CategoryId, string[]][] = [
 /** Переводы себе, погашения кредитов, зарплата — не траты */
 const NOT_SPENDING = ['ПЕРЕВОД СЕБЕ', 'МЕЖДУ СВОИМИ', 'МЕЖДУ СЧЕТАМИ', 'МЕЖДУ СЧЕТ', 'ПОГАШЕНИЕ', 'ВНЕСЕНИЕ', 'ПОПОЛНЕНИЕ СЧЕТА', 'ЗАРАБОТН', 'ЗАРПЛАТ', 'АВАНС', 'ПРЕМИЯ',
   'КРЕДИТ', 'НАКОПИТЕЛЬН', 'СБЕРЕГАТЕЛЬН', 'ВОЗВРАТ', 'КЭШБЭК', 'CASHBACK', 'ПРОЦЕНТЫ НА ОСТАТОК'];
+
+/** Записи из выписок, которым категория не нашлась и встала «кафе и досуг» по умолчанию, — по обновлённым шаблонам.
+ *  Подписи банка вроде «Транспорт» раньше не узнавались. Своё и присланное из чата не трогаем. */
+export function fixDefaultCategories<T extends { category: CategoryId; note?: string; origin?: string }>(list: T[]): T[] {
+  return list.map(e => {
+    if (e.category !== 'fun' || !e.note || !e.origin || e.origin === 'manual' || e.origin === 'chat') return e;
+    const c = categorize(e.note);
+    return c && c !== 'fun' ? { ...e, category: c } : e;
+  });
+}
 
 export function categorize(merchant: string): CategoryId | null {
   const s = ` ${merchant.toUpperCase().replace(/Ё/g, 'Е')} `;

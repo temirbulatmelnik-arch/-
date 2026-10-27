@@ -6,7 +6,9 @@ import { checklistDue } from './planUpdate';
 import type { CalEvent, CategoryId, ChecklistItem, Debt, EventMark, Expense, WeeklyOverride, WishItem } from './types';
 
 /** Трата идёт из недельного лимита: с карты жизни и не фиксированный платёж */
-export const countsWeekly = (e: Expense) => e.source !== 'reserve' && e.category !== 'fixed';
+/** В недельный лимит идёт всё, что ушло с карты жизни (и с кредитки), даже связь и подписки: остаток недели — это остаток
+ *  на карте. Не идёт только оплаченное из резерва. */
+export const countsWeekly = (e: Expense) => e.source !== 'reserve';
 
 export interface WeekSummary {
   monday: string;
