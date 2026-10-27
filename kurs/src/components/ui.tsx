@@ -78,8 +78,9 @@ export function Chip({ children, tone = 'neutral', className = '' }: { children:
 
 /* ---------- Лист снизу ---------- */
 
-export function Sheet({ open, onClose, title, subtitle, children, footer }: {
-  open: boolean; onClose: () => void; title: string; subtitle?: ReactNode; children: ReactNode; footer?: ReactNode;
+/** compact — окно не выше трёх четвертей экрана: над ним видно, откуда оно открылось */
+export function Sheet({ open, onClose, title, subtitle, children, footer, compact }: {
+  open: boolean; onClose: () => void; title: string; subtitle?: ReactNode; children: ReactNode; footer?: ReactNode; compact?: boolean;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -96,7 +97,7 @@ export function Sheet({ open, onClose, title, subtitle, children, footer }: {
         <motion.div className="fixed inset-0 z-50 flex items-end justify-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
           <div className="absolute inset-0 bg-black/50 backdrop-blur-[3px]" onClick={onClose} />
           <motion.div role="dialog" aria-modal="true" aria-label={title}
-            className="relative flex max-h-[94dvh] w-full max-w-md flex-col rounded-t-[28px] border-t border-line bg-bg"
+            className={`relative flex w-full max-w-md flex-col rounded-t-[28px] border-t border-line bg-bg ${compact ? 'max-h-[76dvh]' : 'max-h-[94dvh]'}`}
             initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', stiffness: 420, damping: 42 }}>
             <div className="mx-auto mt-2.5 h-1 w-9 rounded-full bg-line" />
             <div className="flex items-start justify-between gap-3 px-5 pt-3 pb-3">

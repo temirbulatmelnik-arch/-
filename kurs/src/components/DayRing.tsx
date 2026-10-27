@@ -1,4 +1,4 @@
-// Кольцо дня на «Неделе»: стеклянный круг над небом сцены, внутри — сколько ещё можно потратить сегодня.
+// Кольцо дня на «Неделе»: стеклянный круг над небом сцены, внутри — сколько ещё можно потратить сегодня; нажатие — траты дня.
 // Трата — дуга тает вместе с числом; перерасход — красная дуга в обратную сторону. Дуга считается от досчитывающегося
 // числа и рисуется атрибутом, а не CSS-переходом: Safari на iPhone не всегда анимирует переходы на элементах SVG.
 import type { CSSProperties } from 'react';
@@ -19,15 +19,15 @@ function Arc({ frac, reverse, stroke }: { frac: number; reverse?: boolean; strok
   );
 }
 
-export function DayRing({ day, left }: { day: number; left: number }) {
+export function DayRing({ day, left, onClick }: { day: number; left: number; onClick: () => void }) {
   const shown = useCountUp(left, 1100, day);
   const over = shown < -0.5;
   const frac = day > 0 ? Math.min(1, Math.max(0, shown / day)) : 0;
   const overFrac = !over ? 0 : day > 0 ? Math.min(1, -shown / day) : 1;
   const ink = over ? 'var(--ring-neg)' : 'var(--ring-ink)';
   return (
-    <div role="img" aria-label={left < 0 ? `Сегодня перерасход ${rub(-left)}` : `На сегодня осталось ${rub(left)} из ${rub(day)}`}
-      className="relative grid size-[140px] shrink-0 place-items-center rounded-full border backdrop-blur-md backdrop-saturate-150 transition-colors duration-700"
+    <button type="button" onClick={onClick} aria-label={`${left < 0 ? `Сегодня перерасход ${rub(-left)}` : `На сегодня осталось ${rub(left)} из ${rub(day)}`}. Траты за сегодня`}
+      className="pointer-events-auto relative grid size-[140px] shrink-0 place-items-center rounded-full border backdrop-blur-md backdrop-saturate-150 transition-[background-color,transform] duration-700 active:scale-[.97]"
       style={{ background: over ? 'var(--glass-over)' : 'var(--glass)', borderColor: 'var(--glass-border)', boxShadow: 'var(--glass-shadow)' }}>
       <svg viewBox="0 0 140 140" className="absolute -inset-px size-[140px]" aria-hidden="true">
         <defs>
@@ -43,6 +43,6 @@ export function DayRing({ day, left }: { day: number; left: number }) {
         <span className="figure text-[25px] leading-none" style={{ color: ink }}>{over && '−'}<Money value={Math.abs(shown)} /></span>
         <span className="text-[11.5px]" style={{ color: over ? 'var(--ring-neg)' : 'var(--ring-label)' }}>{over ? 'сверх лимита' : 'на сегодня'}</span>
       </span>
-    </div>
+    </button>
   );
 }

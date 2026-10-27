@@ -73,6 +73,12 @@
   --ring-1: #2f86a8; --ring-2: #7c8fc0; --ring-3: #f08a62; --ring-track: .5; --ring-over: #d93a16;
   --ring-ink: #0a2433; --ring-label: #3a4e62; --ring-neg: #a8320f;
   --pill: rgba(255, 248, 242, .42); --pill-border: rgba(255, 255, 255, .6);
+  /* стопка карточек «Недели»: сегодня — Нева, платежи — закат, дела — золото, резерв — сумерки */
+  --stack-today: linear-gradient(155deg, #dcedf4, #c9e2ec 70%); --stack-today-line: #b5d3df; --stack-today-kicker: #1f6f8f;
+  --stack-ahead: linear-gradient(155deg, #f6e2db, #eed0c7 70%); --stack-ahead-line: #e2b9ad; --stack-ahead-kicker: #b8401a;
+  --stack-todo: linear-gradient(155deg, #f5ecd6, #ecdcb9 70%); --stack-todo-line: #dcc690; --stack-todo-kicker: #8a5a0c;
+  --stack-money: linear-gradient(155deg, #e4e6f4, #d3d7ee 70%); --stack-money-line: #bcc2e2; --stack-money-kicker: #4b57a0;
+  --stack-shadow: 0 -8px 22px rgba(10, 36, 51, .12);
   color-scheme: light;
 }
 
@@ -118,6 +124,11 @@
   --ring-1: #45a9cb; --ring-2: #a9b8ea; --ring-3: #f08a62; --ring-track: .16; --ring-over: #ff6b3d;
   --ring-ink: #f2f6f8; --ring-label: #b9c6d6; --ring-neg: #ff9a70;
   --pill: rgba(14, 26, 48, .55); --pill-border: rgba(255, 255, 255, .18);
+  --stack-today: linear-gradient(155deg, #1e4c66, #0f2c3d 70%); --stack-today-line: #2a5a75; --stack-today-kicker: #9ed7ea;
+  --stack-ahead: linear-gradient(155deg, #4a2a33, #23192a 70%); --stack-ahead-line: #5a3540; --stack-ahead-kicker: #ff9a70;
+  --stack-todo: linear-gradient(155deg, #41361f, #1e1d20 70%); --stack-todo-line: #54462a; --stack-todo-kicker: #f0b24a;
+  --stack-money: linear-gradient(155deg, #26325a, #131c33 70%); --stack-money-line: #34426e; --stack-money-kicker: #a9b8ea;
+  --stack-shadow: 0 -10px 26px rgba(0, 0, 0, .38);
   color-scheme: dark;
 }
 
@@ -192,6 +203,10 @@ button:disabled { cursor: default; }
 @keyframes sc-fade { from { opacity: 0; } }
 @keyframes sc-lakhta { 0%, 100% { opacity: .3; } 3% { opacity: 1; } 11% { opacity: .3; } }
 @keyframes sc-pop { from { opacity: 0; transform: translateY(-8px) scale(.97); } }
+/* плашка о перерасходе: проявляется из размытия, держится, пока бежит полоска, и растворяется вверх */
+@keyframes sc-pill-in { 0% { opacity: 0; transform: translateY(-16px) scale(.95); filter: blur(8px); } 55% { opacity: 1; filter: blur(0); } 100% { opacity: 1; transform: none; filter: none; } }
+@keyframes sc-pill-out { 0% { opacity: 1; transform: none; filter: none; } 100% { opacity: 0; transform: translateY(-12px) scale(.97); filter: blur(10px); } }
+@keyframes sc-pill-timer { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 .sc-halo { transform-box: fill-box; transform-origin: center; animation: sc-halo 7s ease-in-out infinite; }
 .sc-cloud { transform-box: view-box; animation: sc-cloud 26s ease-in-out infinite alternate; }
 .sc-gull { transform-box: view-box; animation: sc-gull 40s linear infinite; }
@@ -209,6 +224,9 @@ button:disabled { cursor: default; }
 /* огни «Лахты» вспыхивают все вместе, как заградительные огни высоток */
 .sc-lakhta { animation: sc-lakhta 1.6s linear infinite; }
 .sc-pop { animation: sc-pop .6s cubic-bezier(.2, .8, .2, 1) both; }
+.sc-pill-in { animation: sc-pill-in .9s cubic-bezier(.2, .8, .2, 1) both; }
+.sc-pill-out { animation: sc-pill-out .8s cubic-bezier(.5, 0, .75, 0) both; }
+.sc-pill-timer { transform-origin: left center; animation: sc-pill-timer 6.5s linear both; }
 /* солнце и закат — в светлой теме, луна и звёзды — в тёмной */
 .scene-night { display: none; }
 .dark .scene-night { display: inline; }

@@ -1,7 +1,8 @@
-// Итог недели: траты по категориям против лимита и воскресное пополнение карты жизни из резерва до лимита.
+// Итог недели: траты по категориям против лимита, воскресное пополнение карты жизни из резерва до лимита и все траты недели.
 import { FileUp, Undo2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import { ExpenseRow } from '../components/rows';
 import { AmountInput, Bar, CatIcon, Money, PrimaryButton, SecondaryButton, Sheet } from '../components/ui';
 import { addDays, ddmm } from '../domain/dates';
 import { parseAmount } from '../domain/money';
@@ -27,6 +28,7 @@ function Body({ monday }: { monday: string }) {
   const [amount, setAmount] = useState(String(Math.round(r.topUp)));
   const value = parseAmount(amount) ?? 0;
   const max = Math.max(...r.byCategory.map(c => c.spent), 1);
+  const list = useMemo(() => expenses.filter(e => e.date >= monday && e.date <= r.sunday).sort((a, b) => b.date.localeCompare(a.date)), [expenses, monday, r.sunday]);
 
   const close = (topUp: number) => {
     closeWeek({ monday, limit: r.limit, spent: r.spent, left: r.left, transferred: 0, topUp });
@@ -89,6 +91,13 @@ function Body({ monday }: { monday: string }) {
           <PrimaryButton onClick={() => close(value)} disabled={value <= 0}>Долил из резерва</PrimaryButton>
           <button type="button" onClick={() => close(0)} className="w-full py-1 text-[13px] text-muted">Закрыть без пополнения</button>
         </div>
+      )}
+
+      {list.length > 0 && (
+        <section>
+          <div className="mb-2 px-1 text-[13px] text-muted">Все траты недели</div>
+          <div className="card divide-hair overflow-hidden">{list.map(e => <ExpenseRow key={e.id} e={e} onClick={() => set({ week: null, add: { edit: e } })} />)}</div>
+        </section>
       )}
     </div>
   );

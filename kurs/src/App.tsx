@@ -18,6 +18,7 @@ import { updateBadge } from './screens/reminders';
 import { ReserveSheet } from './screens/ReserveSheet';
 import { SettingsSheet } from './screens/Settings';
 import { SyncSheet, UnlockSheet, usePlanUpdates } from './screens/Sync';
+import { TodaySheet } from './screens/TodaySheet';
 import { Week } from './screens/Week';
 import { WeekSheet } from './screens/WeekSheet';
 import { cleanedTwins, useStore } from './store/store';
@@ -101,6 +102,7 @@ export default function App() {
       <ReserveSheet />
       <SettingsSheet />
       <WeekSheet />
+      <TodaySheet />
       <SavingsSheet />
       <CardSheet />
       <FixedSheet />

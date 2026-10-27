@@ -50,6 +50,9 @@ export interface DayBudget {
   nextWeek: boolean;
   /** недельный лимит кончился ещё до сегодняшнего дня */
   exhausted: boolean;
+  /** остаток недели на утро и сколько дней до воскресенья, включая сегодня — из них считается day */
+  morning: number;
+  daysLeft: number;
 }
 
 const floor10 = (n: number) => Math.max(0, Math.floor(n / 10) * 10);
@@ -67,7 +70,7 @@ export function dayBudget(expenses: Expense[], debts: Debt[], overrides: WeeklyO
   const tomorrow = nextWeek
     ? floor10(weeklyLimit(debts, addDays(sunday, 1), overrides) / 7)
     : floor10((morning - spentToday) / (daysLeft - 1));
-  return { day, spentToday, left: day - spentToday, tomorrow, nextWeek, exhausted: morning <= 0 };
+  return { day, spentToday, left: day - spentToday, tomorrow, nextWeek, exhausted: morning <= 0, morning, daysLeft };
 }
 
 export interface CategoryRow {
