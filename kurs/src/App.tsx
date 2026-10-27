@@ -20,8 +20,8 @@ import { SettingsSheet } from './screens/Settings';
 import { SyncSheet, UnlockSheet, usePlanUpdates } from './screens/Sync';
 import { Week } from './screens/Week';
 import { WeekSheet } from './screens/WeekSheet';
-import { useStore } from './store/store';
-import { useUi, type Tab } from './store/ui';
+import { cleanedTwins, useStore } from './store/store';
+import { toast as showToast, useUi, type Tab } from './store/ui';
 
 const TABS: { id: Tab; label: string; icon: ComponentType<{ size?: number; strokeWidth?: number; className?: string }> }[] = [
   { id: 'week', label: 'Неделя', icon: BridgeIcon },
@@ -55,6 +55,7 @@ export default function App() {
   useEffect(() => {
     // просим браузер не вычищать данные при нехватке места
     void navigator.storage?.persist?.().catch(() => {});
+    if (cleanedTwins) showToast(`Убрал повторы трат из чата: ${cleanedTwins}`);
     updateBadge();
     const onVis = () => document.visibilityState === 'visible' && updateBadge();
     document.addEventListener('visibilitychange', onVis);

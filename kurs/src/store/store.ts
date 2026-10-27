@@ -7,6 +7,7 @@ import { annuity } from '../domain/calendar';
 import { addDays, monthKey, monthsBetween, today } from '../domain/dates';
 import { setPlanSource, totalDebt, type PlanConfig } from '../domain/plan';
 import { mergeSeed } from '../domain/planUpdate';
+import { dropChatTwins } from '../domain/exchange';
 import type { CalEvent, CardBalance, ChecklistItem, Debt, DebtSnapshot, EventMark, Expense, FixedItem, IncomeTemplate, PlanSeed, ReserveMove, Settings, StrategySection, WeekClosure, WeeklyOverride, WishItem } from '../domain/types';
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -97,6 +98,9 @@ interface Actions {
 }
 
 export type State = Data & Actions;
+
+/** сколько повторов трат из чата убрало обновление данных — App покажет это сообщением один раз */
+export let cleanedTwins = 0;
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 const nowIso = () => new Date().toISOString();
@@ -306,12 +310,19 @@ export const useStore = create<State>()(
     }),
     {
       name: 'kurs',
-      version: 2,
+      version: 3,
       partialize: s => pickData(s),
-      // версия 1: обязательные платежи без id — добавляем, остальное новые поля берут значения по умолчанию
-      migrate: persisted => {
+      // версия 1: обязательные платежи без id — добавляем, остальное новые поля берут значения по умолчанию;
+      // версия 2: файл из чата задваивал траты, уже внесённые под другим названием, — убираем копии один раз
+      migrate: (persisted, version) => {
         const p = persisted as Partial<Data>;
-        return { ...p, fixed: withIds(p.fixed ?? []) } as State;
+        let expenses = p.expenses;
+        if (version < 3 && expenses) {
+          const r = dropChatTwins(expenses);
+          expenses = r.expenses;
+          cleanedTwins = r.removed.length;
+        }
+        return { ...p, expenses, fixed: withIds(p.fixed ?? []) } as State;
       },
       merge: (persisted, current) => {
         const p = persisted as Partial<Data> | undefined;

@@ -495,10 +495,30 @@ const SOURCES: Source[] = ['life', 'reserve', 'credit'];
 const SOURCE_NAME: Record<Source, string> = { life: 'карта жизни', reserve: 'резерв', credit: 'кредитка' };
 const catName = (c: string) => CATEGORY[c as CategoryId]?.short ?? c;
 
+/** Одна и та же трата: та же дата и сумма. Продавца и категорию банк, приложение и чат пишут по-разному. */
+const sameSpend = (a: { date: string; amount: number }, b: { date?: string; amount?: number }) =>
+  a.date === b.date && b.amount != null && Math.abs(a.amount - b.amount) < 1;
+
+/** Повторы, которые раньше добавлял файл из чата: трата из чата и трата с той же датой и суммой, внесённые в разное время.
+ *  Остаётся более ранняя; две одинаковые траты из одного файла (две поездки по 95 ₽) не трогаются. */
+export function dropChatTwins(expenses: Expense[]): { expenses: Expense[]; removed: Expense[] } {
+  const kept: Expense[] = [];
+  const removed: Expense[] = [];
+  const matched = new Set<string>();
+  for (const e of [...expenses].sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? ''))) {
+    const twin = kept.find(t => !matched.has(t.id) && sameSpend(t, e) && (t.origin === 'chat' || e.origin === 'chat') && (t.createdAt ?? '') < (e.createdAt ?? ''));
+    if (twin) { matched.add(twin.id); removed.push(e); } else kept.push(e);
+  }
+  const drop = new Set(removed.map(e => e.id));
+  return { expenses: expenses.filter(e => !drop.has(e.id)), removed };
+}
+
 const stepExpenses: Step = (f, s, ctx) => {
   const lines: string[] = [];
   if (!f.expenses) return { lines, patch: {} };
   let list = [...s.expenses];
+  // каждая трата приложения закрывает одну строку файла: две поездки по 95 ₽ в файле при одной в приложении — одна новая
+  const matched = new Set<string>();
   const validCat = (c?: string): c is CategoryId => !!c && c in CATEGORY;
   for (const p of f.expenses) {
     const i = p.id ? list.findIndex(x => x.id === p.id) : -1;
@@ -508,6 +528,7 @@ const stepExpenses: Step = (f, s, ctx) => {
     }
     if (i >= 0) {
       const cur = list[i];
+      matched.add(cur.id);
       const changes: string[] = [];
       const next: Expense = { ...cur };
       if (isNum(p.amount) && Math.abs(p.amount - cur.amount) >= 0.01) { changes.push(arrow(money(cur.amount), money(p.amount))); next.amount = p.amount; }
@@ -519,8 +540,8 @@ const stepExpenses: Step = (f, s, ctx) => {
       continue;
     }
     if (!isDate(p.date) || !isNum(p.amount) || p.amount <= 0) continue;
-    const dup = list.some(x => x.date === p.date && Math.abs(x.amount - p.amount!) < 1 && ((x.note ?? '') === (p.note ?? '') || x.category === p.category));
-    if (dup) { lines.push(`Уже есть: ${ddmm(p.date)} ${p.note || catName(p.category ?? '')}, ${money(p.amount)}`); continue; }
+    const twin = s.expenses.find(x => !matched.has(x.id) && sameSpend(x, p));
+    if (twin) { matched.add(twin.id); lines.push(`Уже есть: ${ddmm(p.date)} ${twin.note || catName(twin.category)}, ${money(p.amount)}`); continue; }
     const category: CategoryId = validCat(p.category) ? p.category : (p.note && categorize(p.note)) || 'shopping';
     list.push({
       id: ctx.newId(), date: p.date, amount: p.amount, category, ...(p.note ? { note: p.note } : {}),
@@ -617,7 +638,8 @@ function run(f: ExchangeFile, s: ExchangeState, now: string, only: Set<SectionId
   for (const [id, title, step] of STEPS) {
     if (only && !only.has(id)) continue;
     const r = step(f, state, ctx);
-    if (r.lines.length) sections.push({ id, title, lines: r.lines });
+    // раздел, где всё уже есть в приложении, не показываем: менять в нём нечего
+    if (r.lines.some(l => !l.startsWith('Уже есть'))) sections.push({ id, title, lines: r.lines });
     Object.assign(patch, r.patch);
     state = { ...state, ...r.patch };
   }

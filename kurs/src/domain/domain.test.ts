@@ -10,7 +10,7 @@ import { categoryLimit, currentPhase, DEFAULT_PLAN, setPlanSource, splitBonus, t
 import { fromAi, fromDrafts } from './proposals';
 import { cashFlow, dailyLevels } from './cashflow';
 import { mergeSeed, type PlanState } from './planUpdate';
-import { applyExchange, buildExchange, normalize, parseExchange, previewExchange, type ExchangeState } from './exchange';
+import { applyExchange, buildExchange, dropChatTwins, normalize, parseExchange, previewExchange, type ExchangeState } from './exchange';
 import { parseStatementText, isIncomeLine } from './pdf';
 import { weekReport, weekToClose } from './weekly';
 import { dayBudget } from './summary';
@@ -469,6 +469,38 @@ describe('файл обмена с чатом', () => {
     expect(patch.marks!.gift).toMatchObject({ done: true, amount: 15_000 });
   });
 
+  it('трата из чата, уже внесённая под другим названием и категорией, — повтор; две одинаковые поездки — нет', () => {
+    const s0: ExchangeState = { ...base, expenses: [
+      { id: 'm1', date: '2026-11-03', amount: 420, category: 'fun', note: 'VKUSNO I TOCHKA', source: 'life', createdAt: '' },
+      { id: 'm2', date: '2026-11-03', amount: 95, category: 'taxi', source: 'life', createdAt: '' },
+    ] };
+    const f = normalize(parseExchange(JSON.stringify({ app: 'kurs-exchange', version: 2, expenses: [
+      { date: '2026-11-03', amount: 420, category: 'work', note: 'Фастфуд, обед' },
+      { date: '2026-11-03', amount: 95, category: 'transport', note: 'Метро' },
+      { date: '2026-11-03', amount: 95, category: 'transport', note: 'Метро' },
+    ] }))!, s0);
+    const lines = previewExchange(f, s0, NOW).find(x => x.id === 'expenses')!.lines;
+    expect(lines.filter(l => l.startsWith('Уже есть'))).toHaveLength(2);
+    const patch = applyExchange(f, s0, NOW, new Set(['expenses' as const]), id);
+    expect(patch.expenses!.filter(e => e.date === '2026-11-03').map(e => e.amount).sort()).toEqual([420, 95, 95].sort());
+    // только повторы — нового ничего
+    const same = normalize(parseExchange(JSON.stringify({ app: 'kurs-exchange', version: 2, expenses: [{ date: '2026-11-03', amount: 420, category: 'work', note: 'Обед' }] }))!, s0);
+    expect(previewExchange(same, s0, NOW)).toEqual([]);
+  });
+  it('разовая чистка: копии, которые добавил файл из чата, уходят; одинаковые траты из одного файла остаются', () => {
+    const e = (id: string, amount: number, origin: 'manual' | 'chat' | 'ai', createdAt: string, date = '2026-10-27'): Expense =>
+      ({ id, date, amount, category: 'transport', source: 'life', origin, createdAt });
+    const { expenses, removed } = dropChatTwins([
+      e('a', 420, 'manual', '2026-10-27T09:00'), e('b', 95, 'ai', '2026-10-27T09:00'),
+      e('c', 420, 'chat', '2026-10-27T12:00'), e('d', 95, 'chat', '2026-10-27T12:00'),
+      // вторая поездка из того же файла чата — настоящая
+      e('f', 95, 'chat', '2026-10-27T12:00'),
+      // одинаковые ручные траты — решение человека, не трогаем
+      e('g', 300, 'manual', '2026-10-26T10:00', '2026-10-26'), e('h', 300, 'manual', '2026-10-26T11:00', '2026-10-26'),
+    ]);
+    expect(removed.map(x => x.id).sort()).toEqual(['c', 'd']);
+    expect(expenses.map(x => x.id)).toEqual(['a', 'b', 'f', 'g', 'h']);
+  });
   it('применяется только выбранное', () => {
     const f = normalize(parseExchange(JSON.stringify({ app: 'kurs-exchange', version: 2, reserve: 1, expenses: [{ id: 'e2', delete: true }] }))!, base);
     const patch = applyExchange(f, base, NOW, new Set(['expenses']), id);
