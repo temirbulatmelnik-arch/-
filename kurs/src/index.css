@@ -220,6 +220,10 @@ button:disabled { cursor: default; }
 .sc-wave { animation: sc-wave 4.5s linear infinite; }
 .sc-ring { animation: sc-ring .8s ease-out both; }
 .sc-draw { stroke-dasharray: 1; animation: sc-draw 1.6s .4s cubic-bezier(.4, 0, .2, 1) both; }
+/* линия денег под календарём: проявляется, полоса прокрутки скрыта */
+.sc-draw-line { animation: sc-fade .9s .15s ease-out both; }
+.hs { scrollbar-width: none; }
+.hs::-webkit-scrollbar { display: none; }
 .sc-fade { animation: sc-fade 1s .8s ease-out both; }
 /* огни «Лахты» вспыхивают все вместе, как заградительные огни высоток */
 .sc-lakhta { animation: sc-lakhta 1.6s linear infinite; }

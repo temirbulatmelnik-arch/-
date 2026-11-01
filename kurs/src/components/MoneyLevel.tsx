@@ -1,8 +1,8 @@
 // Месяц на «Платежах»: каждый день наполняется водой по деньгам на карте и в резерве,
 // под календарём — одна линия уровня с выводом словами. Одни данные, два взгляда.
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { LOW_WATER } from '../domain/cashflow';
-import { fromKey, lastDay } from '../domain/dates';
+import { fromKey, weekday } from '../domain/dates';
 import { num } from '../domain/money';
 import { isWorkday } from '../domain/workdays';
 
@@ -85,84 +85,106 @@ export function MonthGrid({ month, days, top, now, selected, onSelect, onSwipe }
   );
 }
 
-function useWidth<T extends HTMLElement>() {
-  const ref = useRef<T>(null);
-  const [w, setW] = useState(358);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([e]) => setW(Math.round(e.contentRect.width)));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  return [ref, w] as const;
-}
+/** Линия денег по дням: крупно, около шести дней на экране, остальное листается вбок. Между днями — плавные
+ *  S-образные переходы с горизонтальными касательными в центре дня (без ступенек и без ложных выбросов). Ниже нуля —
+ *  кредит: линия и заливка красные; ниже подушки 30 000 — оранжевые. */
+const DW = 56, H = 200, TOP = 26, BOTTOM = 150;
 
-/** Линия уровня денег по дням: ступенька — день; оранжевым — ниже запаса; точка — самое низкое место */
-export function LevelChart({ month, days, top, selected, onSelect }: {
+export function LevelChart({ days, selected, onSelect }: {
   month: string; days: DayMoney[]; top: number; selected: string; onSelect: (d: string) => void;
 }) {
-  const [ref, W] = useWidth<HTMLDivElement>();
-  const N = lastDay(month), BASE = 52, H = 46, bw = W / N;
-  const y = (v: number) => +(BASE - (Math.max(0, v) / (top || 1)) * H).toFixed(1);
-  const x0 = (n: number) => +((n - 1) * bw).toFixed(1);
-  const cx = (n: number) => +((n - 0.5) * bw).toFixed(1);
+  const scroller = useRef<HTMLDivElement>(null);
   const known = days.filter(d => d.total != null) as (DayMoney & { total: number })[];
-  if (!known.length) return null;
+  const max = Math.max(LOW_WATER * 1.3, ...known.map(d => d.total));
+  const min = Math.min(0, ...known.map(d => d.total));
+  // одна ось от минимума до максимума: ноль — где выпадет, минус виден в том же масштабе, что и плюс
+  const y = (v: number) => +(BOTTOM - ((v - min) / (max - min || 1)) * (BOTTOM - TOP)).toFixed(1);
+  const BASE = y(0);
+  const cx = (i: number) => i * DW + DW / 2;
+  const W = days.length * DW;
+  const idx = new Map(days.map((d, i) => [d.date, i]));
+  const sel = idx.get(selected) ?? -1;
 
-  const first = Number(known[0].date.slice(8));
-  let line = `M${x0(first)} ${y(known[0].total)}`;
-  known.forEach((d, i) => {
-    const n = Number(d.date.slice(8));
-    if (i) line += ` V${y(d.total)}`;
-    line += ` H${x0(n + 1)}`;
-  });
-  const area = `${line} V${BASE} H${x0(first)} Z`;
-  const low = known.filter(d => d.total < LOW_WATER).map(d => `M${x0(Number(d.date.slice(8)))} ${y(d.total)} H${x0(Number(d.date.slice(8)) + 1)}`).join(' ');
-  const ahead = known.filter(d => !d.past);
-  const min = (ahead.length ? ahead : known).reduce((m, d) => (d.total < m.total ? d : m), (ahead.length ? ahead : known)[0]);
-  const tri = (d: DayMoney) => {
-    const c = cx(Number(d.date.slice(8)));
-    const both = d.out > 0 && d.in > 0;
-    return {
-      out: d.out > 0 ? `M${c - (both ? 6 : 2.5)} 56 h5 l-2.5 5 Z` : '',
-      in: d.in > 0 ? `M${c + (both ? 1 : -2.5)} 61 h5 l-2.5 -5 Z` : '',
-    };
-  };
-  const rug = days.map(tri);
-  const sel = days.find(d => d.date === selected);
-  const ticks = [1, 10, 20, N];
+  // к выбранному дню (и при открытии) — плавно подъезжаем, он оказывается по центру
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el || sel < 0) return;
+    const to = Math.max(0, cx(sel) - el.clientWidth / 2);
+    if (Math.abs(el.scrollLeft - to) > 2) el.scrollTo({ left: to, behavior: el.dataset.ready ? 'smooth' : 'auto' });
+    el.dataset.ready = '1';
+  }, [sel]);
+
+  if (!known.length) return null;
+  const pts = known.map(d => [cx(idx.get(d.date)!), y(d.total)] as const);
+  let line = `M${pts[0][0] - DW / 2} ${pts[0][1]} L${pts[0][0]} ${pts[0][1]}`;
+  for (let i = 1; i < pts.length; i++) {
+    const [x1, y1] = pts[i - 1], [x2, y2] = pts[i], k = (x2 - x1) * 0.5;
+    line += ` C${x1 + k} ${y1} ${x2 - k} ${y2} ${x2} ${y2}`;
+  }
+  const last = pts[pts.length - 1];
+  line += ` L${last[0] + DW / 2} ${last[1]}`;
+  const area = `${line} V${BASE} H${pts[0][0] - DW / 2} Z`;
+  const lowY = y(LOW_WATER);
+  const s = sel >= 0 ? days[sel] : undefined;
+  const sx = sel >= 0 ? cx(sel) : 0, sy = s?.total != null ? y(s.total) : BASE;
+  const tone = (v: number) => (v < 0 ? 'var(--neg)' : v < LOW_WATER ? 'var(--warn)' : 'var(--sea)');
 
   return (
-    <div ref={ref} className="relative h-[78px]">
-      <svg width={W} height="78" className="absolute inset-0 overflow-visible" aria-hidden="true">
-        <defs>
-          <linearGradient id="lvl-area" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" style={{ stopColor: 'var(--sea)', stopOpacity: 0.26 }} /><stop offset="1" style={{ stopColor: 'var(--sea)', stopOpacity: 0.05 }} />
-          </linearGradient>
-        </defs>
-        <path className="sc-fade" d={area} fill="url(#lvl-area)" />
-        <path d={`M0 ${y(LOW_WATER)} H${W}`} strokeWidth="1" style={{ stroke: 'var(--mark-out)' }} opacity=".35" />
-        <text x="2" y={y(LOW_WATER) - 3} fontSize="10" style={{ fill: 'var(--muted)' }}>{num(LOW_WATER)}</text>
-        <path className="sc-draw" pathLength={1} d={line} fill="none" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" style={{ stroke: 'var(--sea)' }} />
-        {low && <path className="sc-fade" d={low} fill="none" strokeWidth="2.4" strokeLinecap="round" style={{ stroke: 'var(--mark-out)' }} />}
-        <path d={`M0 ${BASE + 0.5} H${W}`} strokeWidth="1" style={{ stroke: 'var(--faint)' }} />
-        <path d={rug.map(r => r.out).join(' ')} style={{ fill: 'var(--mark-out)' }} />
-        <path d={rug.map(r => r.in).join(' ')} style={{ fill: 'var(--mark-in)' }} />
-        {ticks.map(t => <text key={t} x={cx(t)} y="76" textAnchor="middle" fontSize="10.5" style={{ fill: 'var(--muted)' }}>{t}</text>)}
-        <circle className="sc-fade" cx={cx(Number(min.date.slice(8)))} cy={y(min.total)} r="4" strokeWidth="2" style={{ fill: 'var(--mark-out)', stroke: 'var(--bg)' }} />
-        {sel?.total != null && (
-          <g style={{ transform: `translateX(${cx(Number(sel.date.slice(8)))}px)`, transition: 'transform .45s cubic-bezier(.3,.8,.3,1)' }}>
-            <path d="M0 2 V52" strokeWidth="1" opacity=".45" style={{ stroke: 'var(--ink)' }} />
-            <circle cx="0" cy={y(sel.total)} r="4.5" strokeWidth="2" style={{ fill: sel.total < LOW_WATER ? 'var(--mark-out)' : 'var(--sea)', stroke: 'var(--bg)' }} />
+    <div ref={scroller} className="hs -mx-4 overflow-x-auto overscroll-x-contain" style={{ scrollSnapType: 'x proximity' }}>
+      <div className="relative" style={{ width: W + 32, height: H, paddingLeft: 16 }}>
+        <svg width={W} height={H} className="absolute top-0 left-4 overflow-visible" aria-hidden="true">
+          <defs>
+            <linearGradient id="lvl-up" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" style={{ stopColor: 'var(--sea)', stopOpacity: 0.42 }} /><stop offset="1" style={{ stopColor: 'var(--sea)', stopOpacity: 0.04 }} />
+            </linearGradient>
+            <linearGradient id="lvl-dn" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" style={{ stopColor: 'var(--neg)', stopOpacity: 0.1 }} /><stop offset="1" style={{ stopColor: 'var(--neg)', stopOpacity: 0.5 }} />
+            </linearGradient>
+            <clipPath id="lvl-above"><rect x="-40" y="-40" width={W + 80} height={BASE + 40} /></clipPath>
+            <clipPath id="lvl-below"><rect x="-40" y={BASE} width={W + 80} height={H - BASE} /></clipPath>
+            <clipPath id="lvl-cushion"><rect x="-40" y="-40" width={W + 80} height={lowY + 40} /></clipPath>
+            <clipPath id="lvl-low"><rect x="-40" y={lowY} width={W + 80} height={BASE - lowY} /></clipPath>
+          </defs>
+          {days.map((d, i) => fromKey(d.date).getDay() === 0 && <rect key={d.date} x={i * DW} y="0" width={DW} height={H} rx="14" style={{ fill: 'var(--surface)' }} opacity=".55" />)}
+          {sel >= 0 && <rect x={sel * DW + 3} y="0" width={DW - 6} height={H} rx="16" style={{ fill: 'var(--sea)' }} opacity=".12" />}
+          <path d={`M0 ${lowY} H${W}`} strokeDasharray="4 5" strokeWidth="1" style={{ stroke: 'var(--warn)' }} opacity=".55" />
+          <path className="sc-fade" d={area} fill="url(#lvl-up)" clipPath="url(#lvl-above)" />
+          <path className="sc-fade" d={area} fill="url(#lvl-dn)" clipPath="url(#lvl-below)" />
+          <path d={`M0 ${BASE} H${W}`} strokeWidth="1.2" style={{ stroke: 'var(--ink)' }} opacity=".35" />
+          <g className="sc-draw-line">
+            <path d={line} fill="none" strokeWidth="2.6" strokeLinecap="round" clipPath="url(#lvl-cushion)" style={{ stroke: 'var(--sea)' }} />
+            <path d={line} fill="none" strokeWidth="2.8" strokeLinecap="round" clipPath="url(#lvl-low)" style={{ stroke: 'var(--warn)' }} />
+            <path d={line} fill="none" strokeWidth="3" strokeLinecap="round" clipPath="url(#lvl-below)" style={{ stroke: 'var(--neg)' }} />
           </g>
+          {min < 0 && <text x="6" y={Math.min(BOTTOM, BASE + 15)} fontSize="10.5" style={{ fill: 'var(--neg)' }}>ниже нуля — кредит</text>}
+          <text x="6" y={lowY - 5} fontSize="10.5" style={{ fill: 'var(--warn)' }}>{num(LOW_WATER)}</text>
+          {days.map((d, i) => (
+            <g key={d.date} transform={`translate(${cx(i)} 0)`}>
+              {d.out > 0 && <path d={`M${d.in > 0 ? -7 : -3} ${BOTTOM + 8} h6 l-3 6 Z`} style={{ fill: 'var(--mark-out)' }} />}
+              {d.in > 0 && <path d={`M${d.out > 0 ? 1 : -3} ${BOTTOM + 14} h6 l-3 -6 Z`} style={{ fill: 'var(--mark-in)' }} />}
+              <text y={H - 22} textAnchor="middle" fontSize="15" fontWeight={i === sel ? 600 : 400} style={{ fill: i === sel ? 'var(--ink)' : 'var(--muted)', fontFamily: 'var(--font-display)' }}>{Number(d.date.slice(8))}</text>
+              <text y={H - 6} textAnchor="middle" fontSize="10.5" style={{ fill: fromKey(d.date).getDay() === 0 ? 'var(--neg)' : 'var(--faint)' }}>{weekday(d.date)}</text>
+            </g>
+          ))}
+          {s?.total != null && (
+            <g style={{ transform: `translateX(${sx}px)`, transition: 'transform .45s cubic-bezier(.3,.8,.3,1)' }}>
+              <path d={`M0 ${sy + 6} V${BOTTOM}`} strokeWidth="1" opacity=".4" style={{ stroke: 'var(--ink)' }} />
+              <circle cy={sy} r="6" strokeWidth="2.5" style={{ fill: tone(s.total), stroke: 'var(--bg)' }} />
+            </g>
+          )}
+        </svg>
+        {s?.total != null && (
+          <div className="pointer-events-none absolute rounded-xl border border-line bg-surface px-2.5 py-1 text-[12.5px] font-medium whitespace-nowrap shadow-sm transition-[left,top] duration-500"
+            style={{ left: 16 + Math.min(Math.max(sx - 56, 0), W - 112), top: Math.max(0, sy - 40), color: tone(s.total) }}>
+            {s.total < 0 ? '−' : ''}{num(Math.abs(s.total))} ₽
+          </div>
         )}
-      </svg>
-      <div className="absolute inset-x-0 top-0 flex h-[62px]">
-        {days.map(d => (
-          <button key={d.date} type="button" onClick={() => onSelect(d.date)} className="h-full flex-1"
-            aria-label={`${Number(d.date.slice(8))}-е${d.total != null ? `: ${num(d.total)} ₽` : ''}`} />
-        ))}
+        <div className="absolute top-0 left-4 flex" style={{ height: H }}>
+          {days.map(d => (
+            <button key={d.date} type="button" onClick={() => onSelect(d.date)} className="h-full" style={{ width: DW, scrollSnapAlign: 'center' }}
+              aria-label={`${Number(d.date.slice(8))}-е${d.total != null ? `: ${num(d.total)} ₽` : ''}`} />
+          ))}
+        </div>
       </div>
     </div>
   );
