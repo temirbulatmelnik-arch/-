@@ -18,6 +18,7 @@ import { updateBadge } from './screens/reminders';
 import { ReserveSheet } from './screens/ReserveSheet';
 import { SettingsSheet } from './screens/Settings';
 import { SyncSheet, UnlockSheet, useInbox, usePlanUpdates } from './screens/Sync';
+import { CheckupSheet, useSundayCheckup } from './screens/Checkup';
 import { TodaySheet } from './screens/TodaySheet';
 import { Week } from './screens/Week';
 import { WeekSheet } from './screens/WeekSheet';
@@ -51,6 +52,7 @@ export default function App() {
   useTheme();
   usePlanUpdates();
   useInbox();
+  useSundayCheckup();
   const ready = useStore(s => s.ready);
   const { tab, setTab, toast, set } = useUi();
 
@@ -95,6 +97,7 @@ export default function App() {
         </div>
       </nav>
 
+      <CheckupSheet />
       <AddExpenseSheet />
       <ImportSheet />
       <EventSheet />

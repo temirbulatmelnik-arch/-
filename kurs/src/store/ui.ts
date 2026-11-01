@@ -4,7 +4,7 @@ import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 import type { CalendarInput } from '../domain/calendar';
 import { today } from '../domain/dates';
-import type { CalEvent, CategoryId, Expense } from '../domain/types';
+import type { CalEvent, CategoryId, Expense, Source } from '../domain/types';
 import { useStore } from './store';
 
 export type Tab = 'week' | 'payments' | 'plan' | 'budget';
@@ -15,6 +15,9 @@ export interface AddPrefill {
   category?: CategoryId;
   note?: string;
   wishId?: string;
+  source?: Source;
+  date?: string;
+  creditCard?: string;
   /** редактирование существующей траты */
   edit?: Expense;
 }
@@ -51,6 +54,8 @@ interface Ui {
   inbox: { id: string; text: string } | null;
   /** окно трат за сегодня (нажатие на кольцо дня) */
   today: boolean;
+  /** воскресная сверка с банком: понедельник закрываемой недели */
+  checkup: string | null;
   /** раскрытая карточка в стопке «Недели»; null — выбрать по обстановке */
   stackOpen: string | null;
   toast: string | null;
@@ -60,7 +65,7 @@ interface Ui {
 
 export const useUi = create<Ui>()(set => ({
   tab: 'week', add: null, scan: false, settings: false, event: null, bonus: null, debt: null, reserve: false,
-  week: null, savings: false, sync: false, fixed: false, card: false, unlock: false, planView: 'debts', focus: null, settingsFocus: null, inbox: null, today: false, stackOpen: null, toast: null,
+  week: null, savings: false, sync: false, fixed: false, card: false, unlock: false, planView: 'debts', focus: null, settingsFocus: null, inbox: null, checkup: null, today: false, stackOpen: null, toast: null,
   setTab: tab => { set({ tab }); window.scrollTo({ top: 0 }); },
   set: p => set(p),
 }));

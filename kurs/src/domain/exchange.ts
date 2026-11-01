@@ -3,6 +3,7 @@
 // но только с изменениями. Списки с id/key — «добавить или изменить», удаление — только явное "delete": true.
 // Перед применением приложение показывает разницу по разделам; присланное без изменений ничего не трогает.
 import { bridgeState, weekMoney, type Bridge } from './bridge';
+import { ledger, type Checkup } from './ledger';
 import { coverage } from './coverage';
 import { PROTOCOL_VERSION } from './sync';
 import { eventsBetween, type CalendarInput } from './calendar';
@@ -12,7 +13,7 @@ import { rub } from './money';
 import { CATEGORIES, CATEGORY, currentPhase, DEFAULT_PLAN, reserveNeed, totalDebt, type BonusRule, type PlanConfig } from './plan';
 import { weekSummary } from './summary';
 import type {
-  CalEvent, CardBalance, CategoryId, ChecklistItem, Debt, DebtKind, EventMark, Expense, FixedItem, IncomeTemplate, Phase, Source,
+  CalEvent, CardBalance, CategoryId, ChecklistItem, Debt, DebtKind, EventMark, Expense, FixedItem, IncomeTemplate, Phase, ReserveMove, Source,
   StrategySection, WeekClosure, WeeklyOverride,
 } from './types';
 
@@ -34,6 +35,8 @@ export interface ExchangeState extends CalendarInput {
   strategy: StrategySection[];
   rules: string[];
   closures: Record<string, WeekClosure>;
+  checkups?: Checkup[];
+  reserveLog?: ReserveMove[];
 }
 
 type Del = { delete?: boolean };
@@ -51,6 +54,8 @@ export interface ExchangeFile {
   about?: string;
   /** сводка из приложения — только для чтения, при загрузке не применяется */
   status?: Record<string, unknown>;
+  /** воскресные сверки с банком — только из приложения */
+  checkups?: { date: string; monday: string; expected: Checkup['expected']; actual: Checkup['actual']; topUp: number; toReserve: number }[];
   limits?: {
     /** особые недельные лимиты на периоды — полный список */
     weekly?: WeeklyOverride[];
@@ -118,7 +123,8 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
   const phase = currentPhase(s.debts, now);
   const need = reserveNeed(now, s.debts);
   const from = addDays(now, short ? -14 : -EXPENSE_DAYS);
-  const cov = coverage({ cal: s, marks: s.marks, reserve: s.reserve, debts: s.debts, expenses: s.expenses, bridge: s.bridge }, now);
+  const led = ledger({ checkups: s.checkups ?? [], cardBalance: s.cardBalance, reserve: s.reserve, reserveLog: s.reserveLog ?? [], marks: s.marks, expenses: s.expenses, oneOff: s.oneOff, debts: s.debts, bridge: s.bridge ?? null });
+  const cov = coverage({ cal: s, marks: s.marks, reserve: led.reserve + led.incomeOnCard, debts: s.debts, expenses: s.expenses, bridge: s.bridge }, now);
   // окно −45…+75 дней и, дальше него, всё, что поправлено в приложении вручную: точные суммы и даты будущих платежей;
   // воскресные пополнения карты — только прошедшие и ближайшее, чтобы сверить их с переводами из резерва
   const calendar = short
@@ -137,6 +143,10 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
         to: cov.to, ...(cov.min ? { min: r0(cov.min.balance), minDate: cov.min.date, minTitle: cov.min.title } : {}),
         ...(cov.shortage ? { shortage: { date: cov.shortage.date, amount: r0(cov.shortage.amount), title: cov.shortage.title } } : {}),
         narrow: cov.narrow.map(n => ({ date: n.date, title: n.title, left: r0(n.balance) })),
+      },
+      ledger: {
+        card: led.card == null ? null : r0(led.card), reserve: r0(led.reserve), credit: led.credit == null ? null : r0(led.credit),
+        incomeOnCard: r0(led.incomeOnCard), ...(led.cardFrom ? { since: led.cardFrom.date } : {}),
       },
     },
     limits: { weekly: s.weeklyOverrides, phases: plan.phases, categories: plan.categories, bonusRules: plan.bonusRules ?? {}, shortfall: plan.shortfallOverrides ?? {} },
@@ -169,6 +179,7 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
     weeks: Object.values(s.closures).sort((a, b) => b.monday.localeCompare(a.monday)).slice(0, short ? 4 : 8)
       .map(w => ({ monday: w.monday, ...weekFields(s, w.monday), ...(w.topUp ? { topUp: r0(w.topUp) } : {}), ...(w.transferred ? { transferred: r0(w.transferred) } : {}) })),
     bridge: bridgeOut(s),
+    ...((s.checkups ?? []).length ? { checkups: s.checkups!.slice(-4).map(c => ({ date: c.date, monday: c.monday, expected: c.expected, actual: c.actual, topUp: c.topUp, toReserve: c.toReserve })) } : {}),
     checklist: s.checklist.map(c => ({ ...c, done: s.checks[c.id]?.done ?? !!c.done })),
     ...(short ? {} : { strategy: s.strategy, rules: s.rules }),
   };

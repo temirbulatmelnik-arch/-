@@ -69,8 +69,8 @@ function useOverPill(left: number, alert: boolean) {
 export function Week() {
   const now = useToday();
   const cal = useCal();
-  const [expenses, debts, marks, wishes, reserve, settings, overrides, startTotal, closures, checklist, checks, toggleCheck, bridge] = useStore(useShallow(s => [
-    s.expenses, s.debts, s.marks, s.wishes, s.reserve, s.settings, s.weeklyOverrides, s.planTrajectory[0]?.[1] ?? 0, s.closures, s.checklist, s.checks, s.toggleCheck, s.bridge,
+  const [expenses, debts, marks, wishes, reserve, settings, overrides, startTotal, closures, checklist, checks, toggleCheck, bridge, checkups] = useStore(useShallow(s => [
+    s.expenses, s.debts, s.marks, s.wishes, s.reserve, s.settings, s.weeklyOverrides, s.planTrajectory[0]?.[1] ?? 0, s.closures, s.checklist, s.checks, s.toggleCheck, s.bridge, s.checkups,
   ] as const));
   const ui = useUi();
   const week = useMemo(() => weekSummary(expenses, debts, overrides, now), [expenses, debts, overrides, now]);
@@ -93,9 +93,11 @@ export function Week() {
   const topped = closures[week.monday]?.topUp;
 
   // в выходные и в начале недели — предложить закрыть неделю
-  const closeMonday = weekToClose(now, closures);
+  // неделя считается закрытой, когда сохранена сверка с банком (или закрыта по-старому)
+  const done = useMemo(() => ({ ...closures, ...Object.fromEntries(checkups.map(c => [c.monday, c])) }) as typeof closures, [closures, checkups]);
+  const closeMonday = weekToClose(now, done);
   const dow = fromKey(now).getDay();
-  const offerClose = !closures[closeMonday] && (dow === 0 || dow === 6 || closeMonday < week.monday);
+  const offerClose = !done[closeMonday] && (dow === 0 || dow === 6 || closeMonday < week.monday);
   const closing = useMemo(() => (offerClose ? weekReport(expenses, debts, overrides, closeMonday, bridge) : null), [offerClose, expenses, debts, overrides, closeMonday, bridge]);
 
   // платежи: просроченные и на 3 дня — из предупреждений, плюс всё неотмеченное на неделю вперёд
@@ -111,7 +113,7 @@ export function Week() {
 
   const todoAlerts = list.filter(a => a.action !== 'pay' && a.action !== 'wish');
   const todoCount = (closing ? 1 : 0) + todoAlerts.length + pending.length;
-  const todoFirst = closing ? `Закрыть неделю ${ddmm(closeMonday)}–${ddmm(addDays(closeMonday, 6))}` : todoAlerts[0]?.title ?? (pending[0] ? `Пауза 48 часов: ${pending[0].title}` : null);
+  const todoFirst = closing ? `Сверка с банком за ${ddmm(closeMonday)}–${ddmm(addDays(closeMonday, 6))}` : todoAlerts[0]?.title ?? (pending[0] ? `Пауза 48 часов: ${pending[0].title}` : null);
 
   const onAlert = (a: Alert) => {
     if (a.action === 'pay' || a.action === 'weekly') ui.set({ event: a.event ?? null });
@@ -162,13 +164,12 @@ export function Week() {
         : (
           <div className="divide-hair">
             {closing && (
-              <button type="button" onClick={() => ui.set({ week: closeMonday })} className="flex w-full items-start gap-3 px-4 py-3.5 text-left">
+              <button type="button" onClick={() => ui.set({ checkup: closeMonday })} className="flex w-full items-start gap-3 px-4 py-3.5 text-left">
                 <span className="grid size-9 shrink-0 place-items-center rounded-full bg-sea/12 text-sea"><PiggyBank size={17} strokeWidth={1.6} /></span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-[14.5px] leading-snug font-medium">Закрыть неделю {ddmm(closeMonday)}–{ddmm(addDays(closeMonday, 6))}</span>
+                  <span className="block text-[14.5px] leading-snug font-medium">Сверка с банком и закрытие недели {ddmm(closeMonday)}–{ddmm(addDays(closeMonday, 6))}</span>
                   <span className="mt-0.5 block text-[12.5px] leading-snug text-muted">
-                    Долить на карту жизни из резерва <Money value={closing.topUp} className="text-ink" />
-                    {closing.leftover > 0 ? <>: остаток <Money value={closing.leftover} /> уже на ней</> : closing.left < 0 ? <>: перерасход <Money value={-closing.left} /></> : ''}. Сначала загрузите выписку.
+                    Впишите остатки на карте, в резерве и на кредитке — приложение сверит с учётом и скажет, сколько перевести. По учёту из резерва на карту <Money value={closing.topUp} className="text-ink" />{closing.leftover > 0 ? <>, остаток <Money value={closing.leftover} /> уже на ней</> : closing.left < 0 ? <>, перерасход <Money value={-closing.left} /></> : ''}.
                   </span>
                 </span>
                 <ChevronRight size={16} className="mt-2.5 shrink-0 text-faint" />

@@ -109,6 +109,12 @@ export interface ReserveMove {
   /** + пополнение, − расход */
   amount: number;
   note: string;
+  /** когда записано (ISO) — для сверки с банком */
+  at?: string;
+  /** остаток введён из банка целиком, а не сдвинут на сумму */
+  abs?: boolean;
+  /** перевод между картой и резервом: на сколько изменилась карта (− с карты в резерв) */
+  card?: number;
 }
 
 export interface WishItem {
@@ -218,6 +224,8 @@ export interface CardBalance {
   /** YYYY-MM-DD: платежи и поступления до этой даты включительно уже учтены в балансе */
   date: string;
   source: 'manual' | 'statement';
+  /** когда введён (ISO) */
+  at?: string;
 }
 
 /** Исходные данные плана (зашифрованы в seed.enc.json) */

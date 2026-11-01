@@ -7,6 +7,7 @@ import { ddmm, monthName } from '../domain/dates';
 import { num } from '../domain/money';
 import { useStore } from '../store/store';
 import { useCal, useToday } from '../store/ui';
+import { useLedger } from '../screens/Checkup';
 import { Money } from './ui';
 
 const W = 340, H = 96, PAD = 8;
@@ -46,7 +47,10 @@ function ReserveLine({ steps, start, from, to }: { steps: CoverageStep[]; start:
 export function CoverageCard() {
   const now = useToday();
   const cal = useCal();
-  const [marks, reserve, debts, expenses, bridge] = useStore(useShallow(s => [s.marks, s.reserve, s.debts, s.expenses, s.bridge] as const));
+  const [marks, debts, expenses, bridge] = useStore(useShallow(s => [s.marks, s.debts, s.expenses, s.bridge] as const));
+  // резерв по учёту: минус оплаченное из него после последнего остатка из банка, плюс поступления, ждущие перевода с карты
+  const led = useLedger();
+  const reserve = led.reserve + led.incomeOnCard;
   const [all, setAll] = useState(false);
   const [allNarrow, setAllNarrow] = useState(false);
   const input = useMemo(() => ({ cal, marks, reserve, debts, expenses, bridge }), [cal, marks, reserve, debts, expenses, bridge]);
@@ -58,7 +62,7 @@ export function CoverageCard() {
   return (
     <section className="mx-4 mt-6">
       <h2 className="text-[14px] font-medium">Покрытие обязательных платежей</h2>
-      <p className="mt-0.5 text-[12.5px] leading-snug text-muted">Резерв <Money value={reserve} className="text-ink" /> и всё, что придёт, против долгов, обязательных платежей и пополнений карты до {ddmm(cov.to)}</p>
+      <p className="mt-0.5 text-[12.5px] leading-snug text-muted">Резерв по учёту <Money value={led.reserve} className="text-ink" />{led.incomeOnCard > 0 ? <>, ещё <Money value={led.incomeOnCard} className="text-ink" /> на карте для перевода в резерв,</> : ''} и всё, что придёт, против долгов, обязательных платежей и пополнений карты до {ddmm(cov.to)}</p>
       <div className={`mt-3 rounded-2xl px-4 py-3 text-[14px] leading-snug ${s ? 'bg-neg/12 text-neg' : 'bg-pos/10'}`}>
         {s
           ? <>{ddmm(s.date)} не хватит <b className="font-semibold">{num(s.amount)} ₽</b> на «{s.title}».</>

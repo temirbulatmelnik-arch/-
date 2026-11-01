@@ -8,6 +8,8 @@ import { buildIcs } from './ics';
 import { rub, parseAmount } from './money';
 import { categoryLimit, currentPhase, DEFAULT_PLAN, setPlanSource, splitBonus, targetDebt, weeklyLimit, type PlanConfig } from './plan';
 import { fromAi, fromDrafts } from './proposals';
+import { PROTOCOL_VERSION } from './sync';
+import { checkupPlan, ledger, type Checkup } from './ledger';
 import { cashFlow, dailyLevels } from './cashflow';
 import { mergeSeed, type PlanState } from './planUpdate';
 import { applyExchange, buildExchange, dropChatTwins, exchangeDigest, normalize, parseExchange, previewExchange, type ExchangeState } from './exchange';
@@ -18,7 +20,7 @@ import { bridgeState, weekMoney, type Bridge } from './bridge';
 import { isWorkday, workdayOnOrBefore } from './workdays';
 import { draft } from './statements';
 import { parseCsv, parseText } from './statements';
-import type { CalEvent, Debt, Expense, PlanSeed } from './types';
+import type { CalEvent, Debt, EventMark, Expense, PlanSeed } from './types';
 import { coverage, coverageHints } from './coverage';
 import { open, seal } from './vault';
 
@@ -629,7 +631,7 @@ describe('обмен: короткая выгрузка и сводка', () => 
       reserve: 50_000, savings: 0, cardBalance: null, checklist: [], checks: {}, strategy: [{ title: 'Суть', text: 'т' }], rules: ['п'], closures: {},
     };
     const short = buildExchange(s, '2026-11-05', { short: true });
-    expect(short).toMatchObject({ protocolVersion: '2.2', short: true });
+    expect(short).toMatchObject({ protocolVersion: PROTOCOL_VERSION, short: true });
     expect(short.incomes).toBeUndefined();
     expect(short.strategy).toBeUndefined();
     expect(short.expenses).toEqual([]);
@@ -637,5 +639,44 @@ describe('обмен: короткая выгрузка и сводка', () => 
     const f = normalize(parseExchange('Вот блок:\n```json\n' + JSON.stringify({ app: 'kurs-exchange', version: 2, from: 'chat', reserve: 60_000,
       expenses: [{ date: '2026-11-05', amount: 300, category: 'fun' }, { date: '2026-11-05', amount: 200, category: 'taxi' }] }) + '\n```\nПроверь.')!, s);
     expect(exchangeDigest(f, s, '2026-11-05').map(l => l.replace(/\s/g, ' '))).toEqual(['Траты: +2 (500 ₽)', 'Резерв: 50 000 ₽ → 60 000 ₽']);
+  });
+});
+
+describe('учёт по счетам для воскресной сверки', () => {
+  const base = {
+    checkups: [] as Checkup[], reserve: 40_000, reserveLog: [{ id: 'r', date: '2026-11-01', at: '2026-11-01T18:00:00.000Z', abs: true, amount: 0, note: 'Сверка с банком' }],
+    marks: {} as Record<string, EventMark>, expenses: [] as Expense[], oneOff: [], debts: [] as Debt[], bridge: null,
+    cardBalance: { amount: 3000, date: '2026-11-01', source: 'manual' as const, at: '2026-11-01T18:00:00.000Z' },
+  };
+  const spend = (date: string, amount: number, source: Expense['source'] = 'life'): Expense => ({ id: date + amount, date, amount, category: 'groceries', source, origin: 'manual', createdAt: `${date}T12:00:00.000Z` });
+
+  it('карта: + пополнение и зарплата, − траты и платежи с карты; резерв: − платежи из резерва', () => {
+    const l = ledger({
+      ...base,
+      marks: {
+        'wk:2026-11-09': { done: true, amount: 8000, at: '2026-11-08T19:00:00.000Z' },
+        'inc:salary:2026-11': { done: true, amount: 50_000, at: '2026-11-10T09:00:00.000Z' },
+        'pay:vtb:2026-11': { done: true, amount: 20_000, at: '2026-11-11T09:00:00.000Z', paidFrom: 'reserve' },
+        'pay:split:2026-11': { done: true, amount: 5000, at: '2026-11-11T09:00:00.000Z', paidFrom: 'card' },
+        'inc:salary:2026-10': { done: true, amount: 50_000, at: '2026-10-10T09:00:00.000Z' },
+      },
+      expenses: [spend('2026-11-03', 1200), spend('2026-10-30', 999), spend('2026-11-04', 700, 'reserve')],
+    });
+    expect(l.card).toBe(3000 + 8000 + 50_000 - 5000 - 1200);
+    expect(l.incomeOnCard).toBe(50_000);
+    expect(l.reserve).toBe(40_000 - 20_000 - 700);
+  });
+
+  it('перевод: без моста — лимит минус остаток недели, поступления с карты — в резерв', () => {
+    const p = checkupPlan({ expenses: [], debts: [], overrides: [{ from: '2026-11-02', to: '2026-11-08', amount: 8000 }], bridge: null, marks: {}, monday: '2026-10-26', leftover: 1500, incomeOnCard: 50_000 });
+    expect(p.topUp).toBe(6500);
+    expect(p.toReserve).toBe(50_000);
+    expect(p.net).toBe(6500 - 50_000);
+  });
+
+  it('пополнение уже отмечено — повторно не предлагается', () => {
+    const p = checkupPlan({ expenses: [], debts: [], overrides: [], bridge: null, marks: { 'wk:2026-11-02': { done: true, amount: 7000, at: 'x' } }, monday: '2026-10-26', leftover: 0, incomeOnCard: 0 });
+    expect(p.topUp).toBe(0);
+    expect(p.toppedBefore).toBe(7000);
   });
 });

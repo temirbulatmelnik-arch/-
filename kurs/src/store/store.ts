@@ -10,6 +10,7 @@ import { mergeSeed } from '../domain/planUpdate';
 import type { Bridge } from '../domain/bridge';
 import { fixDefaultCategories } from '../domain/categorize';
 import { dropChatTwins } from '../domain/exchange';
+import { freshReserve, type Checkup } from '../domain/ledger';
 import type { CalEvent, CardBalance, ChecklistItem, Debt, DebtSnapshot, EventMark, Expense, FixedItem, IncomeTemplate, PlanSeed, ReserveMove, Settings, StrategySection, WeekClosure, WeeklyOverride, WishItem } from '../domain/types';
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -59,6 +60,8 @@ interface Data {
   cardBalance: CardBalance | null;
   /** мост на кредитке до премии; null — нет */
   bridge: Bridge | null;
+  /** воскресные сверки с банком: журнал и точка отсчёта учёта по счетам */
+  checkups: Checkup[];
   /** последние импорты из чата со снимком данных до них — чтобы откатить неверный блок */
   imports: ImportRecord[];
   settings: Settings;
@@ -76,6 +79,8 @@ interface Actions {
   rollbackImport: (id: string) => void;
   toggleCheck: (id: string) => void;
   closeWeek: (c: Omit<WeekClosure, 'at'>) => void;
+  /** воскресная сверка: остатки из банка становятся точкой отсчёта, пополнение и перевод в резерв — ровно один раз */
+  checkup: (c: Omit<Checkup, 'id' | 'at' | 'date' | 'after'>, closure: Omit<WeekClosure, 'at' | 'topUp'> | null) => void;
   reopenWeek: (monday: string) => void;
   moveSavings: (amount: number, note: string) => void;
   setCardBalance: (b: CardBalance | null) => void;
@@ -96,7 +101,8 @@ interface Actions {
   prepay: (id: string, amount: number, fromReserve: boolean, note?: string) => void;
   /** премия: резерв становится reserveAfter, остальное — досрочно по списку */
   applyBonus: (opts: { amount: number; reserveAfter: number; allocations: { debtId: string; amount: number }[]; title: string; eventKey?: string }) => void;
-  moveReserve: (amount: number, note: string) => void;
+  /** card — перевод между картой и резервом: на сколько изменилась карта */
+  moveReserve: (amount: number, note: string, card?: number) => void;
   setReserve: (balance: number, note: string) => void;
   addWish: (w: Omit<WishItem, 'id' | 'createdAt'>) => void;
   resolveWish: (id: string, r: WishItem['resolved']) => void;
@@ -124,7 +130,7 @@ const nowIso = () => new Date().toISOString();
 const EMPTY: Data = {
   ready: false, asOf: today(), debts: [], incomes: [], fixed: [], oneOff: [], templateFrom: monthKey(today()),
   weeklyOverrides: [], planTrajectory: [], baselineTrajectory: [], reserve: 0, reserveLog: [], expenses: [], marks: {}, wishes: [], snapshots: [], overrides: {}, plan: null,
-  planRev: 0, planCode: '', checklist: [], strategy: [], rules: [], checks: {}, savings: 0, savingsLog: [], closures: {}, cardBalance: null, bridge: null, imports: [],
+  planRev: 0, planCode: '', checklist: [], strategy: [], rules: [], checks: {}, savings: 0, savingsLog: [], closures: {}, cardBalance: null, bridge: null, checkups: [], imports: [],
   settings: DEFAULT_SETTINGS,
 };
 
@@ -140,7 +146,7 @@ function topUpMove(s: Data, key: string, amount: number, note = 'Долил ка
   const prev = s.marks[key]?.done ? s.marks[key].amount ?? 0 : 0;
   const diff = amount - prev;
   if (!diff) return {};
-  return { reserve: s.reserve - diff, reserveLog: [...s.reserveLog, { id: uid(), date: today(), amount: -diff, note }] };
+  return { reserve: s.reserve - diff, reserveLog: [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), amount: -diff, note }] };
 }
 
 function patchDebt(d: Debt, balance: number, recalc = false): Debt {
@@ -195,7 +201,7 @@ export const useStore = create<State>()(
           next.imports = [...imports, { id: uid(), at: nowIso(), summary, snapshot }].slice(-5);
         }
         if (patch.reserve != null && patch.reserve !== s.reserve) {
-          next.reserveLog = [...s.reserveLog, { id: uid(), date: today(), amount: patch.reserve - s.reserve, note: 'Сверка из чата «Финансы»' }];
+          next.reserveLog = [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), abs: true, amount: patch.reserve - s.reserve, note: 'Сверка из чата «Финансы»' }];
         }
         if (patch.savings != null && patch.savings !== s.savings) {
           next.savingsLog = [...s.savingsLog, { id: uid(), date: today(), amount: patch.savings - s.savings, note: 'Сверка из чата «Финансы»' }];
@@ -216,10 +222,33 @@ export const useStore = create<State>()(
         // воскресное пополнение: из резерва на карту жизни; в календаре отмечается пополнение следующей недели
         const top = c.topUp ?? 0;
         const key = `wk:${addDays(c.monday, 7)}`;
+        // резерв уже пришёл из банка в воскресенье или позже — пополнение в нём есть, второй раз не вычитаем
+        const fresh = freshReserve(s.reserveLog, addDays(c.monday, 6)) && !s.marks[key]?.done;
         return {
           closures: { ...s.closures, [c.monday]: { ...c, at: nowIso() } },
           ...(c.transferred > 0 ? { savings: s.savings + c.transferred, savingsLog: [...s.savingsLog, { id: uid(), date: today(), amount: c.transferred, note: 'Остаток недели' }] } : {}),
-          ...(top > 0 ? { ...topUpMove(s, key, top), marks: { ...s.marks, [key]: { done: true, amount: top, at: nowIso() } } } : {}),
+          ...(top > 0 ? { ...(fresh ? {} : topUpMove(s, key, top)), marks: { ...s.marks, [key]: { done: true, amount: top, at: nowIso() } } } : {}),
+        };
+      }),
+      checkup: (c, closure) => set(s => {
+        const at = nowIso();
+        const date = today();
+        const key = `wk:${addDays(c.monday, 7)}`;
+        const after = { card: Math.round((c.actual.card + c.topUp - c.toReserve) * 100) / 100, reserve: Math.round((c.actual.reserve - c.topUp + c.toReserve) * 100) / 100 };
+        const entry: Checkup = { ...c, id: uid(), at, date, after };
+        const marks = c.topUp > 0 ? { ...s.marks, [key]: { done: true, amount: c.topUp, at } } : s.marks;
+        const closures = closure && !s.closures[c.monday] ? { ...s.closures, [c.monday]: { ...closure, topUp: c.topUp, at } } : s.closures;
+        const note = [c.topUp > 0 ? `на карту ${Math.round(c.topUp)}` : '', c.toReserve > 0 ? `с карты ${Math.round(c.toReserve)}` : ''].filter(Boolean).join(', ');
+        let debts = s.debts;
+        if (c.creditCard && c.actual.credit != null) debts = s.debts.map(d => (d.id === c.creditCard ? patchDebt(d, c.actual.credit!) : d));
+        return {
+          checkups: [...s.checkups, entry].slice(-26),
+          marks,
+          closures,
+          reserve: after.reserve,
+          reserveLog: [...s.reserveLog, { id: uid(), date, at, abs: true, amount: after.reserve - s.reserve, note: `Сверка с банком${note ? `: ${note}` : ''}` }],
+          cardBalance: { amount: after.card, date, source: 'manual' as const, at },
+          ...(debts !== s.debts ? withSnapshot(debts, s.snapshots) : {}),
         };
       }),
       reopenWeek: monday => set(s => {
@@ -237,7 +266,7 @@ export const useStore = create<State>()(
         };
       }),
       moveSavings: (amount, note) => set(s => ({ savings: s.savings + amount, savingsLog: [...s.savingsLog, { id: uid(), date: today(), amount, note }] })),
-      setCardBalance: b => set({ cardBalance: b }),
+      setCardBalance: b => set({ cardBalance: b && { ...b, at: b.at ?? (b.date === today() ? nowIso() : undefined) } }),
       setFixed: list => set({ fixed: list }),
       clearOverride: key => set(s => {
         const overrides = { ...s.overrides };
@@ -294,7 +323,7 @@ export const useStore = create<State>()(
           ...withSnapshot(debts, s.snapshots),
           ...(fromReserve ? {
             reserve: s.reserve - amount,
-            reserveLog: [...s.reserveLog, { id: uid(), date: today(), amount: -amount, note: note ?? `Досрочно в ${debt.short}` }],
+            reserveLog: [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), amount: -amount, note: note ?? `Досрочно в ${debt.short}` }],
           } : {}),
         };
       }),
@@ -309,12 +338,12 @@ export const useStore = create<State>()(
           ...withSnapshot(debts, s.snapshots),
           marks,
           reserve: reserveAfter,
-          reserveLog: [...s.reserveLog, { id: uid(), date: today(), amount: reserveAfter - s.reserve, note: `${title}: ${sent ? `в долг ${Math.round(sent)} (${names}), ` : ''}остальное в резерв` }],
+          reserveLog: [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), abs: true, amount: reserveAfter - s.reserve, note: `${title}: ${sent ? `в долг ${Math.round(sent)} (${names}), ` : ''}остальное в резерв` }],
         };
       }),
 
-      moveReserve: (amount, note) => set(s => ({ reserve: s.reserve + amount, reserveLog: [...s.reserveLog, { id: uid(), date: today(), amount, note }] })),
-      setReserve: (balance, note) => set(s => ({ reserve: balance, reserveLog: [...s.reserveLog, { id: uid(), date: today(), amount: balance - s.reserve, note }] })),
+      moveReserve: (amount, note, card) => set(s => ({ reserve: s.reserve + amount, reserveLog: [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), amount, note, ...(card ? { card } : {}) }] })),
+      setReserve: (balance, note) => set(s => ({ reserve: balance, reserveLog: [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), abs: true, amount: balance - s.reserve, note }] })),
 
       addWish: w => set(s => ({ wishes: [...s.wishes, { ...w, id: uid(), createdAt: nowIso() }] })),
       resolveWish: (id, r) => set(s => ({ wishes: s.wishes.map(w => (w.id === id ? { ...w, resolved: r, resolvedAt: nowIso() } : w)) })),

@@ -1,0 +1,179 @@
+// Учёт по счетам банка: сколько должно быть на карте жизни (мастер-счёт), в резерве (накопительный) и долга на
+// кредитке моста — от последней сверки. В воскресенье вечером человек вводит, что видит в банке, приложение сравнивает
+// и считает, сколько перевести между картой и резервом.
+import { activeBridge, bridgeWeek, weekMoney, type Bridge } from './bridge';
+import { addDays } from './dates';
+import { weeklyLimit } from './plan';
+import type { CalEvent, CardBalance, Debt, EventMark, Expense, ReserveMove, WeeklyOverride } from './types';
+
+/** разница в пределах рубля — сошлось */
+export const MATCH = 1;
+
+const BONUS = new Set(['bonusQuarter', 'bonusYear', 'vacation', 'thirteenth']);
+
+export interface Checkup {
+  id: string;
+  /** когда сверено (ISO) и за какой день */
+  at: string;
+  date: string;
+  /** закрываемая неделя */
+  monday: string;
+  /** что ждало приложение; null — не с чем сравнить (первая сверка) */
+  expected: { card: number | null; reserve: number; credit: number | null };
+  /** что было в банке до перевода */
+  actual: { card: number; reserve: number; credit: number | null };
+  /** из резерва на карту на следующую неделю */
+  topUp: number;
+  /** с карты в резерв: поступления, пришедшие на карту */
+  toReserve: number;
+  /** остатки после перевода — точка отсчёта следующей сверки */
+  after: { card: number; reserve: number };
+  creditCard?: string;
+}
+
+export interface LedgerInput {
+  checkups: Checkup[];
+  cardBalance: CardBalance | null;
+  reserve: number;
+  reserveLog: ReserveMove[];
+  marks: Record<string, EventMark>;
+  expenses: Expense[];
+  oneOff: CalEvent[];
+  debts: Debt[];
+  bridge: Bridge | null;
+}
+
+export interface Ledger {
+  /** ожидаемый остаток карты; null — нет точки отсчёта */
+  card: number | null;
+  cardFrom: { at: string; date: string } | null;
+  /** ожидаемый резерв: резерв приложения минус то, что оплачено из него после последнего остатка из банка */
+  reserve: number;
+  /** ожидаемый долг на кредитке моста */
+  credit: number | null;
+  creditCard: Debt | null;
+  /** обычные поступления, пришедшие на карту после сверки и ещё не переведённые в резерв */
+  incomeOnCard: number;
+}
+
+const endOfDay = (date: string) => `${date}T23:59:59.999`;
+
+/** трата после точки: позже дня отсчёта; в сам день — только внесённая руками после сверки */
+const after = (e: Expense, at: string, date: string) => e.date > date || (e.date === date && e.origin === 'manual' && e.createdAt > at);
+
+/** резерв, введённый из банка целиком (сверка, чат, премия), а не сдвинутый на сумму */
+export const isAbsolute = (m: ReserveMove) => m.abs ?? /^Сверка/.test(m.note);
+
+/** последний момент, когда резерв пришёл из банка целиком */
+export function reserveAnchor(log: ReserveMove[]): { at: string; date: string } | null {
+  for (let i = log.length - 1; i >= 0; i--) if (isAbsolute(log[i])) return { at: log[i].at ?? endOfDay(log[i].date), date: log[i].date };
+  return null;
+}
+
+type MarkKind = 'weekly' | 'payment' | 'income' | 'bonus' | null;
+
+/** что за отметка: пополнение, платёж, обычное поступление (приходит на карту) или премия (распределяется сразу) */
+function kindOf(key: string, oneOff: CalEvent[]): MarkKind {
+  if (key.startsWith('wk:')) return 'weekly';
+  if (key.startsWith('pay:') || key.startsWith('fix:')) return 'payment';
+  if (key.startsWith('inc:')) return BONUS.has(key.split(':')[1]) ? 'bonus' : 'income';
+  const e = oneOff.find(o => o.key === key);
+  if (!e) return null;
+  if (e.kind === 'income') return e.incomeKind && BONUS.has(e.incomeKind) ? 'bonus' : 'income';
+  return e.kind;
+}
+
+export function ledger(s: LedgerInput): Ledger {
+  const last = s.checkups.at(-1);
+  // точка отсчёта карты: последняя сверка или остаток карты из выписки/вручную — что позже
+  const cb = s.cardBalance ? { at: s.cardBalance.at ?? endOfDay(s.cardBalance.date), date: s.cardBalance.date, amount: s.cardBalance.amount } : null;
+  const lc = last ? { at: last.at, date: last.date, amount: last.after.card } : null;
+  const ref = cb && (!lc || cb.at > lc.at) ? cb : lc;
+
+  let card: number | null = null;
+  let incomeOnCard = 0;
+  if (ref) {
+    card = ref.amount;
+    for (const [key, m] of Object.entries(s.marks)) {
+      if (!m.done || m.at <= ref.at) continue;
+      const amount = m.amount ?? 0;
+      const kind = kindOf(key, s.oneOff);
+      if (kind === 'weekly') card += amount;
+      else if (kind === 'payment' && m.paidFrom === 'card') card -= amount;
+      else if (kind === 'income') { card += amount; incomeOnCard += amount; }
+    }
+    for (const e of s.expenses) if (e.source === 'life' && after(e, ref.at, ref.date)) card -= e.amount;
+    for (const r of s.reserveLog) if (r.card && r.at && r.at > ref.at) { card += r.card; if (r.card < 0) incomeOnCard += r.card; }
+  }
+
+  // резерв: отметки «оплачено из резерва» и траты из резерва после последнего остатка из банка
+  const anchor = [reserveAnchor(s.reserveLog), last ? { at: last.at, date: last.date } : null].filter(Boolean).sort((a, b) => b!.at.localeCompare(a!.at))[0] ?? null;
+  let reserve = s.reserve;
+  if (anchor) {
+    for (const [key, m] of Object.entries(s.marks)) {
+      if (m.done && m.at > anchor.at && kindOf(key, s.oneOff) === 'payment' && (m.paidFrom ?? 'reserve') === 'reserve') reserve -= m.amount ?? 0;
+    }
+    for (const e of s.expenses) if (e.source === 'reserve' && after(e, anchor.at, anchor.date)) reserve -= e.amount;
+  }
+
+  // кредитка моста: остаток долга плюс покупки после его последнего обновления
+  const b = s.bridge && s.bridge.weeks.length ? s.bridge : null;
+  const creditCard = b ? s.debts.find(d => d.id === b.card) ?? null : null;
+  let credit: number | null = null;
+  if (creditCard) {
+    const at = creditCard.updatedAt ?? '';
+    const date = at.slice(0, 10);
+    credit = creditCard.balance;
+    for (const e of s.expenses) if (e.source === 'credit' && (e.creditCard ?? b!.card) === creditCard.id && at && (e.date > date || (e.date === date && e.createdAt > at))) credit += e.amount;
+  }
+
+  return { card, cardFrom: ref ? { at: ref.at, date: ref.date } : null, reserve, credit, creditCard, incomeOnCard: Math.max(0, Math.round(incomeOnCard * 100) / 100) };
+}
+
+export interface CheckupPlan {
+  /** остаток недели на карте по учёту (не по банку) */
+  leftover: number;
+  /** лимит следующей недели */
+  nextLimit: number;
+  /** из резерва на карту */
+  topUp: number;
+  /** с кредитки моста на следующую неделю, до */
+  credit: number;
+  /** пополнение уже отмечено раньше — повторно не списывать */
+  toppedBefore: number;
+  /** с карты в резерв */
+  toReserve: number;
+  /** итог: + из резерва на карту, − с карты в резерв */
+  net: number;
+}
+
+/**
+ * Перевод в воскресенье. Без моста: пополнение = лимит следующей недели − остаток недели на карте.
+ * С мостом: пополнение = план моста на следующую неделю, остаток уменьшает траты с кредитки.
+ * Обычные поступления, которые пришли на карту, — в резерв. Всё по учёту, не по сырому остатку карты.
+ */
+export function checkupPlan(o: {
+  expenses: Expense[]; debts: Debt[]; overrides: WeeklyOverride[]; bridge: Bridge | null; marks: Record<string, EventMark>;
+  monday: string; leftover: number; incomeOnCard: number;
+}): CheckupPlan {
+  const nextMonday = addDays(o.monday, 7);
+  const nextLimit = weeklyLimit(o.debts, nextMonday, o.overrides);
+  const bw = bridgeWeek(o.bridge, nextMonday);
+  const leftover = Math.max(0, Math.round(o.leftover * 100) / 100);
+  const plain = bw ? bw.fromReserve : Math.max(0, nextLimit - leftover);
+  const mark = o.marks[`wk:${nextMonday}`];
+  const toppedBefore = mark?.done ? mark.amount ?? 0 : 0;
+  const topUp = toppedBefore ? 0 : Math.round(plain);
+  const credit = bw ? Math.max(0, bw.fromCredit - leftover) : 0;
+  const toReserve = Math.round(o.incomeOnCard);
+  return { leftover, nextLimit, topUp, credit, toppedBefore, toReserve, net: topUp - toReserve };
+}
+
+/** остаток недели на карте по учёту: в неделю моста — карта отдельно от кредитки */
+export function weekLeftover(expenses: Expense[], debts: Debt[], overrides: WeeklyOverride[], bridge: Bridge | null, monday: string): number {
+  const m = weekMoney(expenses, debts, overrides, activeBridge(bridge), monday);
+  return bridgeWeek(bridge, monday) ? m.cardLeft : m.left;
+}
+
+/** резерв уже пришёл из банка в день пополнения или позже — пополнение в нём уже есть, второй раз не вычитать */
+export const freshReserve = (log: ReserveMove[], topUpDate: string) => (reserveAnchor(log)?.date ?? '') >= topUpDate;

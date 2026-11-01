@@ -28,10 +28,10 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   const store = useStore.getState();
   const [amount, setAmount] = useState(edit ? String(edit.amount) : p.amount ? String(p.amount) : '');
   const [category, setCategory] = useState<CategoryId | null>(edit?.category ?? p.category ?? null);
-  const [source, setSource] = useState<Source>(edit?.source ?? 'life');
+  const [source, setSource] = useState<Source>(edit?.source ?? p.source ?? 'life');
   const bridge = useStore(s => s.bridge);
   const [note, setNote] = useState(edit?.note ?? p.note ?? '');
-  const [date, setDate] = useState(edit?.date ?? today());
+  const [date, setDate] = useState(edit?.date ?? p.date ?? today());
   const [askPause, setAskPause] = useState(false);
   const input = useRef<HTMLInputElement>(null);
 
@@ -46,7 +46,7 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   const save = () => {
     if (!valid) return;
     if (!edit && !p.wishId && value > BIG_PURCHASE && source === 'life' && !askPause) { setAskPause(true); return; }
-    const item = { date, amount: value, category: category!, note: note.trim() || undefined, source, origin: 'manual' as const };
+    const item = { date, amount: value, category: category!, note: note.trim() || undefined, source, origin: 'manual' as const, ...(source === 'credit' && p.creditCard ? { creditCard: p.creditCard } : {}) };
     if (edit) store.updateExpense(edit.id, item);
     else store.addExpenses([item]);
     if (p.wishId) store.resolveWish(p.wishId, 'bought');

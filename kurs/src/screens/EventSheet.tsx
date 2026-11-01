@@ -48,7 +48,7 @@ function Body({ e }: { e: CalEvent }) {
   const done = () => {
     if (isBonus(e)) { set({ event: null, bonus: { event: { ...e, amount: value } } }); return; }
     markEvent(e, true, value, from);
-    toast(e.kind === 'income' ? 'Отмечено: пришло' : e.kind === 'weekly' ? 'Отмечено: карта долита из резерва' : debt ? `Оплачено. Остаток ${debt.short} пересчитан` : 'Отмечено: оплачено');
+    toast(e.kind === 'income' ? `Пришло на карту. В воскресной сверке приложение напомнит перевести ${rub(value)} в резерв` : e.kind === 'weekly' ? 'Отмечено: карта долита из резерва' : debt ? `Оплачено. Остаток ${debt.short} пересчитан` : 'Отмечено: оплачено');
     close();
   };
 

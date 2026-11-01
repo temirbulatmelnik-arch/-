@@ -89,9 +89,11 @@ function Body({ monday }: { monday: string }) {
               : r.left < 0 ? <>Остатка нет: перерасход <Money value={-r.left} /> не переносится, долить нужно весь лимит.</>
                 : <>Остатка нет — долить весь лимит.</>}
           </div>
+          <PrimaryButton onClick={() => set({ week: null, checkup: monday })}>Сверить с банком и закрыть</PrimaryButton>
+          <p className="text-[12px] leading-snug text-muted">Впишете остатки на карте, в резерве и на кредитке — приложение найдёт невнесённые траты и посчитает перевод. Или без сверки:</p>
           <AmountInput value={amount} onChange={setAmount} size="md" />
           <p className="text-[12px] leading-snug text-muted">Перевели другую сумму — поправьте. Резерв уменьшится на неё, а в календаре пополнение отметится сделанным.</p>
-          <PrimaryButton onClick={() => close(value)} disabled={value <= 0}>Долил из резерва</PrimaryButton>
+          <SecondaryButton onClick={() => close(value)} disabled={value <= 0} className="w-full">Долил из резерва без сверки</SecondaryButton>
           <button type="button" onClick={() => close(0)} className="w-full py-1 text-[13px] text-muted">Закрыть без пополнения</button>
         </div>
       )}
