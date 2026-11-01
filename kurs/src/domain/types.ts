@@ -155,6 +155,8 @@ export interface Settings {
   lastBackupAt?: string;
   lastIcsAt?: string;
   lastReportAt?: string;
+  /** последний применённый (или отложенный) файл обмена, доставленный с сайта */
+  inboxSeen?: string;
   badge: boolean;
 }
 

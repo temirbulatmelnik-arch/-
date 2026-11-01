@@ -17,7 +17,7 @@ import { Plan } from './screens/Plan';
 import { updateBadge } from './screens/reminders';
 import { ReserveSheet } from './screens/ReserveSheet';
 import { SettingsSheet } from './screens/Settings';
-import { SyncSheet, UnlockSheet, usePlanUpdates } from './screens/Sync';
+import { SyncSheet, UnlockSheet, useInbox, usePlanUpdates } from './screens/Sync';
 import { TodaySheet } from './screens/TodaySheet';
 import { Week } from './screens/Week';
 import { WeekSheet } from './screens/WeekSheet';
@@ -50,6 +50,7 @@ function useTheme() {
 export default function App() {
   useTheme();
   usePlanUpdates();
+  useInbox();
   const ready = useStore(s => s.ready);
   const { tab, setTab, toast, set } = useUi();
 

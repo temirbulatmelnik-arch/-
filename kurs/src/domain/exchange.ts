@@ -420,7 +420,10 @@ const stepEvents: Step = (f, s) => {
   for (const p of f.events) {
     const i = p.key ? list.findIndex(x => x.key === p.key) : -1;
     if (p.delete) {
-      if (i >= 0) { lines.push(`Удалить: ${ddmm(list[i].date)} ${list[i].title}`); list = list.filter((_, k) => k !== i); }
+      // без key удалить можно по названию: все разовые события с таким названием
+      const del = i >= 0 ? [i] : !p.key && p.title ? list.map((x, k) => (x.title.toLowerCase() === p.title!.toLowerCase() ? k : -1)).filter(k => k >= 0) : [];
+      for (const k of del) lines.push(`Удалить: ${ddmm(list[k].date)} ${list[k].title}`);
+      list = list.filter((_, k) => !del.includes(k));
       continue;
     }
     if (i >= 0) {

@@ -32,7 +32,8 @@ async function copy(text: string) {
 }
 
 function Body() {
-  const [text, setText] = useState('');
+  const inbox = useUi(s => s.inbox);
+  const [text, setText] = useState(inbox?.text ?? '');
   const [file, setFile] = useState<ExchangeFile | null>(null);
   const [sections, setSections] = useState<ExchangeSection[]>([]);
   const [off, setOff] = useState<Set<SectionId>>(new Set());
@@ -59,8 +60,16 @@ function Body() {
     if (!list.length) { toast('В файле нет ничего нового'); return; }
     setFile(f); setSections(list); setOff(new Set());
   };
+  // файл, доставленный с сайта, сразу разбираем; отметка «применён» — когда его применили или вернулись назад
+  useEffect(() => { if (inbox) parse(inbox.text); }, []);
+  const seenInbox = () => {
+    if (!inbox) return;
+    useStore.getState().setSettings({ inboxSeen: inbox.id });
+    useUi.getState().set({ inbox: null });
+  };
   const apply = () => {
     if (!file) return;
+    seenInbox();
     const s = useStore.getState();
     const only = new Set(sections.map(x => x.id).filter(id => !off.has(id)));
     s.applySync(applyExchange(file, s, today(), only, uid));
@@ -103,7 +112,7 @@ function Body() {
             </div>
             <p className="text-[12px] leading-snug text-muted">Применится только включённое. Чего нет в файле, не меняется.</p>
             <div className="grid grid-cols-[auto_1fr] gap-2">
-              <SecondaryButton onClick={() => setFile(null)}>Назад</SecondaryButton>
+              <SecondaryButton onClick={() => { seenInbox(); setFile(null); }}>Назад</SecondaryButton>
               <PrimaryButton onClick={apply} disabled={sections.every(x => off.has(x.id))}>Применить</PrimaryButton>
             </div>
           </>
@@ -157,6 +166,27 @@ export function usePlanUpdates() {
         }
         useUi.getState().set({ unlock: true });
       } catch { /* нет сети или файла — попробуем в следующий раз */ }
+    })();
+    return () => { cancelled = true; };
+  }, [ready]);
+}
+
+/** Файл обмена с сайта: зашифрован кодом плана; новый — открывается в окне обмена, применить или нет — решает человек */
+export function useInbox() {
+  const ready = useStore(s => s.ready);
+  useEffect(() => {
+    if (!ready || !navigator.onLine) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('./inbox.enc.json', { cache: 'no-cache' });
+        if (!res.ok) return;
+        const sealed = (await res.json()) as Sealed & { id?: string };
+        const s = useStore.getState();
+        if (cancelled || !sealed.id || !s.planCode || s.settings.inboxSeen === sealed.id) return;
+        const plain = await openSealed(sealed, s.planCode);
+        if (plain && !cancelled) useUi.getState().set({ sync: true, inbox: { id: sealed.id, text: plain } });
+      } catch { /* нет сети или файла */ }
     })();
     return () => { cancelled = true; };
   }, [ready]);

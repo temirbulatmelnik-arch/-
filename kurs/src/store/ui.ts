@@ -47,6 +47,8 @@ interface Ui {
   focus: string | null;
   /** раздел настроек, к которому прокрутить */
   settingsFocus: 'reminders' | 'backup' | null;
+  /** файл обмена, доставленный с сайта: открыть в окне обмена */
+  inbox: { id: string; text: string } | null;
   /** окно трат за сегодня (нажатие на кольцо дня) */
   today: boolean;
   /** раскрытая карточка в стопке «Недели»; null — выбрать по обстановке */
@@ -58,7 +60,7 @@ interface Ui {
 
 export const useUi = create<Ui>()(set => ({
   tab: 'week', add: null, scan: false, settings: false, event: null, bonus: null, debt: null, reserve: false,
-  week: null, savings: false, sync: false, fixed: false, card: false, unlock: false, planView: 'debts', focus: null, settingsFocus: null, today: false, stackOpen: null, toast: null,
+  week: null, savings: false, sync: false, fixed: false, card: false, unlock: false, planView: 'debts', focus: null, settingsFocus: null, inbox: null, today: false, stackOpen: null, toast: null,
   setTab: tab => { set({ tab }); window.scrollTo({ top: 0 }); },
   set: p => set(p),
 }));

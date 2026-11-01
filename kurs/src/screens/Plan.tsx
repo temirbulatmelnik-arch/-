@@ -5,6 +5,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { DebtChart } from '../components/DebtChart';
 import { SkyButton, SkyHeader } from '../components/Petersburg';
 import { Bar, Chip, Empty, LinkButton, Money, SectionTitle, Segmented } from '../components/ui';
+import { bridgeState } from '../domain/bridge';
 import { eventsBetween } from '../domain/calendar';
 import { addDays, addMonths, ddmm, monthIn, monthKey, monthName } from '../domain/dates';
 import { forecast } from '../domain/forecast';
@@ -54,6 +55,36 @@ export function Plan() {
   );
 }
 
+/** Мост на кредитке: сколько взято из лимита моста, по неделям и когда гасить. Закрыт — карточки нет. */
+function BridgeCard() {
+  const [expenses, bridge, debts] = useStore(useShallow(s => [s.expenses, s.bridge, s.debts] as const));
+  const st = useMemo(() => bridgeState(expenses, bridge), [expenses, bridge]);
+  if (!st || st.bridge.closed) return null;
+  const card = debts.find(d => d.id === st.bridge.card)?.short ?? 'кредитке';
+  return (
+    <section className="mx-4 mt-3 rounded-[24px] border p-4" style={{ background: 'var(--stack-money)', borderColor: 'var(--stack-money-line)' }}>
+      <div className="text-[12.5px]" style={{ color: 'var(--stack-money-kicker)' }}>Мост на кредитке {card}</div>
+      <div className="mt-0.5 text-[16px] font-medium">использовано <Money value={st.used} /> из <Money value={st.bridge.cap} /></div>
+      <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-line">
+        <div className={`h-full rounded-full ${st.left < 0 ? 'bg-neg' : ''}`} style={{ width: `${Math.min(100, (st.used / st.bridge.cap) * 100)}%`, background: st.left < 0 ? undefined : 'repeating-linear-gradient(135deg, #c77dff 0 5px, #9b5de5 5px 10px)' }} />
+      </div>
+      <div className="divide-hair mt-3">
+        {st.weeks.map(w => (
+          <div key={w.monday} className="grid grid-cols-[64px_1fr_auto] items-center gap-3 py-2 text-[13px]">
+            <span>{ddmm(w.monday)}–{ddmm(addDays(w.monday, 6))}</span>
+            <span className="text-[12px] leading-snug text-muted">из резерва <Money value={w.fromReserve} />, кредитка до <Money value={w.fromCredit} /></span>
+            <Money value={w.used} className={`figure text-[13px] ${w.used > w.fromCredit ? 'text-neg' : ''}`} />
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-[12.5px] leading-snug text-muted">
+        Долг {card} вырос на <Money value={st.used} className="text-ink" />.
+        {st.bridge.repayBy && <> Погасить до {ddmm(st.bridge.repayBy)}.{st.bridge.repayBy.slice(0, 4)}.</>}{st.bridge.repayNote && <> {st.bridge.repayNote.replace(/^./, c => c.toUpperCase())}.</>} Только покупки картой: без переводов и снятия.
+      </p>
+    </section>
+  );
+}
+
 function DebtsView() {
   const now = useToday();
   const cal = useCal();
@@ -94,6 +125,8 @@ function DebtsView() {
             : 'При текущих суммах долг не закрывается за 6 лет.'}
         </div>
       </section>
+
+      <BridgeCard />
 
       {target && (
         <div className="mx-4 mt-3 flex items-start gap-3 rounded-[22px] border border-sea/30 bg-sea/8 px-4 py-3.5">

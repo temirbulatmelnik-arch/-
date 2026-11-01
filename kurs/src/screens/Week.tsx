@@ -11,7 +11,8 @@ import { AlertRow, EventRow } from '../components/rows';
 import { CatIcon, Money } from '../components/ui';
 import { useCountUp } from '../components/useCountUp';
 import { eventsBetween, urgency } from '../domain/calendar';
-import { addDays, dayMonth, ddmm, fromKey, monthIn, plural, weekday, weekdayFull, weekRange } from '../domain/dates';
+import { weekMoney } from '../domain/bridge';
+import { addDays, dayMonth, ddmm, fromKey, monthIn, plural, weekday, weekdayFull, weekRange, weekStart } from '../domain/dates';
 import { BIG_PURCHASE_HOURS, currentPhase, phaseByDate, reserveNeed, totalDebt } from '../domain/plan';
 import { alerts as buildAlerts, type Alert, dayBudget, weekSummary } from '../domain/summary';
 import type { CalEvent } from '../domain/types';
@@ -74,6 +75,8 @@ export function Week() {
   const ui = useUi();
   const week = useMemo(() => weekSummary(expenses, debts, overrides, now), [expenses, debts, overrides, now]);
   const today = useMemo(() => dayBudget(expenses, debts, overrides, now), [expenses, debts, overrides, now]);
+  const money = useMemo(() => weekMoney(expenses, debts, overrides, bridge, weekStart(now)), [expenses, debts, overrides, bridge, now]);
+  const bridgeCardName = `${debts.find(d => d.id === bridge?.card)?.short ?? 'кредитка'}-кредитка`.replace('кредитка-кредитка', 'кредитка');
   const phase = currentPhase(debts, now);
   const planPhase = phaseByDate(now);
   const list = useMemo(() => buildAlerts({ bridge, cal, marks, expenses, wishes, now, nowMs: Date.now(), lastBackupAt: settings.lastBackupAt, lastIcsAt: settings.lastIcsAt, checklist, checks }),
@@ -231,9 +234,26 @@ export function Week() {
             <div className="mt-1.5 text-[14px] leading-snug" style={{ color: over ? 'var(--neg)' : 'var(--scene-muted)' }}>
               {over ? <>перерасход<br />за неделю</> : <>на неделю,<br />до воскресенья</>}
             </div>
+            {/* неделя моста: сколько из этого на карте, а сколько — кредитка */}
+            {money.creditCap > 0 && !over && (
+              <div className="mt-2.5 w-[168px] text-[12px] leading-snug" style={{ color: 'var(--scene-muted)' }}>
+                <div className="flex h-2 overflow-hidden rounded-full bg-white/20">
+                  <span style={{ width: `${(Math.max(0, money.cardLeft) / money.limit) * 100}%`, background: 'linear-gradient(90deg, var(--ring-1), var(--ring-2))' }} />
+                  <span style={{ width: `${(Math.max(0, money.creditLeft) / money.limit) * 100}%`, background: 'repeating-linear-gradient(135deg, #c77dff 0 5px, #9b5de5 5px 10px)' }} />
+                </div>
+                <div className="mt-1.5 flex items-center gap-1.5"><span className="size-2 rounded-[3px]" style={{ background: 'var(--ring-1)' }} />на карте <Money value={Math.max(0, money.cardLeft)} /></div>
+                <div className="flex items-center gap-1.5"><span className="size-2 rounded-[3px] bg-[#b06ef3]" />кредитка <Money value={Math.max(0, money.creditLeft)} /></div>
+              </div>
+            )}
           </div>
           <DayRing day={today.day} left={today.left} onClick={() => ui.set({ today: true })} />
         </div>
+        {money.creditCap > 0 && !over && money.cardLeft <= 0 && money.creditLeft > 0 && !pill.phase && (
+          <p className="sc-pop mx-5 mt-3 rounded-2xl border px-3.5 py-2.5 text-[13.5px] leading-snug backdrop-blur-md"
+            style={{ background: 'var(--pill)', borderColor: 'var(--pill-border)', color: 'var(--scene-ink)' }}>
+            Карта пуста — дальше {bridgeCardName}, доступно <Money value={money.creditLeft} /> до воскресенья. Только покупки картой.
+          </p>
+        )}
         {pill.phase && (
           <button key={pill.key} type="button" onClick={pill.hide} aria-label="Скрыть"
             className={`pointer-events-auto relative mx-5 mt-3 block w-[calc(100%-2.5rem)] overflow-hidden rounded-2xl border px-3.5 pt-2.5 pb-3.5 text-left text-[14px] leading-snug shadow-lg backdrop-blur-md ${pill.phase === 'out' ? 'sc-pill-out' : 'sc-pill-in'}`}
