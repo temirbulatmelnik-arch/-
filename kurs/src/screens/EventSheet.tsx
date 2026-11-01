@@ -1,7 +1,7 @@
 // Платёж, поступление или воскресное пополнение карты: отметить, поправить сумму и дату (у кредиток они плавают), распределить премию.
 import { CalendarDays, Undo2 } from 'lucide-react';
 import { useState } from 'react';
-import { AmountInput, Money, PrimaryButton, Row, SecondaryButton, Sheet } from '../components/ui';
+import { AmountInput, Money, PrimaryButton, Row, SecondaryButton, Segmented, Sheet } from '../components/ui';
 import { GROUP_LABEL, whenText } from '../components/rows';
 import { eventGroup } from '../domain/calendar';
 import { addDays, dayMonth, relDays, weekdayFull } from '../domain/dates';
@@ -39,6 +39,7 @@ function Body({ e }: { e: CalEvent }) {
     return String(Math.round((mark?.amount ?? e.amount) * 100) / 100);
   });
   const [editing, setEditing] = useState(false);
+  const [from, setFrom] = useState<'reserve' | 'card'>(mark?.paidFrom ?? 'reserve');
   const [newAmount, setNewAmount] = useState(String(e.amount));
   const [newDate, setNewDate] = useState(e.date);
   const value = parseAmount(amount) ?? 0;
@@ -46,7 +47,7 @@ function Body({ e }: { e: CalEvent }) {
 
   const done = () => {
     if (isBonus(e)) { set({ event: null, bonus: { event: { ...e, amount: value } } }); return; }
-    markEvent(e, true, value);
+    markEvent(e, true, value, from);
     toast(e.kind === 'income' ? 'Отмечено: пришло' : e.kind === 'weekly' ? 'Отмечено: карта долита из резерва' : debt ? `Оплачено. Остаток ${debt.short} пересчитан` : 'Отмечено: оплачено');
     close();
   };
@@ -96,6 +97,13 @@ function Body({ e }: { e: CalEvent }) {
             <div className="mb-1.5 text-[12.5px] font-medium text-muted">{e.kind === 'income' ? 'Сколько пришло' : e.kind === 'weekly' ? 'Сколько долили' : 'Сколько заплатили'}</div>
             <AmountInput value={amount} onChange={setAmount} size="md" />
           </div>
+          {e.kind === 'payment' && (
+            <div>
+              <div className="mb-1.5 text-[12.5px] font-medium text-muted">Откуда оплачено</div>
+              <Segmented value={from} onChange={setFrom} options={[{ id: 'reserve', label: 'Из резерва' }, { id: 'card', label: 'С карты' }]} />
+              {debt && <p className="mt-1.5 text-[12px] leading-snug text-muted">Платёж по долгу — только реальными деньгами: с кредитки его не гасим.</p>}
+            </div>
+          )}
           {e.kind === 'payment' && debt && debt.rule.type !== 'schedule' && (
             <p className="text-[12.5px] leading-snug text-muted">Долг уменьшится примерно на {rub(Math.max(0, value - (debt.balance * debt.rate) / 12))}: часть платежа съедают проценты ({rub((debt.balance * debt.rate) / 12)} в месяц). Точный остаток — из выписки или скриншота банка.</p>
           )}

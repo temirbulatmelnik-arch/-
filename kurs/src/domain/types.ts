@@ -98,6 +98,8 @@ export interface EventMark {
   amount?: number;
   /** остаток долга до отметки — чтобы отменить */
   prevBalance?: number;
+  /** откуда оплачен платёж: из резерва или с карты; кредитка не бывает источником платежа по долгу */
+  paidFrom?: 'reserve' | 'card';
   at: string;
 }
 

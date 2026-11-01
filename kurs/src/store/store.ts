@@ -59,6 +59,8 @@ interface Data {
   cardBalance: CardBalance | null;
   /** мост на кредитке до премии; null — нет */
   bridge: Bridge | null;
+  /** последние импорты из чата со снимком данных до них — чтобы откатить неверный блок */
+  imports: ImportRecord[];
   settings: Settings;
 }
 
@@ -68,7 +70,10 @@ interface Actions {
   updateFromSeed: (seed: PlanSeed, code: string) => void;
   /** обновление плана из чата «Финансы» */
   /** изменения из файла обмена с чатом: резерв и копилка пишутся в журнал, долги — в снимок месяца */
-  applySync: (patch: Partial<Data>) => void;
+  /** summary — запомнить импорт и снимок данных до него (хранятся последние 5) */
+  applySync: (patch: Partial<Data>, summary?: string) => void;
+  /** вернуть данные к снимку до импорта; этот и более поздние импорты уходят из журнала */
+  rollbackImport: (id: string) => void;
   toggleCheck: (id: string) => void;
   closeWeek: (c: Omit<WeekClosure, 'at'>) => void;
   reopenWeek: (monday: string) => void;
@@ -81,7 +86,7 @@ interface Actions {
   updateExpense: (id: string, patch: Partial<Expense>) => void;
   removeExpense: (id: string) => void;
   /** отметить событие календаря; для платежа по долгу остаток уменьшается на оценку погашения */
-  markEvent: (e: CalEvent, done: boolean, amount?: number) => void;
+  markEvent: (e: CalEvent, done: boolean, amount?: number, paidFrom?: EventMark['paidFrom']) => void;
   updateDebt: (id: string, patch: Partial<Debt>) => void;
   /** точная сумма/дата платежа из банка */
   setOverride: (key: string, o: { amount?: number; date?: string }) => void;
@@ -106,13 +111,20 @@ export type State = Data & Actions;
 /** сколько повторов трат из чата убрало обновление данных — App покажет это сообщением один раз */
 export let cleanedTwins = 0;
 
+export interface ImportRecord {
+  id: string;
+  at: string;
+  summary: string;
+  snapshot: Omit<Data, 'imports' | 'settings' | 'planCode' | 'ready'>;
+}
+
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 const nowIso = () => new Date().toISOString();
 
 const EMPTY: Data = {
   ready: false, asOf: today(), debts: [], incomes: [], fixed: [], oneOff: [], templateFrom: monthKey(today()),
   weeklyOverrides: [], planTrajectory: [], baselineTrajectory: [], reserve: 0, reserveLog: [], expenses: [], marks: {}, wishes: [], snapshots: [], overrides: {}, plan: null,
-  planRev: 0, planCode: '', checklist: [], strategy: [], rules: [], checks: {}, savings: 0, savingsLog: [], closures: {}, cardBalance: null, bridge: null,
+  planRev: 0, planCode: '', checklist: [], strategy: [], rules: [], checks: {}, savings: 0, savingsLog: [], closures: {}, cardBalance: null, bridge: null, imports: [],
   settings: DEFAULT_SETTINGS,
 };
 
@@ -175,8 +187,13 @@ export const useStore = create<State>()(
       startEmpty: () => set(s => ({ ...EMPTY, settings: s.settings, ready: true })),
 
       updateFromSeed: (seed, code) => set(s => ({ ...mergeSeed(s, seed), planRev: seed.rev ?? s.planRev, planCode: code })),
-      applySync: patch => set(s => {
+      applySync: (patch, summary) => set(s => {
         const next: Partial<Data> = { ...patch };
+        if (summary != null) {
+          const { imports, settings, planCode, ready, ...snapshot } = pickData(s);
+          void settings; void planCode; void ready;
+          next.imports = [...imports, { id: uid(), at: nowIso(), summary, snapshot }].slice(-5);
+        }
         if (patch.reserve != null && patch.reserve !== s.reserve) {
           next.reserveLog = [...s.reserveLog, { id: uid(), date: today(), amount: patch.reserve - s.reserve, note: 'Сверка из чата «Финансы»' }];
         }
@@ -184,6 +201,11 @@ export const useStore = create<State>()(
           next.savingsLog = [...s.savingsLog, { id: uid(), date: today(), amount: patch.savings - s.savings, note: 'Сверка из чата «Финансы»' }];
         }
         return patch.debts ? { ...next, ...withSnapshot(patch.debts, s.snapshots) } : next;
+      }),
+      rollbackImport: id => set(s => {
+        const i = s.imports.findIndex(r => r.id === id);
+        if (i < 0) return {};
+        return { ...s.imports[i].snapshot, imports: s.imports.slice(0, i) };
       }),
       toggleCheck: id => set(s => {
         const base = s.checklist.find(c => c.id === id)?.done ?? false;
@@ -229,14 +251,14 @@ export const useStore = create<State>()(
       updateExpense: (id, patch) => set(s => ({ expenses: s.expenses.map(e => (e.id === id ? { ...e, ...patch } : e)) })),
       removeExpense: id => set(s => ({ expenses: s.expenses.filter(e => e.id !== id) })),
 
-      markEvent: (e, done, amount) => set(s => {
+      markEvent: (e, done, amount, paidFrom) => set(s => {
         const prev = s.marks[e.key];
         const marks = { ...s.marks };
         let debts = s.debts;
         const debt = e.debtId ? s.debts.find(d => d.id === e.debtId) : undefined;
         if (done) {
           const paid = amount ?? e.amount;
-          marks[e.key] = { done: true, amount: paid, at: nowIso(), prevBalance: debt?.balance };
+          marks[e.key] = { done: true, amount: paid, at: nowIso(), prevBalance: debt?.balance, ...(e.kind === 'payment' ? { paidFrom: paidFrom ?? 'reserve' } : {}) };
           if (e.kind === 'weekly') return { marks, ...topUpMove(s, e.key, paid) };
           if (debt && e.kind === 'payment' && !prev?.done) {
             // погашение основного долга ≈ платёж минус проценты за месяц; закрывающий платёж обнуляет долг

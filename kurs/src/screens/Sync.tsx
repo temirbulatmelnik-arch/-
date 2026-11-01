@@ -3,13 +3,13 @@
 // А ещё — новая редакция зашифрованного плана с сайта: подтягивается по коду, данные на телефоне остаются.
 import { ClipboardPaste, Copy, Download, FileUp, Share2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { Field, PrimaryButton, SecondaryButton, Sheet, Switch } from '../components/ui';
+import { Field, PrimaryButton, SecondaryButton, Segmented, Sheet, Switch } from '../components/ui';
 import { today } from '../domain/dates';
 import {
-  applyExchange, buildExchange, exchangeFileName, normalize, parseExchange, previewExchange, type ExchangeFile, type ExchangeSection, type SectionId,
+  applyExchange, buildExchange, exchangeDigest, exchangeFileName, normalize, parseExchange, previewExchange, type ExchangeFile, type ExchangeSection, type SectionId,
 } from '../domain/exchange';
 import { downloadFile } from '../domain/ics';
-import { PROJECT_INSTRUCTIONS } from '../domain/sync';
+import { PROJECT_INSTRUCTIONS, PROTOCOL_VERSION } from '../domain/sync';
 import type { PlanSeed } from '../domain/types';
 import { open as openSealed, type Sealed } from '../domain/vault';
 import { uid, useStore } from '../store/store';
@@ -25,7 +25,7 @@ export function SyncSheet() {
   );
 }
 
-const exportText = () => JSON.stringify(buildExchange(useStore.getState(), today()), null, 1);
+const exportText = (short: boolean) => JSON.stringify(buildExchange(useStore.getState(), today(), { short }), null, 1);
 
 async function copy(text: string) {
   try { await navigator.clipboard.writeText(text); toast('Скопировано'); } catch { toast('Не удалось скопировать'); }
@@ -38,11 +38,14 @@ function Body() {
   const [sections, setSections] = useState<ExchangeSection[]>([]);
   const [off, setOff] = useState<Set<SectionId>>(new Set());
   const [showInstr, setShowInstr] = useState(false);
+  const [short, setShort] = useState(true);
+  const [digest, setDigest] = useState<string[]>([]);
+  const imports = useStore(s => s.imports);
   const picker = useRef<HTMLInputElement>(null);
   const name = exchangeFileName(today());
 
   const share = async () => {
-    const body = exportText();
+    const body = exportText(short);
     const f = new File([body], name, { type: 'application/json' });
     const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
     if (nav.canShare?.({ files: [f] })) {
@@ -58,7 +61,7 @@ function Body() {
     const f = normalize(p, useStore.getState());
     const list = previewExchange(f, useStore.getState(), today());
     if (!list.length) { toast('В файле нет ничего нового'); return; }
-    setFile(f); setSections(list); setOff(new Set());
+    setFile(f); setSections(list); setOff(new Set()); setDigest(exchangeDigest(f, useStore.getState(), today()));
   };
   // файл, доставленный с сайта, сразу разбираем; отметка «применён» — когда его применили или вернулись назад
   useEffect(() => { if (inbox) parse(inbox.text); }, []);
@@ -72,7 +75,7 @@ function Body() {
     seenInbox();
     const s = useStore.getState();
     const only = new Set(sections.map(x => x.id).filter(id => !off.has(id)));
-    s.applySync(applyExchange(file, s, today(), only, uid));
+    s.applySync(applyExchange(file, s, today(), only, uid), file.summary || digest.join('; ') || 'Изменения из чата');
     toast('Изменения из чата применены');
     setFile(null); setText('');
     useUi.getState().set({ sync: false });
@@ -88,10 +91,12 @@ function Body() {
       <section className="card space-y-3 p-4">
         <h3 className="text-[15px] font-medium">Из приложения в чат</h3>
         <p className="text-[13.5px] leading-snug">Один файл со всем, что знает приложение: лимиты, обязательные платежи, календарь с отметками, траты и зачисления за 90 дней, долги, резерв, копилка, чек-лист и стратегия. Добавьте его в <b className="font-medium">файлы проекта «Финансы»</b> вместо прошлого или приложите к сообщению.</p>
-        <PrimaryButton onClick={() => void share()}><Share2 size={17} strokeWidth={1.6} /> Поделиться файлом</PrimaryButton>
+        <Segmented value={short ? 'short' : 'full'} onChange={v => setShort(v === 'short')} options={[{ id: 'short', label: 'Коротко, для сверки' }, { id: 'full', label: 'Полностью' }]} />
+        <p className="text-[12px] leading-snug text-muted">{short ? 'Календарь на 2 недели назад и 45 дней вперёд, траты за 14 дней, 4 недели, без стратегии — чтобы не вставлять в чат тысячи строк.' : 'Всё: календарь с дальними поправками, траты за 90 дней, шаблоны, стратегия и правила.'}</p>
+        <PrimaryButton onClick={() => void copy(exportText(short))}><Copy size={17} strokeWidth={1.6} /> Отправить в Claude — скопировать</PrimaryButton>
         <div className="grid grid-cols-2 gap-2">
-          <SecondaryButton onClick={() => void copy(exportText())}><Copy size={15} strokeWidth={1.5} /> Скопировать</SecondaryButton>
-          <SecondaryButton onClick={() => downloadFile(name, exportText(), 'application/json')}><Download size={15} strokeWidth={1.5} /> Сохранить</SecondaryButton>
+          <SecondaryButton onClick={() => void share()}><Share2 size={15} strokeWidth={1.5} /> Поделиться</SecondaryButton>
+          <SecondaryButton onClick={() => downloadFile(name, exportText(short), 'application/json')}><Download size={15} strokeWidth={1.5} /> Сохранить</SecondaryButton>
         </div>
       </section>
 
@@ -100,6 +105,11 @@ function Body() {
         {file ? (
           <>
             {file.summary && <p className="text-[14px] leading-snug font-medium">{file.summary}</p>}
+            {digest.length > 0 && (
+              <ul className="space-y-1 rounded-xl bg-surface-2 px-3 py-2.5 text-[13.5px] leading-snug">
+                {digest.map((d, i) => <li key={i} className={d.startsWith('⚠') ? 'text-neg' : ''}>{d}</li>)}
+              </ul>
+            )}
             <div className="divide-hair">
               {sections.map(sec => (
                 <div key={sec.id} className="py-2">
@@ -126,7 +136,7 @@ function Body() {
               if (f) parse(await f.text());
             }} />
             <div className="grid grid-cols-3 gap-2">
-              <SecondaryButton onClick={async () => { try { setText(await navigator.clipboard.readText()); } catch { toast('Вставьте вручную: удерживайте палец в поле'); } }} className="px-2"><ClipboardPaste size={15} strokeWidth={1.5} /> Вставить</SecondaryButton>
+              <SecondaryButton onClick={async () => { try { setText(await navigator.clipboard.readText()); } catch { toast('Вставьте вручную: удерживайте палец в поле'); } }} className="px-2"><ClipboardPaste size={15} strokeWidth={1.5} /> Из Claude</SecondaryButton>
               <SecondaryButton onClick={() => picker.current?.click()} className="px-2"><FileUp size={15} strokeWidth={1.5} /> Файл</SecondaryButton>
               <PrimaryButton tone="ink" onClick={() => parse(text)} disabled={!text.trim()} className="h-12">Разобрать</PrimaryButton>
             </div>
@@ -134,8 +144,24 @@ function Body() {
         )}
       </section>
 
+      {imports.length > 0 && (
+        <section className="card p-4">
+          <h3 className="text-[15px] font-medium">Последние импорты</h3>
+          <p className="mt-1 text-[12.5px] leading-snug text-muted">Прислали неверный блок — откатите: данные вернутся к виду до импорта.</p>
+          <div className="divide-hair mt-2">
+            {[...imports].reverse().map(r => (
+              <div key={r.id} className="flex items-start gap-3 py-2.5">
+                <span className="min-w-0 flex-1 text-[13px] leading-snug"><span className="text-muted">{new Date(r.at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span><br />{r.summary}</span>
+                <button type="button" className="shrink-0 rounded-full border border-line px-3 py-1.5 text-[12.5px] font-medium"
+                  onClick={() => { if (confirm('Вернуть данные к виду до этого импорта? Более поздние импорты тоже отменятся.')) { useStore.getState().rollbackImport(r.id); toast('Импорт откатан'); } }}>Откатить</button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="card space-y-3 p-4">
-        <h3 className="text-[15px] font-medium">Один раз: инструкция проекта</h3>
+        <h3 className="text-[15px] font-medium">Протокол обмена, версия {PROTOCOL_VERSION}</h3>
         <p className="text-[13.5px] leading-snug">Чтобы чат понимал файл и отвечал изменениями в нужном виде, вставьте этот текст в <b className="font-medium">«Инструкции проекта»</b> «Финансы» вместо прежнего.</p>
         <SecondaryButton onClick={() => void copy(PROJECT_INSTRUCTIONS)} className="w-full"><Copy size={15} strokeWidth={1.5} /> Скопировать инструкцию</SecondaryButton>
         <button type="button" onClick={() => setShowInstr(!showInstr)} className="text-[12.5px] font-medium text-sea">{showInstr ? 'Скрыть текст' : 'Показать текст'}</button>

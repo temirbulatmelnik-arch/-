@@ -3,6 +3,8 @@
 // но только с изменениями. Списки с id/key — «добавить или изменить», удаление — только явное "delete": true.
 // Перед применением приложение показывает разницу по разделам; присланное без изменений ничего не трогает.
 import { bridgeState, weekMoney, type Bridge } from './bridge';
+import { coverage } from './coverage';
+import { PROTOCOL_VERSION } from './sync';
 import { eventsBetween, type CalendarInput } from './calendar';
 import { categorize } from './categorize';
 import { addDays, daysBetween, ddmm, plural } from './dates';
@@ -39,6 +41,9 @@ type Del = { delete?: boolean };
 export interface ExchangeFile {
   app: typeof EXCHANGE_APP;
   version: 2;
+  /** версия протокола, по которой выгружен файл: чат при несовпадении просит свежий текст */
+  protocolVersion?: string;
+  short?: boolean;
   from?: 'app' | 'chat';
   date?: string;
   /** одной фразой: что меняется */
@@ -61,7 +66,7 @@ export interface ExchangeFile {
   incomes?: IncomeTemplate[];
   /** события календаря по key: amount и date — плановые, paid — фактически оплачено или пришло */
   /** событие ищется по key, а без него — по названию, дате (±7 дней) и сумме */
-  calendar?: { key?: string; date?: string; title?: string; kind?: string; amount?: number; done?: boolean; paid?: number; reset?: boolean; approx?: boolean; exact?: boolean; planned?: string; dateMode?: string }[];
+  calendar?: { key?: string; date?: string; title?: string; kind?: string; amount?: number; done?: boolean; paid?: number; paidFrom?: string; reset?: boolean; approx?: boolean; exact?: boolean; planned?: string; dateMode?: string }[];
   /** разовые платежи и поступления */
   events?: ({ key?: string; date?: string; title?: string; amount?: number; kind?: 'payment' | 'income'; dateMode?: CalEvent['dateMode']; note?: string; debtId?: string } & Del)[];
   expensesFrom?: string;
@@ -105,24 +110,34 @@ function bridgeOut(s: ExchangeState) {
   return { ...st.bridge, weeks: st.weeks.map(w => ({ ...w, used: r0(w.used) })), used: r0(st.used), left: r0(st.left) };
 }
 
-export function buildExchange(s: ExchangeState, now: string): ExchangeFile {
+/** short — для еженедельной сверки: календарь −14…+45 дней, траты за 14 дней, 4 недели, без шаблонов и стратегии */
+export function buildExchange(s: ExchangeState, now: string, opts: { short?: boolean } = {}): ExchangeFile {
+  const short = !!opts.short;
   const plan = s.plan ?? DEFAULT_PLAN;
   const week = weekSummary(s.expenses, s.debts, s.weeklyOverrides, now);
   const phase = currentPhase(s.debts, now);
   const need = reserveNeed(now, s.debts);
-  const from = addDays(now, -EXPENSE_DAYS);
+  const from = addDays(now, short ? -14 : -EXPENSE_DAYS);
+  const cov = coverage({ cal: s, marks: s.marks, reserve: s.reserve, debts: s.debts, expenses: s.expenses, bridge: s.bridge }, now);
   // окно −45…+75 дней и, дальше него, всё, что поправлено в приложении вручную: точные суммы и даты будущих платежей;
   // воскресные пополнения карты — только прошедшие и ближайшее, чтобы сверить их с переводами из резерва
-  const calendar = eventsBetween(s, addDays(now, -45), addDays(now, 400))
-    .filter(e => (e.kind === 'weekly' ? e.date <= addDays(now, 7) : e.date <= addDays(now, 75) || s.overrides[e.key] || s.marks[e.key]));
+  const calendar = short
+    ? eventsBetween(s, addDays(now, -14), addDays(now, 45))
+    : eventsBetween(s, addDays(now, -45), addDays(now, 400))
+      .filter(e => (e.kind === 'weekly' ? e.date <= addDays(now, 7) : e.date <= addDays(now, 75) || s.overrides[e.key] || s.marks[e.key]));
   return {
-    app: EXCHANGE_APP, version: 2, from: 'app', date: now,
+    app: EXCHANGE_APP, version: 2, protocolVersion: PROTOCOL_VERSION, from: 'app', date: now, ...(short ? { short: true } : {}),
     about: 'Файл обмена приложения «Курс». status — сводка только для чтения. Остальные разделы можно менять: в ответ присылай этот же формат только с изменениями.',
     status: {
       totalDebt: r0(totalDebt(s.debts)),
       phase: { id: phase.id, title: phase.title, weekly: phase.weekly, monthly: phase.monthly },
       week: { from: week.monday, to: week.sunday, ...weekFields(s, week.monday) },
       reserveNeed: { amount: r0(need.need), untilBonus: need.next },
+      coverage: {
+        to: cov.to, ...(cov.min ? { min: r0(cov.min.balance), minDate: cov.min.date, minTitle: cov.min.title } : {}),
+        ...(cov.shortage ? { shortage: { date: cov.shortage.date, amount: r0(cov.shortage.amount), title: cov.shortage.title } } : {}),
+        narrow: cov.narrow.map(n => ({ date: n.date, title: n.title, left: r0(n.balance) })),
+      },
     },
     limits: { weekly: s.weeklyOverrides, phases: plan.phases, categories: plan.categories, bonusRules: plan.bonusRules ?? {}, shortfall: plan.shortfallOverrides ?? {} },
     debts: s.debts.map(d => ({
@@ -131,7 +146,7 @@ export function buildExchange(s: ExchangeState, now: string): ExchangeFile {
       ...(d.limit != null ? { limit: d.limit } : {}), closed: d.closed, ...(d.closedOn ? { closedOn: d.closedOn } : {}),
     })),
     fixed: s.fixed,
-    incomes: s.incomes,
+    ...(short ? {} : { incomes: s.incomes }),
     calendar: calendar.map(e => {
       const m = s.marks[e.key];
       return {
@@ -139,24 +154,23 @@ export function buildExchange(s: ExchangeState, now: string): ExchangeFile {
         ...(e.approx ? { approx: true } : {}), ...(e.dateMode !== 'exact' ? { dateMode: e.dateMode } : {}),
         // сумма или дата внесены в приложении вручную — это не оценка
         ...(s.overrides[e.key] ? { exact: true } : {}), ...(e.planned ? { planned: e.planned } : {}),
-        done: !!m?.done, ...(m?.done && m.amount != null ? { paid: r0(m.amount) } : {}),
+        done: !!m?.done, ...(m?.done && m.amount != null ? { paid: r0(m.amount) } : {}), ...(m?.paidFrom ? { paidFrom: m.paidFrom } : {}),
       };
     }),
-    events: s.oneOff.filter(e => e.date >= addDays(now, -45)).map(e => ({
+    ...(short ? {} : { events: s.oneOff.filter(e => e.date >= addDays(now, -45)).map(e => ({
       key: e.key, date: e.date, title: e.title, amount: r0(e.amount), kind: e.kind === 'income' ? 'income' : 'payment',
       ...(e.dateMode !== 'exact' ? { dateMode: e.dateMode } : {}), ...(e.note ? { note: e.note } : {}), ...(e.debtId ? { debtId: e.debtId } : {}),
-    })),
+    })) }),
     expensesFrom: from,
     expenses: s.expenses.filter(e => e.date >= from).map(e => ({ id: e.id, date: e.date, amount: e.amount, category: e.category, ...(e.note ? { note: e.note } : {}), source: e.source, ...(e.creditCard ? { creditCard: e.creditCard } : {}) })),
     reserve: r0(s.reserve),
-    savings: r0(s.savings),
+    ...(short ? {} : { savings: r0(s.savings) }),
     card: s.cardBalance ? { amount: r0(s.cardBalance.amount), date: s.cardBalance.date } : null,
-    weeks: Object.values(s.closures).sort((a, b) => b.monday.localeCompare(a.monday)).slice(0, 8)
+    weeks: Object.values(s.closures).sort((a, b) => b.monday.localeCompare(a.monday)).slice(0, short ? 4 : 8)
       .map(w => ({ monday: w.monday, ...weekFields(s, w.monday), ...(w.topUp ? { topUp: r0(w.topUp) } : {}), ...(w.transferred ? { transferred: r0(w.transferred) } : {}) })),
     bridge: bridgeOut(s),
     checklist: s.checklist.map(c => ({ ...c, done: s.checks[c.id]?.done ?? !!c.done })),
-    strategy: s.strategy,
-    rules: s.rules,
+    ...(short ? {} : { strategy: s.strategy, rules: s.rules }),
   };
 }
 
@@ -494,9 +508,11 @@ const stepCalendar: Step = (f, s, ctx) => {
     if (p.done === true) {
       const paid = isNum(p.paid) ? p.paid : mark?.done && mark.amount != null ? mark.amount : isNum(p.amount) ? p.amount : e.amount;
       if (!mark?.done || Math.abs((mark.amount ?? e.amount) - paid) >= 1) {
-        marks[e.key] = { ...mark, done: true, amount: paid, at: ctx.at };
+        marks[e.key] = { ...mark, done: true, amount: paid, at: ctx.at, ...(p.paidFrom === 'card' || p.paidFrom === 'reserve' ? { paidFrom: p.paidFrom } : {}) };
         mc = true;
         lines.push(`${name}: ${e.kind === 'income' ? 'пришло' : 'оплачено'} ${money(paid)}`);
+        // платёж по долгу с кредитки — против правил плана: отмечаем, но предупреждаем
+        if ((p.paidFrom as string) === 'credit' && e.debtId) lines.push(`⚠ ${name}: платёж по долгу с кредитки — так нельзя по правилам плана`);
       }
     } else if (p.done === false && mark?.done) {
       delete marks[e.key];
@@ -708,3 +724,29 @@ export function applyExchange(f: ExchangeFile, s: ExchangeState, now: string, on
 }
 
 export const exchangeFileName = (now: string) => `Курс — обмен ${now}.json`;
+
+/** Итог файла перед применением, по-человечески: «Траты: +3 (1 234 ₽)», «Отмечено: …», «Резерв: … → …», повторы */
+export function exchangeDigest(f: ExchangeFile, s: ExchangeState, now: string): string[] {
+  const { sections, patch } = run(f, s, now, null, () => `preview-${Math.random()}`);
+  const out: string[] = [];
+  if (patch.expenses) {
+    const have = new Set(s.expenses.map(e => e.id));
+    const added = patch.expenses.filter(e => !have.has(e.id));
+    const left = new Set(patch.expenses.map(e => e.id));
+    const removed = s.expenses.filter(e => !left.has(e.id)).length;
+    if (added.length) out.push(`Траты: +${added.length} (${money(added.reduce((t, e) => t + e.amount, 0))})`);
+    if (removed) out.push(`Траты удалены: ${removed}`);
+  }
+  if (patch.marks) {
+    const titles = new Map(eventsBetween(s, addDays(now, -90), addDays(now, 400)).map(e => [e.key, e.title]));
+    for (const [k, m] of Object.entries(patch.marks)) {
+      if (m.done && !s.marks[k]?.done) out.push(`Отмечено: ${titles.get(k) ?? k}${m.amount != null ? ` — ${money(m.amount)}` : ''}`);
+    }
+  }
+  if (patch.reserve != null) out.push(`Резерв: ${money(s.reserve)} → ${money(patch.reserve)}`);
+  if (patch.bridge) out.push(patch.bridge.closed ? 'Мост на кредитке закрыт' : 'Мост: план по неделям');
+  const dups = sections.flatMap(x => x.lines).filter(l => l.startsWith('Уже есть')).length;
+  if (dups) out.push(`Пропущено как повтор: ${dups}`);
+  const warn = sections.flatMap(x => x.lines).filter(l => l.startsWith('⚠'));
+  return [...warn, ...out];
+}

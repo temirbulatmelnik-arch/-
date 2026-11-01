@@ -1,6 +1,7 @@
 import { BellRing, ChevronLeft, ChevronRight, Repeat, WalletCards } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import { CoverageCard } from '../components/Coverage';
 import { LevelChart, MonthGrid, verdict, type DayMoney } from '../components/MoneyLevel';
 import { SkyButton, SkyHeader } from '../components/Petersburg';
 import { EventRow } from '../components/rows';
@@ -143,6 +144,8 @@ export function Payments() {
           </div>
         ) : <p className="px-5 text-[14px] text-muted">Ничего не уходит и не приходит.</p>}
       </section>
+
+      <CoverageCard />
 
       {overdue.length > 0 && (
         <section className="mt-6">

@@ -10,7 +10,7 @@ import { categoryLimit, currentPhase, DEFAULT_PLAN, setPlanSource, splitBonus, t
 import { fromAi, fromDrafts } from './proposals';
 import { cashFlow, dailyLevels } from './cashflow';
 import { mergeSeed, type PlanState } from './planUpdate';
-import { applyExchange, buildExchange, dropChatTwins, normalize, parseExchange, previewExchange, type ExchangeState } from './exchange';
+import { applyExchange, buildExchange, dropChatTwins, exchangeDigest, normalize, parseExchange, previewExchange, type ExchangeState } from './exchange';
 import { parseStatementText, isIncomeLine } from './pdf';
 import { weekReport, weekToClose } from './weekly';
 import { dayBudget, weekSummary } from './summary';
@@ -18,7 +18,8 @@ import { bridgeState, weekMoney, type Bridge } from './bridge';
 import { isWorkday, workdayOnOrBefore } from './workdays';
 import { draft } from './statements';
 import { parseCsv, parseText } from './statements';
-import type { Debt, Expense, PlanSeed } from './types';
+import type { CalEvent, Debt, Expense, PlanSeed } from './types';
+import { coverage, coverageHints } from './coverage';
 import { open, seal } from './vault';
 
 const debt = (p: Partial<Debt>): Debt => ({
@@ -584,5 +585,57 @@ describe('мост на кредитке', () => {
     expect(previewExchange(normalize(parseExchange(JSON.stringify(out))!, after), after, '2026-11-03')).toEqual([]);
     const closed = applyExchange(normalize(parseExchange(JSON.stringify({ app: 'kurs-exchange', version: 2, bridge: { closed: true } }))!, after), after, '2026-11-03', new Set(['bridge' as const]), () => 'z');
     expect(closed.bridge!.closed).toBe(true);
+  });
+});
+
+describe('покрытие обязательных платежей', () => {
+  const ev = (key: string, date: string, title: string, amount: number, kind: 'payment' | 'income' = 'payment'): CalEvent =>
+    ({ key, date, dateMode: 'exact', kind, title, amount });
+  // пополнения карты обнулены — проверяем только платежи и поступления
+  const cal = (oneOff: CalEvent[]) => ({ debts: [], incomes: [], fixed: [], oneOff, templateFrom: '2027-06', weeklyOverrides: [{ from: '2026-10-26', to: '2027-12-31', amount: 0 }] });
+  const base = { marks: {}, debts: [] as Debt[], expenses: [] as Expense[] };
+
+  it('минимум, узкие места, месяцы, перенос пополнения закрывает нехватку', () => {
+    const oneOff = [ev('one:a', '2026-11-10', 'Зарплата', 20000, 'income'), ev('pay:loan:2026-11', '2026-11-11', 'Кредит', 25000), ev('one:gift', '2026-11-16', 'Подарок', 4000)];
+    const input = { ...base, cal: cal(oneOff), reserve: 6000 };
+    const c = coverage(input, '2026-11-01');
+    expect(c.min).toMatchObject({ date: '2026-11-16', balance: -3000 });
+    expect(c.shortage).toMatchObject({ date: '2026-11-16', amount: 3000 });
+    expect(c.narrow.map(s => s.date)).toEqual(['2026-11-11', '2026-11-16']);
+    expect(c.months[0]).toMatchObject({ month: '2026-11', payments: 29000, incomes: 20000, net: -9000 });
+    const hints = coverageHints(input, '2026-11-01', c);
+    expect(hints.some(h => h.text.includes('Подарок') && h.closes)).toBe(true);
+  });
+
+  it('мост: погашение с процентами в срок и рост минималки кредитки', () => {
+    const sber = { ...DEBTS[0], id: 'sber-card', rate: 0.388 };
+    const bridge: Bridge = { card: 'sber-card', cap: 7782, repayBy: '2027-02-18', weeks: [{ monday: '2026-11-02', fromReserve: 0, fromCredit: 3000 }] };
+    const oneOff = [ev('pay:sber-card:2026-11', '2026-11-30', 'Сбер', 18000)];
+    oneOff[0].debtId = 'sber-card';
+    const c = coverage({ ...base, debts: [sber], bridge, cal: cal(oneOff), reserve: 50000 }, '2026-11-01');
+    const sberStep = c.steps.find(s => s.key === 'pay:sber-card:2026-11')!;
+    expect(sberStep.delta).toBe(-(18000 + Math.round(3000 * (0.02 + 0.388 / 12))));
+    const repay = c.steps.find(s => s.kind === 'bridge')!;
+    expect(repay.date).toBe('2027-02-18');
+    expect(-repay.delta).toBeGreaterThan(3000);
+  });
+});
+
+describe('обмен: короткая выгрузка и сводка', () => {
+  it('короткая выгрузка без шаблонов и стратегии, с версией протокола и покрытием; сводка по-человечески', () => {
+    const s: ExchangeState = {
+      debts: DEBTS, incomes: [{ kind: 'salary', name: 'Зарплата', day: 10, amount: 50_000 }], fixed: [], oneOff: [], templateFrom: '2026-11',
+      weeklyOverrides: [], overrides: {}, marks: {}, plan: PLAN, expenses: [{ id: 'old', date: '2026-10-01', amount: 100, category: 'fun', source: 'life', createdAt: '' }],
+      reserve: 50_000, savings: 0, cardBalance: null, checklist: [], checks: {}, strategy: [{ title: 'Суть', text: 'т' }], rules: ['п'], closures: {},
+    };
+    const short = buildExchange(s, '2026-11-05', { short: true });
+    expect(short).toMatchObject({ protocolVersion: '2.2', short: true });
+    expect(short.incomes).toBeUndefined();
+    expect(short.strategy).toBeUndefined();
+    expect(short.expenses).toEqual([]);
+    expect((short.status as { coverage: { to: string } }).coverage.to >= '2027-04-04').toBe(true);
+    const f = normalize(parseExchange('Вот блок:\n```json\n' + JSON.stringify({ app: 'kurs-exchange', version: 2, from: 'chat', reserve: 60_000,
+      expenses: [{ date: '2026-11-05', amount: 300, category: 'fun' }, { date: '2026-11-05', amount: 200, category: 'taxi' }] }) + '\n```\nПроверь.')!, s);
+    expect(exchangeDigest(f, s, '2026-11-05').map(l => l.replace(/\s/g, ' '))).toEqual(['Траты: +2 (500 ₽)', 'Резерв: 50 000 ₽ → 60 000 ₽']);
   });
 });
