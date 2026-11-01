@@ -7,6 +7,7 @@ import { annuity } from '../domain/calendar';
 import { addDays, monthKey, monthsBetween, today } from '../domain/dates';
 import { setPlanSource, totalDebt, type PlanConfig } from '../domain/plan';
 import { mergeSeed } from '../domain/planUpdate';
+import type { Bridge } from '../domain/bridge';
 import { fixDefaultCategories } from '../domain/categorize';
 import { dropChatTwins } from '../domain/exchange';
 import type { CalEvent, CardBalance, ChecklistItem, Debt, DebtSnapshot, EventMark, Expense, FixedItem, IncomeTemplate, PlanSeed, ReserveMove, Settings, StrategySection, WeekClosure, WeeklyOverride, WishItem } from '../domain/types';
@@ -56,6 +57,8 @@ interface Data {
   closures: Record<string, WeekClosure>;
   /** остаток на зарплатной карте — для прогноза денег по дням */
   cardBalance: CardBalance | null;
+  /** мост на кредитке до премии; null — нет */
+  bridge: Bridge | null;
   settings: Settings;
 }
 
@@ -109,7 +112,7 @@ const nowIso = () => new Date().toISOString();
 const EMPTY: Data = {
   ready: false, asOf: today(), debts: [], incomes: [], fixed: [], oneOff: [], templateFrom: monthKey(today()),
   weeklyOverrides: [], planTrajectory: [], baselineTrajectory: [], reserve: 0, reserveLog: [], expenses: [], marks: {}, wishes: [], snapshots: [], overrides: {}, plan: null,
-  planRev: 0, planCode: '', checklist: [], strategy: [], rules: [], checks: {}, savings: 0, savingsLog: [], closures: {}, cardBalance: null,
+  planRev: 0, planCode: '', checklist: [], strategy: [], rules: [], checks: {}, savings: 0, savingsLog: [], closures: {}, cardBalance: null, bridge: null,
   settings: DEFAULT_SETTINGS,
 };
 

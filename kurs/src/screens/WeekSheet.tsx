@@ -7,6 +7,7 @@ import { AmountInput, Bar, CatIcon, Money, PrimaryButton, SecondaryButton, Sheet
 import { addDays, ddmm } from '../domain/dates';
 import { parseAmount } from '../domain/money';
 import { CATEGORY } from '../domain/plan';
+import { bridgeWeek } from '../domain/bridge';
 import { weekReport } from '../domain/weekly';
 import { useStore } from '../store/store';
 import { toast, useUi } from '../store/ui';
@@ -22,9 +23,9 @@ export function WeekSheet() {
 }
 
 function Body({ monday }: { monday: string }) {
-  const [expenses, debts, overrides, closure, closeWeek, reopenWeek] = useStore(useShallow(s => [s.expenses, s.debts, s.weeklyOverrides, s.closures[monday], s.closeWeek, s.reopenWeek] as const));
+  const [expenses, debts, overrides, closure, closeWeek, reopenWeek, bridge] = useStore(useShallow(s => [s.expenses, s.debts, s.weeklyOverrides, s.closures[monday], s.closeWeek, s.reopenWeek, s.bridge] as const));
   const set = useUi(s => s.set);
-  const r = useMemo(() => weekReport(expenses, debts, overrides, monday), [expenses, debts, overrides, monday]);
+  const r = useMemo(() => weekReport(expenses, debts, overrides, monday, bridge), [expenses, debts, overrides, monday, bridge]);
   const [amount, setAmount] = useState(String(Math.round(r.topUp)));
   const value = parseAmount(amount) ?? 0;
   const max = Math.max(...r.byCategory.map(c => c.spent), 1);
@@ -68,7 +69,9 @@ function Body({ monday }: { monday: string }) {
           ))}
         </div>
       )}
-      {r.credit > 0 && <p className="rounded-2xl bg-neg/10 px-4 py-3 text-[13px] text-neg">С кредиток за неделю: <Money value={r.credit} />. Кредитки только гасим.</p>}
+      {r.credit > 0 && (bridgeWeek(bridge, monday)
+        ? <p className="rounded-2xl bg-warn/12 px-4 py-3 text-[13px] text-warn">С кредитки по мосту за неделю: <Money value={r.credit} />. Только покупки, погасить до {bridge?.repayBy ? ddmm(bridge.repayBy) : 'срока моста'}.</p>
+        : <p className="rounded-2xl bg-neg/10 px-4 py-3 text-[13px] text-neg">С кредиток за неделю: <Money value={r.credit} />. Кредитки только гасим.</p>)}
 
       {closure ? (
         <>

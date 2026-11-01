@@ -1,5 +1,7 @@
 // Итог недели: сколько потрачено из лимита, по категориям, и сколько долить на карту жизни из резерва в воскресенье.
 // Остаток недели остаётся на карте и уменьшает пополнение: долить = лимит следующей недели − остаток.
+// В недели моста на кредитке из резерва доливают по плану моста, а остаток уменьшает траты с кредитки.
+import { bridgeWeek, weekMoney, type Bridge } from './bridge';
 import { addDays, fromKey, weekStart } from './dates';
 import { CATEGORIES, weeklyLimit } from './plan';
 import { countsWeekly } from './summary';
@@ -32,16 +34,19 @@ export interface WeekReport {
   topUp: number;
 }
 
-export function weekReport(expenses: Expense[], debts: Debt[], overrides: WeeklyOverride[], monday: string): WeekReport {
+export function weekReport(expenses: Expense[], debts: Debt[], overrides: WeeklyOverride[], monday: string, bridge?: Bridge | null): WeekReport {
   const sunday = addDays(monday, 6);
   const list = expenses.filter(e => e.date >= monday && e.date <= sunday);
   const counted = list.filter(countsWeekly);
   const spent = counted.reduce((s, e) => s + e.amount, 0);
   const limit = weeklyLimit(debts, monday, overrides);
   const nextLimit = weeklyLimit(debts, addDays(monday, 7), overrides);
-  const leftover = Math.max(0, limit - spent);
+  // на карте осталось по учёту: в неделю моста — карта отдельно от кредитки
+  const leftover = Math.max(0, bridgeWeek(bridge, monday) ? weekMoney(expenses, debts, overrides, bridge, monday).cardLeft : limit - spent);
+  const next = bridgeWeek(bridge, addDays(monday, 7));
   return {
-    monday, sunday, limit, spent, left: limit - spent, count: list.length, nextLimit, leftover, topUp: Math.max(0, nextLimit - leftover),
+    monday, sunday, limit, spent, left: limit - spent, count: list.length, nextLimit, leftover,
+    topUp: next ? next.fromReserve : Math.max(0, nextLimit - leftover),
     credit: list.filter(e => e.source === 'credit').reduce((s, e) => s + e.amount, 0),
     byCategory: CATEGORIES.map(c => ({ id: c.id, spent: counted.filter(e => e.category === c.id).reduce((s, e) => s + e.amount, 0) }))
       .filter(r => r.spent > 0).sort((a, b) => b.spent - a.spent),

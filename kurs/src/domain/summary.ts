@@ -1,4 +1,5 @@
 // Сводки для экранов: неделя, месяц по категориям, что требует внимания сегодня.
+import { bridgeWeek, onBridgeCard, type Bridge } from './bridge';
 import { addDays, daysBetween, ddmm, monthKey, weekStart } from './dates';
 import { eventsBetween, urgency, type CalendarInput } from './calendar';
 import { baselineOf, BIG_PURCHASE_HOURS, CATEGORIES, categoryLimit, currentPhase, weeklyLimit } from './plan';
@@ -102,6 +103,7 @@ export interface Alert {
 }
 
 export function alerts(opts: {
+  bridge?: Bridge | null;
   cal: CalendarInput; marks: Record<string, EventMark>; expenses: Expense[]; wishes: WishItem[];
   now: string; nowMs: number; lastBackupAt?: string; lastIcsAt?: string;
   checklist?: ChecklistItem[]; checks?: Record<string, { done: boolean }>;
@@ -121,7 +123,8 @@ export function alerts(opts: {
       out.push({ id: e.key, tone: 'good', event: e, action: 'income', title: `Ожидается: ${e.title}`, text: 'Пришла? В тот же день распределите: резерв по формуле, остальное — досрочно в долг.' });
     }
   }
-  const credit = opts.expenses.filter(e => e.source === 'credit' && daysBetween(e.date, opts.now) <= 30);
+  // траты моста на кредитке — по плану, не нарушение
+  const credit = opts.expenses.filter(e => e.source === 'credit' && daysBetween(e.date, opts.now) <= 30 && !(opts.bridge && bridgeWeek(opts.bridge, weekStart(e.date)) && onBridgeCard(e, opts.bridge)));
   if (credit.length) {
     out.push({ id: 'credit', tone: 'danger', title: `Траты с кредитки за 30 дней: ${credit.length}`, text: 'Кредитки только гасим. Каждая трата с них отодвигает свободу и стоит 40–60% годовых.' });
   }

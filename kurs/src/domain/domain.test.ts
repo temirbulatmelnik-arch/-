@@ -14,6 +14,7 @@ import { applyExchange, buildExchange, dropChatTwins, normalize, parseExchange, 
 import { parseStatementText, isIncomeLine } from './pdf';
 import { weekReport, weekToClose } from './weekly';
 import { dayBudget, weekSummary } from './summary';
+import { bridgeState, weekMoney, type Bridge } from './bridge';
 import { isWorkday, workdayOnOrBefore } from './workdays';
 import { draft } from './statements';
 import { parseCsv, parseText } from './statements';
@@ -532,5 +533,56 @@ describe('файл обмена с чатом', () => {
     expect(patch.plan!.bonusRules!['2026-12']).toBeTruthy();
     expect(patch.plan!.bonusRules!['2027-04']).toEqual({ targets: ['split'] });
     expect(parseExchange('просто текст')).toBeNull();
+  });
+});
+
+describe('мост на кредитке', () => {
+  const ov = [{ from: '2026-10-26', to: '2026-11-01', amount: 8400 }, { from: '2026-11-02', to: '2026-11-29', amount: 8000 }];
+  const bridge: Bridge = { card: 'sber-card', cap: 7782, repayBy: '2027-02-18', weeks: [
+    { monday: '2026-11-02', fromReserve: 0, fromCredit: 582 }, { monday: '2026-11-09', fromReserve: 4000, fromCredit: 4000 }, { monday: '2026-11-16', fromReserve: 4800, fromCredit: 3200 },
+  ] };
+  const exp = (id: string, date: string, amount: number, source: Expense['source'] = 'life', category: Expense['category'] = 'fun'): Expense => ({ id, date, amount, category, source, createdAt: '' });
+  const base: ExchangeState = {
+    debts: DEBTS, incomes: [], fixed: [], oneOff: [], templateFrom: '2026-10', weeklyOverrides: ov, overrides: {}, marks: {}, plan: PLAN,
+    expenses: [exp('a', '2026-10-31', 17930)], reserve: 65750, savings: 0, cardBalance: null,
+    checklist: [], checks: {}, strategy: [], rules: [], closures: {}, bridge: null,
+  };
+
+  it('перерасход уходит в минус; неделя моста: на карте по учёту, остальное с кредитки; итог — весь лимит', () => {
+    expect(weekMoney(base.expenses, DEBTS, ov, bridge, '2026-10-26').left).toBe(-9530);
+    const w = weekMoney(base.expenses, DEBTS, ov, bridge, '2026-11-02');
+    expect(w).toMatchObject({ limit: 8000, cardBudget: 7418, creditCap: 582, left: 8000 });
+    // траты с кредитки — в лимите недели, карта не трогается
+    const w2 = weekMoney([...base.expenses, exp('c', '2026-11-04', 7418), exp('d', '2026-11-05', 300, 'credit')], DEBTS, ov, bridge, '2026-11-02');
+    expect(w2).toMatchObject({ cardLeft: 0, creditLeft: 282, left: 282, spentCredit: 300 });
+    expect(dayBudget([exp('d', '2026-11-05', 300, 'credit')], DEBTS, ov, '2026-11-05').spentToday).toBe(300);
+    // остаток карты прошлой недели уменьшает кредит следующей, а не пополнение
+    expect(weekMoney([...base.expenses, exp('e', '2026-11-03', 7118)], DEBTS, ov, bridge, '2026-11-09')).toMatchObject({ creditCap: 3700, cardBudget: 4300 });
+    expect(weekReport(base.expenses, DEBTS, ov, '2026-11-02', bridge).topUp).toBe(4000);
+    // в календаре воскресное пополнение — по плану моста
+    const cal = { ...base, bridge };
+    expect(eventsBetween(cal, '2026-11-08', '2026-11-08').find(e => e.kind === 'weekly')!.amount).toBe(4000);
+    expect(eventsBetween(cal, '2026-11-01', '2026-11-01').find(e => e.kind === 'weekly')!.amount).toBe(0);
+    expect(bridgeState([exp('d', '2026-11-05', 300, 'credit'), exp('x', '2026-10-20', 999, 'credit')], bridge)).toMatchObject({ used: 300, left: 7482 });
+  });
+
+  it('обмен: мост целиком, вторая поездка с dup, выгрузка с фактом и обратно без изменений, закрытие', () => {
+    const file = normalize(parseExchange(JSON.stringify({ app: 'kurs-exchange', version: 2, bridge, expenses: [
+      { date: '2026-10-31', amount: 17930, note: 'то же' },
+      { date: '2026-11-02', amount: 95, category: 'transport', note: 'Метро' },
+      { date: '2026-11-02', amount: 95, category: 'transport', note: 'Метро, 2-я', dup: true },
+      { date: '2026-11-03', amount: 200, category: 'fun', source: 'credit' },
+    ] }))!, base);
+    const sections = previewExchange(file, base, '2026-11-03');
+    expect(sections.map(x => x.id)).toEqual(['bridge', 'expenses']);
+    const after = { ...base, ...applyExchange(file, base, '2026-11-03', new Set(sections.map(x => x.id)), () => 'n' + Math.random()) };
+    expect(after.bridge!.weeks).toHaveLength(3);
+    expect(after.expenses.filter(e => e.amount === 95)).toHaveLength(2);
+    const out = buildExchange(after, '2026-11-03');
+    expect(out.bridge).toMatchObject({ cap: 7782, used: 200, left: 7582 });
+    expect((out.status as { week: Record<string, number> }).week).toMatchObject({ limit: 8000, spentLife: 190, spentCredit: 200, cardLeft: 7228, creditLeft: 382, left: 7610 });
+    expect(previewExchange(normalize(parseExchange(JSON.stringify(out))!, after), after, '2026-11-03')).toEqual([]);
+    const closed = applyExchange(normalize(parseExchange(JSON.stringify({ app: 'kurs-exchange', version: 2, bridge: { closed: true } }))!, after), after, '2026-11-03', new Set(['bridge' as const]), () => 'z');
+    expect(closed.bridge!.closed).toBe(true);
   });
 });

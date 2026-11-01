@@ -78,6 +78,6 @@ export function useToday(): string {
 }
 
 export function useCal(): CalendarInput {
-  const [debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides] = useStore(useShallow(s => [s.debts, s.incomes, s.fixed, s.oneOff, s.templateFrom, s.weeklyOverrides, s.overrides] as const));
-  return useMemo(() => ({ debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides }), [debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides]);
+  const [debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge] = useStore(useShallow(s => [s.debts, s.incomes, s.fixed, s.oneOff, s.templateFrom, s.weeklyOverrides, s.overrides, s.bridge] as const));
+  return useMemo(() => ({ debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge }), [debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge]);
 }

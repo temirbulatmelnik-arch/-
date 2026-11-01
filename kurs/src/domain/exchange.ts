@@ -2,6 +2,7 @@
 // Приложение выгружает всё, что знает (status — сводка только для чтения); чат возвращает тот же формат,
 // но только с изменениями. Списки с id/key — «добавить или изменить», удаление — только явное "delete": true.
 // Перед применением приложение показывает разницу по разделам; присланное без изменений ничего не трогает.
+import { bridgeState, weekMoney, type Bridge } from './bridge';
 import { eventsBetween, type CalendarInput } from './calendar';
 import { categorize } from './categorize';
 import { addDays, daysBetween, ddmm, plural } from './dates';
@@ -64,7 +65,10 @@ export interface ExchangeFile {
   /** разовые платежи и поступления */
   events?: ({ key?: string; date?: string; title?: string; amount?: number; kind?: 'payment' | 'income'; dateMode?: CalEvent['dateMode']; note?: string; debtId?: string } & Del)[];
   expensesFrom?: string;
-  expenses?: ({ id?: string; date?: string; amount?: number; category?: string; note?: string; source?: Source } & Del)[];
+  /** source credit — с кредитки, creditCard — id долга (без него — кредитка моста); dup — добавить, даже если такая дата и сумма уже есть */
+  expenses?: ({ id?: string; date?: string; amount?: number; category?: string; note?: string; source?: Source; creditCard?: string; dup?: boolean } & Del)[];
+  /** мост на кредитке — целиком; { closed: true } — закрыть. В выгрузке ещё used и left — факт */
+  bridge?: (Partial<Bridge> & { used?: number; left?: number }) | null;
   reserve?: number;
   savings?: number;
   card?: { amount: number; date: string } | null;
@@ -86,6 +90,21 @@ const hash = (s: string) => {
 
 /* ---------- Выгрузка ---------- */
 
+/** Неделя по источникам: всё в лимите, с карты, с кредитки; left меньше нуля — перерасход */
+function weekFields(s: ExchangeState, monday: string) {
+  const m = weekMoney(s.expenses, s.debts, s.weeklyOverrides, s.bridge, monday);
+  return {
+    limit: r0(m.limit), spent: r0(m.spent), left: r0(m.left), spentLife: r0(m.spentLife), spentCredit: r0(m.spentCredit),
+    cardLeft: r0(m.cardLeft), creditLeft: r0(m.creditLeft),
+  };
+}
+
+function bridgeOut(s: ExchangeState) {
+  const st = bridgeState(s.expenses, s.bridge);
+  if (!st) return null;
+  return { ...st.bridge, weeks: st.weeks.map(w => ({ ...w, used: r0(w.used) })), used: r0(st.used), left: r0(st.left) };
+}
+
 export function buildExchange(s: ExchangeState, now: string): ExchangeFile {
   const plan = s.plan ?? DEFAULT_PLAN;
   const week = weekSummary(s.expenses, s.debts, s.weeklyOverrides, now);
@@ -102,7 +121,7 @@ export function buildExchange(s: ExchangeState, now: string): ExchangeFile {
     status: {
       totalDebt: r0(totalDebt(s.debts)),
       phase: { id: phase.id, title: phase.title, weekly: phase.weekly, monthly: phase.monthly },
-      week: { from: week.monday, to: week.sunday, limit: r0(week.limit), spent: r0(week.spent), left: r0(week.left) },
+      week: { from: week.monday, to: week.sunday, ...weekFields(s, week.monday) },
       reserveNeed: { amount: r0(need.need), untilBonus: need.next },
     },
     limits: { weekly: s.weeklyOverrides, phases: plan.phases, categories: plan.categories, bonusRules: plan.bonusRules ?? {}, shortfall: plan.shortfallOverrides ?? {} },
@@ -128,12 +147,13 @@ export function buildExchange(s: ExchangeState, now: string): ExchangeFile {
       ...(e.dateMode !== 'exact' ? { dateMode: e.dateMode } : {}), ...(e.note ? { note: e.note } : {}), ...(e.debtId ? { debtId: e.debtId } : {}),
     })),
     expensesFrom: from,
-    expenses: s.expenses.filter(e => e.date >= from).map(e => ({ id: e.id, date: e.date, amount: e.amount, category: e.category, ...(e.note ? { note: e.note } : {}), source: e.source })),
+    expenses: s.expenses.filter(e => e.date >= from).map(e => ({ id: e.id, date: e.date, amount: e.amount, category: e.category, ...(e.note ? { note: e.note } : {}), source: e.source, ...(e.creditCard ? { creditCard: e.creditCard } : {}) })),
     reserve: r0(s.reserve),
     savings: r0(s.savings),
     card: s.cardBalance ? { amount: r0(s.cardBalance.amount), date: s.cardBalance.date } : null,
     weeks: Object.values(s.closures).sort((a, b) => b.monday.localeCompare(a.monday)).slice(0, 8)
-      .map(w => ({ monday: w.monday, limit: r0(w.limit), spent: r0(w.spent), left: r0(w.left), ...(w.topUp ? { topUp: r0(w.topUp) } : {}), ...(w.transferred ? { transferred: r0(w.transferred) } : {}) })),
+      .map(w => ({ monday: w.monday, ...weekFields(s, w.monday), ...(w.topUp ? { topUp: r0(w.topUp) } : {}), ...(w.transferred ? { transferred: r0(w.transferred) } : {}) })),
+    bridge: bridgeOut(s),
     checklist: s.checklist.map(c => ({ ...c, done: s.checks[c.id]?.done ?? !!c.done })),
     strategy: s.strategy,
     rules: s.rules,
@@ -204,7 +224,7 @@ export function normalize(p: Parsed, s: ExchangeState): ExchangeFile {
 
 /* ---------- Разница и применение ---------- */
 
-export type SectionId = 'limits' | 'fixed' | 'incomes' | 'debts' | 'events' | 'calendar' | 'expenses' | 'money' | 'checklist' | 'strategy';
+export type SectionId = 'limits' | 'bridge' | 'fixed' | 'incomes' | 'debts' | 'events' | 'calendar' | 'expenses' | 'money' | 'checklist' | 'strategy';
 
 export interface ExchangeSection {
   id: SectionId;
@@ -536,21 +556,48 @@ const stepExpenses: Step = (f, s, ctx) => {
       if (validCat(p.category) && p.category !== cur.category) { changes.push(`${catName(cur.category)} → ${catName(p.category)}`); next.category = p.category; }
       if (p.note != null && p.note !== (cur.note ?? '')) { changes.push(`«${p.note}»`); next.note = p.note || undefined; }
       if (p.source && SOURCES.includes(p.source) && p.source !== cur.source) { changes.push(SOURCE_NAME[p.source]); next.source = p.source; }
+      if (p.creditCard && p.creditCard !== cur.creditCard) { changes.push(`кредитка ${p.creditCard}`); next.creditCard = p.creditCard; }
       if (changes.length) { list[i] = next; lines.push(`${ddmm(cur.date)} ${cur.note || catName(cur.category)}: ${changes.join(', ')}`); }
       continue;
     }
     if (!isDate(p.date) || !isNum(p.amount) || p.amount <= 0) continue;
-    const twin = s.expenses.find(x => !matched.has(x.id) && sameSpend(x, p));
+    // dup — заведомо вторая такая же трата (вторая поездка в метро за день): повтором не считается
+    const twin = p.dup ? undefined : s.expenses.find(x => !matched.has(x.id) && sameSpend(x, p));
     if (twin) { matched.add(twin.id); lines.push(`Уже есть: ${ddmm(p.date)} ${twin.note || catName(twin.category)}, ${money(p.amount)}`); continue; }
     const category: CategoryId = validCat(p.category) ? p.category : (p.note && categorize(p.note)) || 'shopping';
     list.push({
       id: ctx.newId(), date: p.date, amount: p.amount, category, ...(p.note ? { note: p.note } : {}),
-      source: p.source && SOURCES.includes(p.source) ? p.source : 'life', origin: 'chat', createdAt: ctx.at,
+      source: p.source && SOURCES.includes(p.source) ? p.source : 'life', ...(p.source === 'credit' && p.creditCard ? { creditCard: p.creditCard } : {}), origin: 'chat', createdAt: ctx.at,
     });
     lines.push(`Новая: ${ddmm(p.date)} ${catName(category)}${p.note ? ` (${p.note})` : ''}, ${money(p.amount)}`);
   }
   const changed = lines.some(l => !l.startsWith('Уже есть'));
   return { lines, patch: changed ? { expenses: list.sort((a, b) => a.date.localeCompare(b.date)) } : {} };
+};
+
+/** Мост на кредитке: присылается целиком; used и left из выгрузки — факт, их не применяем */
+const stepBridge: Step = (f, s) => {
+  const lines: string[] = [];
+  if (f.bridge === undefined || f.bridge === null) return { lines, patch: {} };
+  if (f.bridge.closed) {
+    if (s.bridge && !s.bridge.closed) { lines.push('Мост на кредитке закрыт'); return { lines, patch: { bridge: { ...s.bridge, closed: true } } }; }
+    return { lines, patch: {} };
+  }
+  const b = f.bridge;
+  const weeks = (Array.isArray(b.weeks) ? b.weeks : [])
+    .filter(w => isDate(w.monday) && isNum(w.fromReserve) && isNum(w.fromCredit))
+    .map(w => ({ monday: w.monday, fromReserve: w.fromReserve, fromCredit: w.fromCredit }))
+    .sort((a, c) => a.monday.localeCompare(c.monday));
+  if (!weeks.length || !isNum(b.cap)) return { lines: ['Мост: нет недель или общего лимита — пропускаю'], patch: {} };
+  const next: Bridge = {
+    card: typeof b.card === 'string' && b.card ? b.card : 'sber-card', cap: b.cap, weeks,
+    ...(isDate(b.repayBy) ? { repayBy: b.repayBy } : {}), ...(typeof b.repayNote === 'string' && b.repayNote ? { repayNote: b.repayNote } : {}),
+  };
+  if (s.bridge && !s.bridge.closed && same(s.bridge, next)) return { lines, patch: {} };
+  const card = s.debts.find(d => d.id === next.card)?.short ?? next.card;
+  lines.push(`Мост на кредитке ${card}: не больше ${money(next.cap)}${next.repayBy ? `, погасить до ${ddmm(next.repayBy)}` : ''}`);
+  for (const w of weeks) lines.push(`Неделя с ${ddmm(w.monday)}: из резерва ${money(w.fromReserve)}, с кредитки до ${money(w.fromCredit)}`);
+  return { lines, patch: { bridge: next } };
 };
 
 const stepMoney: Step = (f, s) => {
@@ -619,6 +666,7 @@ const stepStrategy: Step = (f, s) => {
 
 const STEPS: [SectionId, string, Step][] = [
   ['limits', 'Лимиты', stepLimits],
+  ['bridge', 'Мост на кредитке', stepBridge],
   ['fixed', 'Обязательные платежи', stepFixed],
   ['incomes', 'Поступления по шаблону', stepIncomes],
   ['debts', 'Долги', stepDebts],

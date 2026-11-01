@@ -68,16 +68,16 @@ function useOverPill(left: number, alert: boolean) {
 export function Week() {
   const now = useToday();
   const cal = useCal();
-  const [expenses, debts, marks, wishes, reserve, settings, overrides, startTotal, closures, checklist, checks, toggleCheck] = useStore(useShallow(s => [
-    s.expenses, s.debts, s.marks, s.wishes, s.reserve, s.settings, s.weeklyOverrides, s.planTrajectory[0]?.[1] ?? 0, s.closures, s.checklist, s.checks, s.toggleCheck,
+  const [expenses, debts, marks, wishes, reserve, settings, overrides, startTotal, closures, checklist, checks, toggleCheck, bridge] = useStore(useShallow(s => [
+    s.expenses, s.debts, s.marks, s.wishes, s.reserve, s.settings, s.weeklyOverrides, s.planTrajectory[0]?.[1] ?? 0, s.closures, s.checklist, s.checks, s.toggleCheck, s.bridge,
   ] as const));
   const ui = useUi();
   const week = useMemo(() => weekSummary(expenses, debts, overrides, now), [expenses, debts, overrides, now]);
   const today = useMemo(() => dayBudget(expenses, debts, overrides, now), [expenses, debts, overrides, now]);
   const phase = currentPhase(debts, now);
   const planPhase = phaseByDate(now);
-  const list = useMemo(() => buildAlerts({ cal, marks, expenses, wishes, now, nowMs: Date.now(), lastBackupAt: settings.lastBackupAt, lastIcsAt: settings.lastIcsAt, checklist, checks }),
-    [cal, marks, expenses, wishes, now, settings.lastBackupAt, settings.lastIcsAt, checklist, checks]);
+  const list = useMemo(() => buildAlerts({ bridge, cal, marks, expenses, wishes, now, nowMs: Date.now(), lastBackupAt: settings.lastBackupAt, lastIcsAt: settings.lastIcsAt, checklist, checks }),
+    [bridge, cal, marks, expenses, wishes, now, settings.lastBackupAt, settings.lastIcsAt, checklist, checks]);
   const pending = wishes.filter(w => !w.resolved);
   const debt = totalDebt(debts);
   const over = week.left < 0;
@@ -86,14 +86,14 @@ export function Week() {
   const pill = useOverPill(today.left, dayAlert);
   const { need, next } = reserveNeed(now, debts);
   // воскресное пополнение карты жизни: лимит следующей недели минус то, что на ней осталось
-  const current = useMemo(() => weekReport(expenses, debts, overrides, week.monday), [expenses, debts, overrides, week.monday]);
+  const current = useMemo(() => weekReport(expenses, debts, overrides, week.monday, bridge), [expenses, debts, overrides, week.monday, bridge]);
   const topped = closures[week.monday]?.topUp;
 
   // в выходные и в начале недели — предложить закрыть неделю
   const closeMonday = weekToClose(now, closures);
   const dow = fromKey(now).getDay();
   const offerClose = !closures[closeMonday] && (dow === 0 || dow === 6 || closeMonday < week.monday);
-  const closing = useMemo(() => (offerClose ? weekReport(expenses, debts, overrides, closeMonday) : null), [offerClose, expenses, debts, overrides, closeMonday]);
+  const closing = useMemo(() => (offerClose ? weekReport(expenses, debts, overrides, closeMonday, bridge) : null), [offerClose, expenses, debts, overrides, closeMonday, bridge]);
 
   // платежи: просроченные и на 3 дня — из предупреждений, плюс всё неотмеченное на неделю вперёд
   const ahead = useMemo(() => {

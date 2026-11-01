@@ -35,7 +35,7 @@ function Body({ e }: { e: CalEvent }) {
   // пополнение по воскресеньям: до лимита следующей недели минус остаток уходящей
   const monday = e.kind === 'weekly' ? addDays(e.date, -6) : '';
   const [amount, setAmount] = useState(() => {
-    if (mark?.amount == null && e.kind === 'weekly') { const s = useStore.getState(); return String(Math.round(weekReport(s.expenses, s.debts, s.weeklyOverrides, monday).topUp)); }
+    if (mark?.amount == null && e.kind === 'weekly') { const s = useStore.getState(); return String(Math.round(weekReport(s.expenses, s.debts, s.weeklyOverrides, monday, s.bridge).topUp)); }
     return String(Math.round((mark?.amount ?? e.amount) * 100) / 100);
   });
   const [editing, setEditing] = useState(false);

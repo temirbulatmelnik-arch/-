@@ -1,6 +1,7 @@
 // Календарь платежей и поступлений: разовые события из плана + ежемесячный шаблон + воскресные пополнения карты жизни.
 import { addDays, dayIn, monthKey, weekStart } from './dates';
 import type { CalEvent, Debt, EventMark, FixedItem, IncomeTemplate, WeeklyOverride } from './types';
+import { bridgeWeek, type Bridge } from './bridge';
 import { weeklyLimit } from './plan';
 import { workdayOnOrBefore } from './workdays';
 
@@ -35,6 +36,8 @@ export interface CalendarInput {
   weeklyOverrides: WeeklyOverride[];
   /** точная сумма и дата платежа со скриншота банка вместо оценки */
   overrides?: Record<string, { amount?: number; date?: string }>;
+  /** мост на кредитке: в его недели из резерва доливают по плану моста, а не весь лимит */
+  bridge?: Bridge | null;
 }
 
 /** Все события в диапазоне дат [from, to]. Перенос даты вручную учитывается: генерируем с запасом и фильтруем после. */
@@ -94,7 +97,7 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
     const mon = addDays(sun, 1);
     out.push({
       key: `wk:${mon}`, date: sun, dateMode: 'exact', kind: 'weekly', title: 'Долить карту жизни до лимита',
-      amount: weeklyLimit(input.debts, mon, input.weeklyOverrides),
+      amount: bridgeWeek(input.bridge, mon)?.fromReserve ?? weeklyLimit(input.debts, mon, input.weeklyOverrides),
     });
   }
 

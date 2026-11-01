@@ -57,6 +57,8 @@ export interface Expense {
   category: CategoryId;
   note?: string;
   source: Source;
+  /** кредитка, с которой трата (id долга); без него — кредитка моста */
+  creditCard?: string;
   /** откуда пришла: вручную, выписка, скриншот */
   origin?: 'manual' | 'csv' | 'text' | 'ai' | 'pdf' | 'chat';
   /** для поиска дублей при импорте */

@@ -2,7 +2,8 @@
 import { AlertTriangle, Hourglass, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { CATEGORY_ICON, PrimaryButton, SecondaryButton, Segmented, Sheet } from '../components/ui';
-import { today } from '../domain/dates';
+import { bridgeWeek, weekMoney } from '../domain/bridge';
+import { today, weekStart } from '../domain/dates';
 import { parseAmount, rub } from '../domain/money';
 import { BIG_PURCHASE, CATEGORIES, CATEGORY } from '../domain/plan';
 import { weekSummary } from '../domain/summary';
@@ -28,6 +29,7 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   const [amount, setAmount] = useState(edit ? String(edit.amount) : p.amount ? String(p.amount) : '');
   const [category, setCategory] = useState<CategoryId | null>(edit?.category ?? p.category ?? null);
   const [source, setSource] = useState<Source>(edit?.source ?? 'life');
+  const bridge = useStore(s => s.bridge);
   const [note, setNote] = useState(edit?.note ?? p.note ?? '');
   const [date, setDate] = useState(edit?.date ?? today());
   const [askPause, setAskPause] = useState(false);
@@ -50,7 +52,9 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
     if (p.wishId) store.resolveWish(p.wishId, 'bought');
     const s = useStore.getState();
     const week = weekSummary(s.expenses, s.debts, s.weeklyOverrides, today());
-    if (source === 'credit') toast('Записано как нарушение: с кредиток не тратим');
+    const plan = source === 'credit' ? weekMoney(s.expenses, s.debts, s.weeklyOverrides, s.bridge, weekStart(date)) : null;
+    if (plan && plan.creditCap > 0) toast(plan.creditLeft >= 0 ? `Мост на кредитке: на неделе ещё ${rub(plan.creditLeft)}` : `Сверх моста на ${rub(-plan.creditLeft)} — это перерасход`);
+    else if (source === 'credit') toast('Записано как нарушение: с кредиток не тратим');
     else if (week.left < 0) toast(`Перерасход недели: ${rub(-week.left)}`);
     else toast(`Записано. На неделю осталось ${rub(week.left)}`);
     onDone();
@@ -105,7 +109,7 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
         { id: 'reserve', label: 'Из резерва' },
         { id: 'credit', label: 'Кредитка' },
       ]} />
-      {source === 'credit' && (
+      {source === 'credit' && !bridgeWeek(bridge, weekStart(date)) && (
         <p className="flex items-start gap-2 rounded-2xl bg-neg/10 px-4 py-3 text-[13px] leading-snug text-neg">
           <AlertTriangle size={16} className="mt-0.5 shrink-0" /> Кредитки заморожены — только гасим. Запишу как нарушение плана.
         </p>
