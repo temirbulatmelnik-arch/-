@@ -9,7 +9,7 @@ import { rub, parseAmount } from './money';
 import { categoryLimit, currentPhase, DEFAULT_PLAN, setPlanSource, splitBonus, targetDebt, weeklyLimit, type PlanConfig } from './plan';
 import { fromAi, fromDrafts } from './proposals';
 import { PROTOCOL_VERSION } from './sync';
-import { checkupPlan, ledger, type Checkup, type LedgerInput } from './ledger';
+import { accruedOnCard, checkupPlan, ledger, type Checkup, type LedgerInput } from './ledger';
 import { cashFlow, dailyLevels } from './cashflow';
 import { mergeSeed, type PlanState } from './planUpdate';
 import { applyExchange, buildExchange, dropChatTwins, exchangeDigest, normalize, parseExchange, previewExchange, type ExchangeState } from './exchange';
@@ -680,7 +680,7 @@ describe('учёт по счетам для воскресной сверки', 
     });
     const bridge = { card: 'c3', cap: 30_000, weeks: [{ monday: '2026-11-02', fromReserve: 5000, fromCredit: 3000 }] } as unknown as LedgerInput['bridge'];
     const l = ledger({
-      ...base, bridge,
+      ...base, bridge, now: '2026-11-01',
       debts: [card('c1', 1, 10_000), card('c2', 2, 20_000), card('c3', 5, 30_000, { limit: 100_000 }), card('c4', 3, 0, { closed: true }),
         { ...card('loan', 0, 50_000), kind: 'loan' }],
       expenses: [
@@ -693,6 +693,15 @@ describe('учёт по счетам для воскресной сверки', 
     expect(l.cards.map(c => c.expected)).toEqual([30_700, 10_000, 20_500]);
     expect(l.cards[0].bridge).toBe(true);
     expect(l.credit).toBe(30_700);
+  });
+
+  it('кредитка: проценты набегают по дням с последнего обновления остатка — как у банка', () => {
+    const d: Debt = { id: 'k', name: 'Кредитка', short: 'К', kind: 'card', balance: 100_000, startBalance: 100_000, rate: 0.365, dueDay: 10,
+      rule: { type: 'interestPlus', plus: 1000 } as Debt['rule'], frozen: true, order: 1, closed: false, updatedAt: '2026-11-01T10:00:00.000Z' };
+    expect(accruedOnCard(d, '2026-11-11')).toBe(1000);
+    expect(accruedOnCard(d, '2026-10-20')).toBe(0);
+    expect(accruedOnCard({ ...d, kind: 'loan' }, '2026-11-11')).toBe(0);
+    expect(ledger({ ...base, debts: [d], now: '2026-11-11' }).cards[0]).toMatchObject({ expected: 101_000, accrued: 1000 });
   });
 
   it('перевод: без моста — лимит минус остаток недели, поступления с карты — в резерв', () => {

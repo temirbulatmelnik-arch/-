@@ -2,7 +2,7 @@
 // кредитке моста — от последней сверки. В воскресенье вечером человек вводит, что видит в банке, приложение сравнивает
 // и считает, сколько перевести между картой и резервом.
 import { activeBridge, bridgeWeek, weekMoney, type Bridge } from './bridge';
-import { addDays } from './dates';
+import { addDays, daysBetween, today } from './dates';
 import { weeklyLimit } from './plan';
 import type { CalEvent, CardBalance, Debt, EventMark, Expense, ReserveMove, WeeklyOverride } from './types';
 
@@ -43,9 +43,24 @@ export interface LedgerInput {
   oneOff: CalEvent[];
   debts: Debt[];
   bridge: Bridge | null;
+  /** на какой день считать (по умолчанию — сегодня): проценты по кредиткам набегают по дням */
+  now?: string;
 }
 
-export interface CardLedger { debt: Debt; expected: number; bridge: boolean }
+/** кредитка в сверке: expected — долг по учёту с процентами на сегодня, accrued — из них проценты с последнего
+ *  обновления остатка */
+export interface CardLedger { debt: Debt; expected: number; accrued: number; bridge: boolean }
+
+/**
+ * Проценты по кредитке, набежавшие с последнего обновления остатка до дня until — по дням, как считает банк.
+ * Остаток кредитки вносят из банка «всей задолженностью», то есть уже с процентами на тот день: поэтому проценты
+ * считаются от дня обновления, а не за целый месяц (иначе часть месяца посчиталась бы дважды).
+ */
+export function accruedOnCard(d: Debt, until: string): number {
+  if (d.kind !== 'card' || d.rule.type === 'schedule' || !d.updatedAt || d.balance <= 0) return 0;
+  const days = Math.max(0, Math.min(62, daysBetween(d.updatedAt.slice(0, 10), until)));
+  return Math.round(((d.balance * d.rate * days) / 365) * 100) / 100;
+}
 
 export interface Ledger {
   /** ожидаемый остаток карты; null — нет точки отсчёта */
@@ -57,7 +72,7 @@ export interface Ledger {
   credit: number | null;
   creditCard: Debt | null;
   /** все кредитки для сверки: первой — кредитка моста, затем открытые по порядку закрытия.
-   *  expected — долг по учёту: остаток плюс покупки с этой карты после последнего обновления остатка */
+   *  expected — долг по учёту: остаток, проценты по дням с его обновления и покупки с этой карты после него */
   cards: CardLedger[];
   /** обычные поступления, пришедшие на карту после сверки и ещё не переведённые в резерв */
   incomeOnCard: number;
@@ -126,10 +141,11 @@ export function ledger(s: LedgerInput): Ledger {
   // кредитки: остаток долга плюс покупки с карты после его последнего обновления
   // (трата с кредитки без указанной карты — с кредитки моста)
   const b = s.bridge && s.bridge.weeks.length ? s.bridge : null;
+  const now = s.now ?? today();
   const owed = (d: Debt) => {
     const at = d.updatedAt ?? '';
     const date = at.slice(0, 10);
-    let x = d.balance;
+    let x = d.balance + accruedOnCard(d, now);
     if (at) for (const e of s.expenses) if (e.source === 'credit' && (e.creditCard ?? b?.card) === d.id && (e.date > date || (e.date === date && e.createdAt > at))) x += e.amount;
     return Math.round(x * 100) / 100;
   };
@@ -138,7 +154,7 @@ export function ledger(s: LedgerInput): Ledger {
   const cards = s.debts
     .filter(d => d.id === creditCard?.id || (d.kind === 'card' && !d.closed))
     .sort((x, y) => Number(y.id === creditCard?.id) - Number(x.id === creditCard?.id) || x.order - y.order)
-    .map(d => ({ debt: d, expected: owed(d), bridge: d.id === creditCard?.id }));
+    .map(d => ({ debt: d, expected: owed(d), accrued: accruedOnCard(d, now), bridge: d.id === creditCard?.id }));
 
   return { card, cardFrom: ref ? { at: ref.at, date: ref.date } : null, reserve, credit, creditCard, cards, incomeOnCard: Math.max(0, Math.round(incomeOnCard * 100) / 100) };
 }

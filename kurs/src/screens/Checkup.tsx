@@ -1,7 +1,7 @@
 // Воскресная сверка с банком: остатки на карте, в резерве и долги на кредитках против учёта приложения.
-// Кредитки — все открытые: первой кредитка моста, под ней остальные. У каждой «Долг» и «Доступно», связанные лимитом:
-// вписали одно — второе считается само (доступно = лимит − долг, бывает меньше нуля). Лимит меняется здесь же.
-// «Без изменений» — долг как по учёту, без ввода.
+// Кредитки — все открытые: первой кредитка моста, под ней остальные. «Долг» — вся задолженность из банка (с процентами
+// на сегодня), её и сравниваем с учётом; «Доступно» — баланс карты (бывает меньше нуля): по нему и лимиту видно, сколько
+// в долге процентов, ещё не списанных банком, и не устарел ли лимит. «Без изменений» — долг как по учёту, без ввода.
 // Расхождения — словами, с кнопкой «внести трату»; затем сколько перевести между картой и резервом и «Перевёл».
 // Показывается сама в воскресенье после 18:00 при входе в приложение, пока сверка недели не сохранена.
 import { Check } from 'lucide-react';
@@ -141,7 +141,7 @@ function Body({ monday }: { monday: string }) {
       {led.cards.length > 0 && (
         <div className="space-y-1 px-1 pt-1">
           <div className="text-[15px] font-medium">Кредитки</div>
-          <p className="text-[12.5px] leading-snug text-muted">Удобнее вписать «Доступно» — баланс карты, он бывает и меньше нуля: долг посчитается по лимиту. Долг «с процентами на сегодня» не подходит — проценты месяца приложение добавит само в день платежа.</p>
+          <p className="text-[12.5px] leading-snug text-muted">«Долг» — вся задолженность из приложения банка, с процентами на сегодня. «Доступно» — баланс карты, он бывает меньше нуля: для минуса — кнопка «−». Проценты приложение считает по дням, как банк.</p>
         </div>
       )}
       {led.cards.map(c => (
@@ -204,10 +204,12 @@ function line(name: string, expected: number | null, actual: number): ReactNode 
   return <>{name} {Math.abs(d) <= MATCH ? 'сошлось' : <Money value={d} sign className={d < 0 ? 'text-neg' : ''} />}</>;
 }
 
-/** Кредитка в сверке: что вписано в «Долг» и «Доступно», какое поле вписывали последним, доступно меньше нуля,
- *  «без изменений» */
-type CardEntry = { debt: string; avail: string; src: 'debt' | 'available'; neg: boolean; same: boolean };
-const NO_ENTRY: CardEntry = { debt: '', avail: '', src: 'debt', neg: false, same: false };
+/** Кредитка в сверке: что вписано в «Долг» и «Доступно», «Доступно» меньше нуля, «без изменений» */
+type CardEntry = { debt: string; avail: string; neg: boolean; same: boolean };
+const NO_ENTRY: CardEntry = { debt: '', avail: '', neg: false, same: false };
+
+/** долг по карте: «без изменений» — как по учёту, иначе — вписанная «вся задолженность» из банка */
+const debtOf = (c: CardLedger, e: CardEntry): number | null => (e.same ? c.expected : parseAmount(e.debt));
 
 /** вписанное «Доступно»: знак — отдельной кнопкой «−», на цифровой клавиатуре iPhone минуса нет */
 function availOf(e: CardEntry): number | null {
@@ -215,42 +217,21 @@ function availOf(e: CardEntry): number | null {
   return a == null ? null : e.neg ? -Math.abs(a) : a;
 }
 
-/** долг по карте из того, что вписано: «без изменений» — как по учёту; при известном лимите вписали доступно —
- *  лимит минус доступно (доступно бывает меньше нуля — тогда долг больше лимита); иначе — вписанный долг */
-function debtOf(c: CardLedger, e: CardEntry): number | null {
-  if (e.same) return c.expected;
-  const limit = c.debt.limit;
-  if (limit && e.src === 'available') {
-    const a = availOf(e);
-    return a == null ? null : round(limit - a);
-  }
-  return parseAmount(e.debt);
-}
-
-/** сумма для поля ввода: целые — с пробелами между разрядами, копейки — через запятую */
-function amountText(x: number): string {
-  const [i, f] = Math.abs(round(x)).toFixed(2).split('.');
-  return `${x < 0 ? '−' : ''}${num(Number(i))}${f === '00' ? '' : `,${f}`}`;
-}
-
 function CardAccount({ c, entry, onEntry, onAddSpend }: {
   c: CardLedger; entry: CardEntry; onEntry: (p: Partial<CardEntry>) => void; onAddSpend: (x: number) => void;
 }) {
-  const { debt, expected } = c;
+  const { debt, expected, accrued } = c;
   const limit = debt.limit;
   const v = debtOf(c, entry);
-  // при известном лимите поля связаны: вписанное — как вписали, второе — посчитанное (доступно = лимит − долг,
-  // бывает меньше нуля, как «баланс» в банке). Без лимита поля независимы
-  const linked = !!limit && !entry.same;
-  const availValue: number | null = entry.same ? (limit ? limit - expected : null)
-    : !limit || entry.src === 'available' ? availOf(entry)
-    : v == null ? null : limit - v;
-  const debtShown = entry.same ? amountText(expected) : !linked || entry.src === 'debt' ? entry.debt : v == null ? '' : amountText(v);
-  const availOwn = !limit || (entry.src === 'available' && !entry.same);
-  const availShown = availOwn ? entry.avail : availValue == null ? '' : amountText(Math.abs(availValue));
-  const availNeg = availOwn ? entry.neg || (availValue ?? 0) < 0 : (availValue ?? 0) < 0;
-  const toggleSign = () => onEntry({ src: 'available', neg: !availNeg, avail: availOwn ? entry.avail : availValue == null ? '' : amountText(Math.abs(availValue)) });
+  const a = entry.same ? null : availOf(entry);
   const d = v == null ? null : round(v - expected);
+  // проценты банк считает по дням и чуть иначе — разница в пару десятых процента не в счёт
+  const near = d != null && Math.abs(d) <= Math.max(MATCH, expected * 0.002);
+  // «Доступно» уменьшают только списанные суммы: долг минус занятая часть лимита — проценты, начисленные, но ещё не списанные
+  const pending = limit && v != null && a != null ? round(v - (limit - a)) : null;
+  const neg = entry.neg || (a ?? 0) < 0;
+  // долг больше учёта ровно на проценты, которые банк ещё не списал, — это не трата, кнопку «Добавить трату» не предлагаем
+  const interestOnly = d != null && d > 0 && pending != null && pending > MATCH && d <= pending + Math.max(MATCH, expected * 0.002);
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3 px-1">
@@ -266,27 +247,43 @@ function CardAccount({ c, entry, onEntry, onAddSpend }: {
           Без изменений
         </button>
       </div>
-      {/* поля друг под другом: рядом суммы с копейками не помещаются */}
+      {/* поля друг под другом: рядом суммы с копейками не помещаются. Не label: кнопка «−» перехватывала бы нажатие */}
       <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2">
         <span className="px-1 text-[13px] text-muted">Долг</span>
-        <AmountInput size="sm" label={`${debt.short}: долг`} value={debtShown} disabled={entry.same} onChange={t => onEntry({ debt: t, src: 'debt' })} />
+        <AmountInput size="sm" label={`${debt.short}: долг, вся задолженность`} value={entry.same ? amountText(expected) : entry.debt} disabled={entry.same}
+          onChange={t => onEntry({ debt: t })} />
         <span className="px-1 text-[13px] text-muted">Доступно</span>
-        <AmountInput size="sm" label={`${debt.short}: доступно${availNeg ? ', меньше нуля' : ''}`} value={availShown} disabled={entry.same}
-          onChange={t => onEntry({ avail: t, src: 'available', neg: availNeg })}
-          prefix={<button type="button" onClick={toggleSign} disabled={entry.same} aria-pressed={availNeg} aria-label="Доступно меньше нуля"
-            className={`grid size-8 shrink-0 place-items-center self-center rounded-full text-[19px] leading-none font-medium transition-colors duration-150 ${availNeg ? 'bg-ink text-bg' : 'bg-surface-2 text-faint'}`}>−</button>} />
+        <AmountInput size="sm" label={`${debt.short}: доступно${neg ? ', меньше нуля' : ''}`} value={entry.same ? '' : entry.avail} disabled={entry.same}
+          onChange={t => onEntry({ avail: t })}
+          prefix={<button type="button" onClick={() => onEntry({ neg: !neg, avail: entry.avail.replace(/^[-−]/, '') })} disabled={entry.same} aria-pressed={neg} aria-label="Доступно меньше нуля"
+            className={`grid size-8 shrink-0 place-items-center self-center rounded-full text-[19px] leading-none font-medium transition-colors duration-150 ${neg ? 'bg-ink text-bg' : 'bg-surface-2 text-faint'}`}>−</button>} />
       </div>
       <LimitLine debt={debt} />
       {entry.same
         ? <p className="flex items-center gap-1.5 px-1 text-[13px] text-pos"><Check size={15} strokeWidth={2} /> Без изменений: долг как по учёту — <Money value={expected} /></p>
-        : d != null
-          ? <Verdict d={d} expected={expected}
+        : d != null && (near
+          ? <p className="flex flex-wrap items-center gap-x-1.5 px-1 text-[13px] text-pos"><Check size={15} strokeWidth={2} /> Сошлось с учётом
+              {Math.abs(d) > MATCH && <span className="text-muted">— разница <Money value={Math.abs(d)} />: проценты банк считает по дням</span>}</p>
+          : interestOnly
+            ? <p className="rounded-2xl bg-info/10 px-4 py-3 text-[13px] leading-snug">Долг больше, чем по учёту, на <Money value={d} /> — это проценты, которые банк начислил, но ещё не списал. После сохранения долг будет как в банке. <span className="text-muted">По учёту <Money value={expected} />.</span></p>
+          : <Verdict d={d} expected={expected} extra={accrued > 0 ? <> С процентами с прошлого обновления: <Money value={accrued} />.</> : null}
               less={x => <>Долг меньше, чем по учёту, на <Money value={x} />: погашение или возврат не отмечены.</>}
               more={x => <>Долг больше, чем по учёту, на <Money value={x} />: {c.bridge ? 'покупки с кредитки не внесены' : 'списания с карты не внесены'} или начислены проценты.{' '}
-                <button type="button" onClick={() => onAddSpend(x)} className="font-medium text-sea">Добавить трату с карты {num(x)} ₽</button></>} />
-          : !limit && <Note>Укажите лимит карты — тогда долг посчитается по «Доступно».</Note>}
+                <button type="button" onClick={() => onAddSpend(x)} className="font-medium text-sea">Добавить трату с карты {num(x)} ₽</button></>} />)}
+      {pending != null && !interestOnly && (pending > MATCH
+        ? <Note>Из долга <Money value={pending} /> — проценты, которые банк начислил, но ещё не списал: поэтому «Доступно» меньше, чем лимит минус долг.</Note>
+        : pending < -MATCH
+          ? <Note>По долгу и «Доступно» лимит выходит <Money value={round(v! + a!)} />, а в приложении <Money value={limit!} />. Если в банке так — поправьте лимит.</Note>
+          : null)}
+      {!limit && !entry.same && a != null && <Note>Укажите лимит — приложение покажет, сколько в долге начисленных процентов.</Note>}
     </div>
   );
+}
+
+/** сумма для поля ввода: целые — с пробелами между разрядами, копейки — через запятую */
+function amountText(x: number): string {
+  const [i, f] = Math.abs(round(x)).toFixed(2).split('.');
+  return `${x < 0 ? '−' : ''}${num(Number(i))}${f === '00' ? '' : `,${f}`}`;
 }
 
 /** Лимит кредитки: показан под полями, меняется здесь же. Лимит с телефона не перетирается обновлением плана */
@@ -332,11 +329,11 @@ function Account({ label, hint, value, onChange, top, children }: { label: strin
   );
 }
 
-function Verdict({ d, expected, less, more }: { d: number; expected: number; less: (x: number) => ReactNode; more: (x: number) => ReactNode }) {
+function Verdict({ d, expected, less, more, extra }: { d: number; expected: number; less: (x: number) => ReactNode; more: (x: number) => ReactNode; extra?: ReactNode }) {
   if (Math.abs(d) <= MATCH) return <p className="flex items-center gap-1.5 px-1 text-[13px] text-pos"><Check size={15} strokeWidth={2} /> Сошлось с учётом</p>;
   return (
     <p className={`rounded-2xl px-4 py-3 text-[13px] leading-snug ${d < 0 ? 'bg-warn/12' : 'bg-info/10'}`}>
-      {d < 0 ? less(-d) : more(d)} <span className="text-muted">По учёту <Money value={expected} />.</span>
+      {d < 0 ? less(-d) : more(d)} <span className="text-muted">По учёту <Money value={expected} />.{extra}</span>
     </p>
   );
 }

@@ -58,6 +58,18 @@ describe('воскресная сверка с банком', () => {
     expect(s().checkups.at(-1)?.cards).toHaveLength(2);
   });
 
+  it('платёж по кредитке: проценты — по дням с последнего обновления остатка, а не за целый месяц', () => {
+    const card = { id: 'k', name: 'К', short: 'К', kind: 'card' as const, balance: 100_000, startBalance: 100_000, rate: 0.365, dueDay: 11,
+      rule: { type: 'interestPlus', plus: 1000 } as never, frozen: true, order: 1, closed: false, updatedAt: '2025-10-01T09:00:00.000Z' };
+    useStore.setState({ debts: [card] });
+    const pay: CalEvent = { key: 'pay:k:2025-10', date: '2025-10-11', dateMode: 'exact', kind: 'payment', title: 'К', amount: 5000, debtId: 'k' };
+    s().markEvent(pay, true, 5000);
+    // 10 дней по 36,5% годовых со 100 000 — 1000 ₽ процентов
+    expect(s().debts[0].balance).toBe(96_000);
+    s().markEvent(pay, false);
+    expect(s().debts[0].balance).toBe(100_000);
+  });
+
   it('резерв пришёл из чата в воскресенье — закрытие недели пополнение второй раз не вычитает', () => {
     s().applySync({ reserve: 44_000 });
     const sundayKey = s().reserveLog.at(-1)!.date;

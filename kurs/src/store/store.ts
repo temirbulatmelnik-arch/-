@@ -10,7 +10,7 @@ import { mergeSeed } from '../domain/planUpdate';
 import type { Bridge } from '../domain/bridge';
 import { fixDefaultCategories } from '../domain/categorize';
 import { dropChatTwins } from '../domain/exchange';
-import { freshReserve, type Checkup } from '../domain/ledger';
+import { accruedOnCard, freshReserve, type Checkup } from '../domain/ledger';
 import { salute } from './events';
 import type { CalEvent, CardBalance, ChecklistItem, Debt, DebtSnapshot, EventMark, Expense, FixedItem, IncomeTemplate, MemoryRule, PlanSeed, ReserveMove, Settings, StrategySection, WeekClosure, WeeklyOverride, WishItem } from '../domain/types';
 
@@ -310,8 +310,12 @@ export const useStore = create<State>()(
           marks[e.key] = { done: true, amount: paid, at: nowIso(), prevBalance: debt?.balance, ...(e.kind === 'payment' ? { paidFrom: paidFrom ?? 'reserve' } : {}) };
           if (e.kind === 'weekly') return { marks, ...topUpMove(s, e.key, paid) };
           if (debt && e.kind === 'payment' && !prev?.done) {
-            // погашение основного долга ≈ платёж минус проценты за месяц; закрывающий платёж обнуляет долг
-            const interest = debt.rule.type === 'schedule' ? 0 : (debt.balance * debt.rate) / 12;
+            // погашение основного долга ≈ платёж минус проценты; закрывающий платёж обнуляет долг. По кредитке проценты —
+            // по дням с последнего обновления остатка (его вносят из банка уже с процентами на тот день), по кредиту — за месяц
+            const paidOn = e.date < today() ? e.date : today();
+            const interest = debt.rule.type === 'schedule' ? 0
+              : debt.kind === 'card' && debt.updatedAt ? accruedOnCard(debt, paidOn)
+              : (debt.balance * debt.rate) / 12;
             const closing = e.key.endsWith(':close') || paid >= debt.balance - 1;
             debts = s.debts.map(d => (d.id === debt.id ? patchDebt(d, closing ? 0 : d.balance + interest - paid) : d));
             // долг закрыт — салют над Невой
