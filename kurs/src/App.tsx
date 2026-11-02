@@ -1,15 +1,16 @@
-import { AnimatePresence, motion } from 'motion/react';
-import { CalendarDays, PieChart } from 'lucide-react';
-import { useEffect, type ComponentType } from 'react';
-import { BridgeIcon, SpireIcon } from './components/Petersburg';
+import { AnimatePresence, motion, MotionConfig } from 'motion/react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
+import { TABS, TabBar } from './components/TabBar';
 import { Toast } from './components/ui';
 import { CardSheet, SavingsSheet } from './screens/Accounts';
 import { AddExpenseSheet } from './screens/AddExpense';
 import { BonusSheet } from './screens/BonusSheet';
 import { Budget } from './screens/Budget';
+import { CheckupSheet, useSundayCheckup } from './screens/Checkup';
 import { DebtSheet } from './screens/DebtSheet';
 import { EventSheet } from './screens/EventSheet';
 import { FixedSheet } from './screens/FixedSheet';
+import { HubSheet } from './screens/Hub';
 import { ImportSheet } from './screens/Import';
 import { Onboarding } from './screens/Onboarding';
 import { Payments } from './screens/Payments';
@@ -18,19 +19,12 @@ import { updateBadge } from './screens/reminders';
 import { ReserveSheet } from './screens/ReserveSheet';
 import { SettingsSheet } from './screens/Settings';
 import { SyncSheet, UnlockSheet, useInbox, usePlanUpdates } from './screens/Sync';
-import { CheckupSheet, useSundayCheckup } from './screens/Checkup';
 import { TodaySheet } from './screens/TodaySheet';
+import { Tour, TOUR_VERSION } from './screens/Tour';
 import { Week } from './screens/Week';
 import { WeekSheet } from './screens/WeekSheet';
 import { cleanedTwins, useStore } from './store/store';
 import { toast as showToast, useUi, type Tab } from './store/ui';
-
-const TABS: { id: Tab; label: string; icon: ComponentType<{ size?: number; strokeWidth?: number; className?: string }> }[] = [
-  { id: 'week', label: 'Неделя', icon: BridgeIcon },
-  { id: 'payments', label: 'Платежи', icon: CalendarDays },
-  { id: 'plan', label: 'План', icon: SpireIcon },
-  { id: 'budget', label: 'Бюджет', icon: PieChart },
-];
 
 function useTheme() {
   const theme = useStore(s => s.settings.theme);
@@ -48,13 +42,38 @@ function useTheme() {
   }, [theme]);
 }
 
+const ORDER: Tab[] = TABS.map(t => t.id);
+
+/** Каждая вкладка помнит, докуда её прокрутили: вернулись — тот же вид, как в приложениях iOS */
+function useTabScroll(tab: Tab) {
+  const saved = useRef<Partial<Record<Tab, number>>>({});
+  const prev = useRef(tab);
+  useLayoutEffect(() => {
+    if (prev.current === tab) return;
+    prev.current = tab;
+    window.scrollTo({ top: saved.current[tab] ?? 0 });
+  }, [tab]);
+  useEffect(() => {
+    const on = () => { saved.current[useUi.getState().tab] = window.scrollY; };
+    window.addEventListener('scroll', on, { passive: true });
+    return () => window.removeEventListener('scroll', on);
+  }, []);
+}
+
 export default function App() {
   useTheme();
   usePlanUpdates();
   useInbox();
   useSundayCheckup();
   const ready = useStore(s => s.ready);
-  const { tab, setTab, toast, set } = useUi();
+  const tourSeen = useStore(s => s.settings.tourSeen ?? 0);
+  const { tab, toast, set } = useUi();
+  useTabScroll(tab);
+  // вкладка уезжает в ту сторону, куда нажали
+  const index = ORDER.indexOf(tab);
+  const last = useRef(index);
+  const dir = index >= last.current ? 1 : -1;
+  useEffect(() => { last.current = index; }, [index]);
 
   useEffect(() => {
     // просим браузер не вычищать данные при нехватке места
@@ -67,52 +86,51 @@ export default function App() {
     return () => { document.removeEventListener('visibilitychange', onVis); unsub(); };
   }, []);
 
-  if (!ready) return <Onboarding />;
+  // знакомство с новым видом — один раз, после того как мост развёлся
+  useEffect(() => {
+    if (!ready || tourSeen >= TOUR_VERSION) return;
+    const t = window.setTimeout(() => { if (!useUi.getState().inbox) set({ tour: true }); }, 2200);
+    return () => clearTimeout(t);
+  }, [ready, tourSeen, set]);
+
+  if (!ready) return <MotionConfig reducedMotion="user"><Onboarding /></MotionConfig>;
 
   return (
-    <div className="pt-safe mx-auto min-h-dvh w-full max-w-md pb-32">
-      <div aria-hidden="true" className="fixed inset-x-0 top-0 z-40 h-[env(safe-area-inset-top)]" style={{ background: 'var(--sky-1)' }} />
-      <AnimatePresence mode="wait">
-        <motion.main key={tab} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
-          {tab === 'week' && <Week />}
-          {tab === 'payments' && <Payments />}
-          {tab === 'plan' && <Plan />}
-          {tab === 'budget' && <Budget />}
-        </motion.main>
-      </AnimatePresence>
+    <MotionConfig reducedMotion="user">
+      <div className="pt-safe mx-auto min-h-dvh w-full max-w-md overflow-x-clip pb-36">
+        <div aria-hidden="true" className="fixed inset-x-0 top-0 z-40 h-[env(safe-area-inset-top)]" style={{ background: 'var(--sky-1)' }} />
+        <AnimatePresence mode="popLayout" initial={false} custom={dir}>
+          <motion.main key={tab} custom={dir}
+            variants={{ enter: (d: number) => ({ x: d * 36, opacity: 0 }), center: { x: 0, opacity: 1 }, exit: (d: number) => ({ x: d * -36, opacity: 0 }) }}
+            initial="enter" animate="center" exit="exit" transition={{ type: 'spring', stiffness: 380, damping: 36, opacity: { duration: 0.18 } }}>
+            {tab === 'week' && <Week />}
+            {tab === 'payments' && <Payments />}
+            {tab === 'budget' && <Budget />}
+            {tab === 'plan' && <Plan />}
+          </motion.main>
+        </AnimatePresence>
 
-      <nav className="pb-safe pointer-events-none fixed inset-x-0 bottom-0 z-30">
-        <div className="pointer-events-auto mx-auto mb-3 flex w-[min(92%,380px)] rounded-full border border-line bg-surface/85 p-1.5 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.35)] backdrop-blur-xl">
-          {TABS.map(t => {
-            const active = t.id === tab;
-            return (
-              <button key={t.id} type="button" onClick={() => setTab(t.id)} aria-current={active ? 'page' : undefined}
-                className={`relative flex flex-1 flex-col items-center gap-0.5 rounded-full py-2 text-[10.5px] font-medium transition-colors ${active ? 'text-ink' : 'text-faint'}`}>
-                {active && <motion.span layoutId="tab-bg" className="absolute inset-0 rounded-full bg-surface-2" transition={{ type: 'spring', stiffness: 500, damping: 40 }} />}
-                <t.icon size={20} strokeWidth={active ? 1.8 : 1.5} className={`relative ${active ? 'text-sea' : ''}`} />
-                <span className="relative">{t.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </nav>
+        <TabBar />
 
-      <CheckupSheet />
-      <AddExpenseSheet />
-      <ImportSheet />
-      <EventSheet />
-      <BonusSheet />
-      <DebtSheet />
-      <ReserveSheet />
-      <SettingsSheet />
-      <WeekSheet />
-      <TodaySheet />
-      <SavingsSheet />
-      <CardSheet />
-      <FixedSheet />
-      <SyncSheet />
-      <UnlockSheet />
-      <Toast text={toast} onDone={() => set({ toast: null })} />
-    </div>
+        <CheckupSheet />
+        <AddExpenseSheet />
+        <ImportSheet />
+        <EventSheet />
+        <BonusSheet />
+        <DebtSheet />
+        <ReserveSheet />
+        <SettingsSheet />
+        <WeekSheet />
+        <TodaySheet />
+        <SavingsSheet />
+        <CardSheet />
+        <FixedSheet />
+        <SyncSheet />
+        <UnlockSheet />
+        <HubSheet />
+        <Tour />
+        <Toast text={toast} onDone={() => set({ toast: null })} />
+      </div>
+    </MotionConfig>
   );
 }

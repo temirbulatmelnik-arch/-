@@ -1,7 +1,9 @@
 // Траты за сегодня: окно по нажатию на кольцо дня и тело карточки «Сегодня» на «Неделе».
 // Сверху — сколько потрачено из лимита дня и что это значит, ниже — траты дня; оплаченное из резерва в лимит не входит —
 // оно отдельно.
-import { Plus } from 'lucide-react';
+import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { spring, SwipeRow } from '../components/motion';
 import { useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { ExpenseRow } from '../components/rows';
@@ -10,7 +12,8 @@ import { dayMonth, plural, weekdayFull } from '../domain/dates';
 import { countsWeekly, dayBudget, type DayBudget } from '../domain/summary';
 import type { Expense } from '../domain/types';
 import { useStore } from '../store/store';
-import { useToday, useUi } from '../store/ui';
+import { toast, useToday, useUi } from '../store/ui';
+import { CATEGORY } from '../domain/plan';
 
 export function useTodaySpends() {
   const now = useToday();
@@ -34,6 +37,7 @@ export function dayNote(b: DayBudget): { text: string; over: boolean } {
 }
 
 export function TodayDetails({ summary }: { summary?: boolean }) {
+  // в листе строки свайпаются (фон листа под ними сплошной), в карточке стопки — просто нажимаются
   const { budget: b, counted, outside } = useTodaySpends();
   const set = useUi(s => s.set);
   const note = dayNote(b);
@@ -55,9 +59,25 @@ export function TodayDetails({ summary }: { summary?: boolean }) {
       ) : (
         <p className={`px-4 text-[13px] leading-snug ${note.over ? 'text-neg' : 'text-muted'}`}>{note.text}</p>
       )}
-      {counted.length > 0
-        ? <div className="divide-hair mt-1">{counted.map(e => <ExpenseRow key={e.id} e={e} onClick={() => edit(e)} />)}</div>
-        : <p className="px-4 pt-3 text-[14px] text-muted">Сегодня трат пока нет.</p>}
+      {counted.length > 0 && !summary && <div className="divide-hair mt-1">{counted.map(e => <ExpenseRow key={e.id} e={e} onClick={() => edit(e)} />)}</div>}
+      {counted.length > 0 && summary
+        ? (
+          <div className="divide-hair mt-1">
+            <AnimatePresence initial={false}>
+              {counted.map(e => (
+                <motion.div key={e.id} layout initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, height: 0 }} transition={spring}>
+                  <SwipeRow rowClass="bg-bg" right={[
+                    { label: 'Изменить', icon: <Pencil size={16} />, tone: 'sea', onAction: () => edit(e) },
+                    { label: 'Удалить', icon: <Trash2 size={16} />, tone: 'neg', onAction: () => { useStore.getState().removeExpense(e.id); toast(`Удалено: ${e.note || CATEGORY[e.category].short}`); } },
+                  ]}>
+                    <ExpenseRow e={e} onClick={() => edit(e)} />
+                  </SwipeRow>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+        )
+        : counted.length === 0 && <p className="px-4 pt-3 text-[14px] text-muted">Сегодня трат пока нет. Нажмите «+» внизу.</p>}
       {outside.length > 0 && (
         <>
           <div className="px-4 pt-4 text-[13px] text-muted">Не входит в лимит дня</div>

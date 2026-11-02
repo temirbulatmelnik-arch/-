@@ -156,6 +156,7 @@ function Body() {
 
       <Section title="Приложение">
         <a href={INSTALL_URL} className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-surface-2 text-[15px] font-medium"><Smartphone size={18} /> Установка на iPhone</a>
+        <button type="button" onClick={() => useUi.getState().set({ settings: false, tour: true })} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-surface-2 text-[15px] font-medium">Что где в приложении</button>
         <button type="button" onClick={() => { if (confirm('Стереть все данные «Курса» на этом телефоне? Сначала сохраните копию.')) { s.reset(); useUi.getState().set({ settings: false }); } }}
           className="w-full py-2 text-[13px] font-medium text-neg">Стереть все данные</button>
         <p className="text-center text-[12px] text-faint">Курс {__APP_VERSION__}</p>

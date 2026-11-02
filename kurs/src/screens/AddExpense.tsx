@@ -1,9 +1,12 @@
-// Быстрый ввод траты: сумма → категория → «Записать». Больше 5 000 — предложить паузу 48 часов.
-import { AlertTriangle, Hourglass, Trash2 } from 'lucide-react';
+// Запись траты: своя клавиатура в листе (iPhone не закрывает экран своей), сумма, категория, «Записать».
+// Больше 5 000 — предложить паузу 48 часов. Сверху — «Из банка»: загрузить траты разом.
+import { AlertTriangle, CalendarDays, Delete, Hourglass, ScanText, Trash2 } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
-import { CATEGORY_ICON, PrimaryButton, SecondaryButton, Segmented, Sheet } from '../components/ui';
+import { snappy, spring } from '../components/motion';
+import { CAT_COLOR, CATEGORY_ICON, PrimaryButton, SecondaryButton, Segmented, Sheet } from '../components/ui';
 import { bridgeWeek, weekMoney } from '../domain/bridge';
-import { today, weekStart } from '../domain/dates';
+import { dayMonth, today, weekday, weekStart } from '../domain/dates';
 import { parseAmount, rub } from '../domain/money';
 import { BIG_PURCHASE, CATEGORIES, CATEGORY } from '../domain/plan';
 import { weekSummary } from '../domain/summary';
@@ -16,7 +19,11 @@ export function AddExpenseSheet() {
   const set = useUi(s => s.set);
   const close = () => set({ add: null });
   return (
-    <Sheet open={!!prefill} onClose={close} title={prefill?.edit ? 'Трата' : 'Новая трата'}>
+    <Sheet open={!!prefill} onClose={close} title={prefill?.edit ? 'Трата' : 'Новая трата'}
+      action={!prefill?.edit && (
+        <motion.button type="button" whileTap={{ scale: 0.94 }} onClick={() => { set({ add: null }); window.setTimeout(() => set({ scan: true }), 200); }}
+          className="flex h-9 items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-[13px] font-medium"><ScanText size={15} strokeWidth={1.7} className="text-sea" /> Из банка</motion.button>
+      )}>
       {prefill && <Form key={prefill.edit?.id ?? prefill.wishId ?? 'new'} p={prefill} onDone={close} />}
     </Sheet>
   );
@@ -33,12 +40,27 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   const [note, setNote] = useState(edit?.note ?? p.note ?? '');
   const [date, setDate] = useState(edit?.date ?? p.date ?? today());
   const [askPause, setAskPause] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
+  const dateInput = useRef<HTMLInputElement>(null);
 
+  /** своя клавиатура: цифры, запятая, стереть; до двух знаков после запятой */
+  const press = (k: string) => setAmount(a => {
+    if (k === 'del') return a.slice(0, -1);
+    if (k === ',') return a.includes(',') ? a : (a || '0') + ',';
+    if (a.includes(',') && a.split(',')[1].length >= 2) return a;
+    if (a.replace(',', '').length >= 9) return a;
+    return a === '0' ? k : a + k;
+  });
+  // с клавиатуры компьютера тоже можно
   useEffect(() => {
-    // клавиатура открывается сразу — первое касание уже ввод суммы
-    if (!edit) setTimeout(() => input.current?.focus(), 250);
-  }, [edit]);
+    const on = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement).tagName === 'INPUT') return;
+      if (/^\d$/.test(e.key)) press(e.key);
+      else if (e.key === ',' || e.key === '.') press(',');
+      else if (e.key === 'Backspace') press('del');
+    };
+    window.addEventListener('keydown', on);
+    return () => window.removeEventListener('keydown', on);
+  }, []);
 
   const value = parseAmount(amount) ?? 0;
   const valid = value > 0 && !!category;
@@ -83,11 +105,25 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   }
 
   return (
-    <div className="space-y-4 pt-1">
-      <div className="flex items-baseline gap-2 rounded-[22px] border border-line bg-surface px-5 py-4">
-        <input ref={input} value={amount} onChange={e => setAmount(e.target.value)} inputMode="decimal" placeholder="0" aria-label="Сумма"
-          className="figure w-full min-w-0 bg-transparent text-[48px] leading-none outline-none placeholder:text-faint" />
-        <span className="text-[26px] text-muted">₽</span>
+    <div className="space-y-3 pt-0">
+      {/* сумма: цифры выпрыгивают по одной */}
+      <div className="flex min-h-[64px] items-end justify-center gap-1 pt-1" aria-live="polite" aria-label={`Сумма ${amount || 0} ₽`}>
+        <span className="figure flex text-[52px] leading-none">
+          <AnimatePresence initial={false} mode="popLayout">
+            {(amount || '0').split('').map((ch, i) => (
+              <motion.span key={`${i}-${ch}`} layout initial={{ y: 18, opacity: 0, scale: 0.6 }} animate={{ y: 0, opacity: amount ? 1 : 0.3, scale: 1 }} exit={{ y: -14, opacity: 0, scale: 0.6 }} transition={snappy}>{ch}</motion.span>
+            ))}
+          </AnimatePresence>
+        </span>
+        <span className="mb-1.5 text-[26px] text-muted">₽</span>
+      </div>
+
+      <div className="flex items-center justify-center gap-2">
+        <button type="button" onClick={() => dateInput.current?.showPicker?.() ?? dateInput.current?.focus()} className="relative flex h-9 items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-[13px] font-medium">
+          <CalendarDays size={15} strokeWidth={1.6} className="text-sea" />{date === today() ? 'Сегодня' : `${weekday(date)}, ${dayMonth(date)}`}
+          <input ref={dateInput} type="date" value={date} onChange={e => setDate(e.target.value || today())} className="absolute inset-0 opacity-0" aria-label="Дата" />
+        </button>
+        <input value={note} onChange={e => setNote(e.target.value)} placeholder="Что купили" className="h-9 w-[150px] rounded-full border border-line bg-surface px-3.5 text-[16px] outline-none placeholder:text-faint focus:border-sea" />
       </div>
 
       <div className="grid grid-cols-5 gap-2">
@@ -95,11 +131,14 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
           const Icon = CATEGORY_ICON[c.id];
           const on = category === c.id;
           return (
-            <button key={c.id} type="button" onClick={() => setCategory(c.id)}
-              className={`flex aspect-square flex-col items-center justify-center gap-1.5 rounded-2xl border text-center transition active:scale-95 ${on ? 'border-ink bg-ink text-bg' : 'border-line bg-surface'}`}>
-              <Icon size={20} strokeWidth={1.5} className={on ? 'text-card-sea' : 'text-ink/75'} />
-              <span className="px-0.5 text-[10px] leading-tight font-medium">{c.short}</span>
-            </button>
+            <motion.button key={c.id} type="button" onClick={() => setCategory(c.id)} whileTap={{ scale: 0.9 }} transition={snappy}
+              className={`relative flex aspect-[1/0.92] flex-col items-center justify-center gap-1 overflow-hidden rounded-[18px] border text-center ${on ? 'border-transparent text-white' : 'border-line bg-surface'}`}>
+              {on && <motion.span layoutId="cat-pick" className="absolute inset-0" style={{ background: CAT_COLOR[c.id] }} transition={spring} />}
+              <motion.span className="relative" animate={on ? { rotate: [0, -12, 10, 0], scale: [1, 1.25, 1] } : { rotate: 0, scale: 1 }} transition={{ duration: 0.45 }}>
+                <Icon size={20} strokeWidth={1.6} className={on ? '' : 'text-ink/75'} />
+              </motion.span>
+              <span className="relative px-0.5 text-[10px] leading-tight font-medium">{c.short}</span>
+            </motion.button>
           );
         })}
       </div>
@@ -109,21 +148,33 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
         { id: 'reserve', label: 'Из резерва' },
         { id: 'credit', label: 'Кредитка' },
       ]} />
-      {source === 'credit' && !bridgeWeek(bridge, weekStart(date)) && (
-        <p className="flex items-start gap-2 rounded-2xl bg-neg/10 px-4 py-3 text-[13px] leading-snug text-neg">
-          <AlertTriangle size={16} className="mt-0.5 shrink-0" /> Кредитки заморожены — только гасим. Запишу как нарушение плана.
-        </p>
-      )}
-      {source === 'reserve' && (
-        <p className="rounded-2xl bg-info/10 px-4 py-3 text-[13px] leading-snug text-info">Из резерва — только здоровье по назначению и срочное. Не входит в недельный лимит и уменьшает резерв.</p>
-      )}
+      <AnimatePresence initial={false}>
+        {source === 'credit' && !bridgeWeek(bridge, weekStart(date)) && (
+          <motion.p key="credit" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+            className="flex items-start gap-2 overflow-hidden rounded-2xl bg-neg/10 px-4 py-3 text-[13px] leading-snug text-neg">
+            <AlertTriangle size={16} className="mt-0.5 shrink-0" /> Кредитки заморожены — только гасим. Запишу как нарушение плана.
+          </motion.p>
+        )}
+        {source === 'reserve' && (
+          <motion.p key="reserve" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden rounded-2xl bg-info/10 px-4 py-3 text-[13px] leading-snug text-info">Из резерва — только здоровье по назначению и срочное. Не входит в недельный лимит.</motion.p>
+        )}
+      </AnimatePresence>
 
-      <div className="grid grid-cols-[1fr_auto] gap-2">
-        <input value={note} onChange={e => setNote(e.target.value)} placeholder="Комментарий" className="field" />
-        <input type="date" value={date} onChange={e => setDate(e.target.value || today())} className="field w-[150px]" aria-label="Дата" />
+      <div className="grid grid-cols-3 gap-2" role="group" aria-label="Клавиатура">
+        {['1', '2', '3', '4', '5', '6', '7', '8', '9', ',', '0', 'del'].map(k => (
+          <motion.button key={k} type="button" onClick={() => press(k)} whileTap={{ scale: 0.9, backgroundColor: 'var(--surface-2)' }} transition={snappy}
+            aria-label={k === 'del' ? 'Стереть' : k === ',' ? 'Запятая' : k}
+            className="figure grid h-[48px] place-items-center rounded-[15px] bg-surface text-[23px] select-none">
+            {k === 'del' ? <Delete size={22} strokeWidth={1.6} /> : k}
+          </motion.button>
+        ))}
       </div>
 
-      <PrimaryButton onClick={save} disabled={!valid}>{edit ? 'Сохранить' : category ? `Записать${value ? ` ${rub(value)}` : ''}` : 'Выберите категорию'}</PrimaryButton>
+      {/* кнопка всегда на виду: прилипает к низу листа */}
+      <div className="sticky bottom-0 -mx-5 bg-bg/95 px-5 pt-2 pb-1 backdrop-blur">
+        <PrimaryButton onClick={save} disabled={!valid}>{edit ? 'Сохранить' : !value ? 'Введите сумму' : category ? `Записать ${rub(value)}` : 'Выберите категорию'}</PrimaryButton>
+      </div>
       {edit && (
         <SecondaryButton onClick={() => { store.removeExpense(edit.id); toast('Трата удалена'); onDone(); }} className="w-full text-neg">
           <Trash2 size={16} strokeWidth={1.5} /> Удалить

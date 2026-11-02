@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from 'motion/react';
+import { animate, AnimatePresence, motion, useDragControls, useMotionValue, type PanInfo } from 'motion/react';
 import { CarTaxiFront, Cigarette, Coffee, Pill, Repeat, Sandwich, Scissors, ShoppingBag, ShoppingBasket, TramFront, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { num } from '../domain/money';
@@ -25,9 +25,16 @@ export const CATEGORY_ICON: Record<CategoryId, LucideIcon> = {
   shopping: ShoppingBag, beauty: Scissors, tobacco: Cigarette, fun: Coffee, fixed: Repeat,
 };
 
+/** Цвета категорий: вода, закат, отмель и сумерки Петербурга — различимы и в светлой, и в тёмной теме */
+export const CAT_COLOR: Record<CategoryId, string> = {
+  groceries: '#2f86a8', work: '#58b4c9', taxi: '#d6a33a', transport: '#23a383', health: '#5fb898',
+  shopping: '#7c8fc0', beauty: '#c77a9e', tobacco: '#9a7b62', fun: '#ee6125', fixed: '#8a9ba5',
+};
+
 export function CatIcon({ id, className = '' }: { id: CategoryId; className?: string }) {
   const Icon = CATEGORY_ICON[id];
-  return <span className={`grid size-10 shrink-0 place-items-center rounded-full bg-surface-2 text-ink/80 ${className}`}><Icon size={18} strokeWidth={1.5} /></span>;
+  const c = CAT_COLOR[id];
+  return <span className={`grid size-10 shrink-0 place-items-center rounded-full ${className}`} style={{ background: `${c}24`, color: c }}><Icon size={18} strokeWidth={1.6} /></span>;
 }
 
 /* ---------- Кнопки ---------- */
@@ -78,34 +85,51 @@ export function Chip({ children, tone = 'neutral', className = '' }: { children:
 
 /* ---------- Лист снизу ---------- */
 
-/** compact — окно не выше трёх четвертей экрана: над ним видно, откуда оно открылось */
-export function Sheet({ open, onClose, title, subtitle, children, footer, compact }: {
-  open: boolean; onClose: () => void; title: string; subtitle?: ReactNode; children: ReactNode; footer?: ReactNode; compact?: boolean;
+/** Лист снизу, как в iOS: выезжает пружиной, тянется пальцем за шапку вниз и закрывается.
+ *  compact — не выше трёх четвертей экрана: над ним видно, откуда он открылся */
+export function Sheet({ open, onClose, title, subtitle, children, footer, compact, action }: {
+  open: boolean; onClose: () => void; title: string; subtitle?: ReactNode; children: ReactNode; footer?: ReactNode; compact?: boolean; action?: ReactNode;
 }) {
+  const controls = useDragControls();
+  const fade = useMotionValue(1);
   useEffect(() => {
     if (!open) return;
+    fade.set(1);
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
-  }, [open, onClose]);
+  }, [open, onClose, fade]);
+
+  const end = (_: unknown, info: PanInfo) => {
+    if (info.offset.y > 110 || info.velocity.y > 650) onClose();
+    else animate(fade, 1, { duration: 0.2 });
+  };
 
   return (
     <AnimatePresence>
       {open && (
-        <motion.div className="fixed inset-0 z-50 flex items-end justify-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-[3px]" onClick={onClose} />
+        <motion.div className="fixed inset-0 z-50 flex items-end justify-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.22 }}>
+          <motion.div className="absolute inset-0 bg-[rgba(4,14,22,.5)] backdrop-blur-[4px]" style={{ opacity: fade }} onClick={onClose} />
           <motion.div role="dialog" aria-modal="true" aria-label={title}
-            className={`relative flex w-full max-w-md flex-col rounded-t-[28px] border-t border-line bg-bg ${compact ? 'max-h-[76dvh]' : 'max-h-[94dvh]'}`}
-            initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', stiffness: 420, damping: 42 }}>
-            <div className="mx-auto mt-2.5 h-1 w-9 rounded-full bg-line" />
-            <div className="flex items-start justify-between gap-3 px-5 pt-3 pb-3">
-              <div className="min-w-0">
-                <h2 className="font-display text-[19px] leading-tight font-medium">{title}</h2>
-                {subtitle && <div className="mt-0.5 text-[13px] text-muted">{subtitle}</div>}
+            drag="y" dragListener={false} dragControls={controls} dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0.04, bottom: 0.9 }}
+            onDrag={(_, i) => fade.set(1 - Math.min(0.85, Math.max(0, i.offset.y) / 520))} onDragEnd={end}
+            className={`relative flex w-full max-w-md flex-col rounded-t-[30px] border-t border-line bg-bg shadow-[0_-18px_48px_-24px_rgba(4,14,22,.55)] ${compact ? 'max-h-[78dvh]' : 'max-h-[94dvh]'}`}
+            initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', stiffness: 380, damping: 38 }}>
+            {/* за шапку лист тянется вниз — как в iOS */}
+            <div onPointerDown={e => controls.start(e)} className="cursor-grab touch-none select-none active:cursor-grabbing">
+              <div className="mx-auto mt-2.5 h-[5px] w-10 rounded-full bg-line" />
+              <div className="flex items-start justify-between gap-3 px-5 pt-3 pb-3">
+                <div className="min-w-0">
+                  <h2 className="font-display text-[19px] leading-tight font-medium">{title}</h2>
+                  {subtitle && <div className="mt-0.5 text-[13px] text-muted">{subtitle}</div>}
+                </div>
+                <div className="flex shrink-0 items-center gap-2" onPointerDown={e => e.stopPropagation()}>
+                  {action}
+                  <IconButton onClick={onClose} label="Закрыть" className="size-9"><X size={17} strokeWidth={1.6} /></IconButton>
+                </div>
               </div>
-              <IconButton onClick={onClose} label="Закрыть" className="size-9"><X size={17} strokeWidth={1.6} /></IconButton>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-6">{children}</div>
             {footer ? <div className="pb-safe border-t border-line bg-bg px-5 pt-3"><div className="pb-3">{footer}</div></div> : <div className="pb-safe" />}
@@ -218,14 +242,17 @@ export function Toast({ text, onDone }: { text: string | null; onDone: () => voi
   done.current = onDone;
   useEffect(() => {
     if (!text) return;
-    const t = setTimeout(() => done.current(), 2600);
+    const t = setTimeout(() => done.current(), 2800);
     return () => clearTimeout(t);
   }, [text]);
+  // сообщение выезжает сверху, как «островок» iPhone: туда смотрят, оно не закрывает кнопки внизу
   return (
     <AnimatePresence>
       {text && (
-        <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 14 }}
-          className="pointer-events-none fixed inset-x-0 bottom-28 z-[60] mx-auto w-fit max-w-[88%] rounded-full bg-ink px-5 py-3 text-center text-[13.5px] font-medium text-bg shadow-xl">
+        <motion.div key={text} role="status" initial={{ opacity: 0, y: -28, scale: 0.92 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -20, scale: 0.95 }}
+          transition={{ type: 'spring', stiffness: 520, damping: 34 }} onClick={() => done.current()}
+          className="fixed inset-x-0 top-[calc(env(safe-area-inset-top)+10px)] z-[70] mx-auto flex w-fit max-w-[90%] items-center gap-2.5 rounded-full bg-ink px-4 py-2.5 text-[13.5px] leading-snug font-medium text-bg shadow-[0_14px_34px_-12px_rgba(4,14,22,.6)]">
+          <motion.span className="size-2 shrink-0 rounded-full bg-sea" initial={{ scale: 0 }} animate={{ scale: [0, 1.6, 1] }} transition={{ duration: 0.5, delay: 0.1 }} />
           {text}
         </motion.div>
       )}

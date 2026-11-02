@@ -9,6 +9,7 @@ import { useStore } from './store';
 
 export type Tab = 'week' | 'payments' | 'plan' | 'budget';
 export type PlanView = 'debts' | 'checklist' | 'strategy';
+export type PayView = 'month' | 'cover' | 'list';
 
 export interface AddPrefill {
   amount?: number;
@@ -54,6 +55,12 @@ interface Ui {
   inbox: { id: string; text: string } | null;
   /** окно трат за сегодня (нажатие на кольцо дня) */
   today: boolean;
+  /** «Банк и чат»: выписка, сверка, обмен с чатом, премия — в одном месте */
+  hub: boolean;
+  /** знакомство с новым интерфейсом */
+  tour: boolean;
+  /** вид «Платежей»: месяц, хватит ли, список */
+  payView: PayView;
   /** воскресная сверка с банком: понедельник закрываемой недели */
   checkup: string | null;
   /** раскрытая карточка в стопке «Недели»; null — выбрать по обстановке */
@@ -65,8 +72,9 @@ interface Ui {
 
 export const useUi = create<Ui>()(set => ({
   tab: 'week', add: null, scan: false, settings: false, event: null, bonus: null, debt: null, reserve: false,
-  week: null, savings: false, sync: false, fixed: false, card: false, unlock: false, planView: 'debts', focus: null, settingsFocus: null, inbox: null, checkup: null, today: false, stackOpen: null, toast: null,
-  setTab: tab => { set({ tab }); window.scrollTo({ top: 0 }); },
+  week: null, savings: false, sync: false, fixed: false, card: false, unlock: false, planView: 'debts', focus: null, settingsFocus: null, inbox: null, checkup: null, hub: false, tour: false, payView: 'month', today: false, stackOpen: null, toast: null,
+  // прокрутку каждой вкладки помнит App (useTabScroll)
+  setTab: tab => set({ tab }),
   set: p => set(p),
 }));
 

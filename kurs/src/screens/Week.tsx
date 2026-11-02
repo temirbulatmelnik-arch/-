@@ -1,20 +1,21 @@
 // «Неделя»: сцена с мостом, остаток недели и кольцо дня. Под сценой — действия и стопка карточек: сегодня,
 // ближайший платёж, дела, резерв. Плашка о перерасходе появляется при входе в приложение и сама растворяется.
-import { ChevronRight, FileUp, Hourglass, PiggyBank, Plus, Settings as Cog } from 'lucide-react';
-import { motion } from 'motion/react';
+import { ChevronRight, Hourglass, MessagesSquare, PiggyBank, Scale, ScanText, Settings as Cog } from 'lucide-react';
+import { AnimatePresence, motion, useMotionValueEvent, useScroll, useTransform } from 'motion/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { CardStack, type StackCard } from '../components/CardStack';
 import { DayRing } from '../components/DayRing';
-import { SkyButton, WeekScene } from '../components/Petersburg';
+import { lampAt, SkyButton, WeekScene } from '../components/Petersburg';
+import { Roll, spring } from '../components/motion';
+import { runQuick } from '../components/TabBar';
 import { AlertRow, EventRow } from '../components/rows';
 import { CatIcon, Money } from '../components/ui';
-import { useCountUp } from '../components/useCountUp';
 import { eventsBetween, urgency } from '../domain/calendar';
 import { weekMoney } from '../domain/bridge';
 import { addDays, dayMonth, ddmm, fromKey, monthIn, plural, weekday, weekdayFull, weekRange, weekStart } from '../domain/dates';
 import { BIG_PURCHASE_HOURS, currentPhase, phaseByDate, reserveNeed, totalDebt } from '../domain/plan';
-import { alerts as buildAlerts, type Alert, dayBudget, weekSummary } from '../domain/summary';
+import { alerts as buildAlerts, type Alert, countsWeekly, dayBudget, weekSummary } from '../domain/summary';
 import type { CalEvent } from '../domain/types';
 import { weekReport, weekToClose } from '../domain/weekly';
 import { useStore } from '../store/store';
@@ -73,6 +74,12 @@ export function Week() {
     s.expenses, s.debts, s.marks, s.wishes, s.reserve, s.settings, s.weeklyOverrides, s.planTrajectory[0]?.[1] ?? 0, s.closures, s.checklist, s.checks, s.toggleCheck, s.bridge, s.checkups,
   ] as const));
   const ui = useUi();
+  const todayIdx = (fromKey(now).getDay() + 6) % 7;
+  // сцена уходит медленнее страницы, сверху проявляется стеклянная полоса с остатком
+  const { scrollY } = useScroll();
+  const sceneY = useTransform(scrollY, [0, 600], [0, 210], { clamp: true });
+  const [compact, setCompact] = useState(false);
+  useMotionValueEvent(scrollY, 'change', v => setCompact(v > 330));
   const week = useMemo(() => weekSummary(expenses, debts, overrides, now), [expenses, debts, overrides, now]);
   const today = useMemo(() => dayBudget(expenses, debts, overrides, now), [expenses, debts, overrides, now]);
   const money = useMemo(() => weekMoney(expenses, debts, overrides, bridge, weekStart(now)), [expenses, debts, overrides, bridge, now]);
@@ -84,7 +91,6 @@ export function Week() {
   const pending = wishes.filter(w => !w.resolved);
   const debt = totalDebt(debts);
   const over = week.left < 0;
-  const shown = useCountUp(Math.abs(week.left));
   const dayAlert = today.left < 0 || today.exhausted;
   const pill = useOverPill(today.left, dayAlert);
   const { need, next } = reserveNeed(now, debts);
@@ -219,18 +225,20 @@ export function Week() {
 
   return (
     <div>
-      <WeekScene today={(fromKey(now).getDay() + 6) % 7}>
+      <CompactBar weekLeft={week.left} dayLeft={today.left} show={compact} />
+      <motion.div style={{ y: sceneY }} className="will-change-transform">
+      <WeekScene today={todayIdx} overlay={<Lamps monday={week.monday} todayIdx={todayIdx} limit={week.limit} dayNorm={today.day} />}>
         <div className="flex items-start justify-between gap-3 px-5 pt-2.5">
           <div style={{ color: 'var(--scene-ink)' }}>
             <div className="text-[14px] first-letter:uppercase" style={{ color: 'var(--scene-muted)' }}>{weekdayFull(now)}, {dayMonth(now)}</div>
             <div className="font-display mt-0.5 text-[19px] font-medium">Неделя {weekRange(week.monday, week.sunday)}</div>
           </div>
-          <span className="pointer-events-auto"><SkyButton onClick={() => ui.set({ settings: true })} label="Настройки"><Cog size={18} strokeWidth={1.5} /></SkyButton></span>
+          <span className="pointer-events-auto flex gap-2"><SkyButton onClick={() => ui.set({ settings: true })} label="Настройки"><Cog size={18} strokeWidth={1.5} /></SkyButton></span>
         </div>
         <div className="mt-1.5 flex items-start justify-between gap-3 pr-4 pl-5">
           <div className="pt-3" style={{ color: over ? 'var(--neg)' : 'var(--scene-ink)' }}>
             <div className="figure text-[36px] leading-[.95]" aria-live="polite">
-              {over && <span className="mr-0.5">−</span>}<Money value={shown} />
+              {over && <span className="mr-0.5">−</span>}<Roll value={Math.abs(week.left)} />
             </div>
             <div className="mt-1.5 text-[14px] leading-snug" style={{ color: over ? 'var(--neg)' : 'var(--scene-muted)' }}>
               {over ? <>перерасход<br />за неделю</> : <>на неделю,<br />до воскресенья</>}
@@ -270,23 +278,28 @@ export function Week() {
           </button>
         )}
       </WeekScene>
+      </motion.div>
 
-      <div className="mt-2 grid grid-cols-[1.4fr_1fr] gap-3 px-4">
-        <motion.button type="button" whileTap={{ scale: 0.98 }} onClick={() => ui.set({ add: {} })}
-          className="flex h-[54px] items-center justify-center gap-2 rounded-[18px] bg-ink text-[15.5px] font-medium text-bg">
-          <Plus size={19} strokeWidth={2} /> Записать трату
-        </motion.button>
-        <motion.button type="button" whileTap={{ scale: 0.98 }} onClick={() => ui.set({ scan: true })}
-          className="flex h-[54px] items-center justify-center gap-2 rounded-[18px] border-[1.5px] border-ink text-[15px] font-medium">
-          <FileUp size={18} strokeWidth={1.5} /> Выписка
-        </motion.button>
+      {/* действия с данными: всё, что приходит из банка и из чата */}
+      <div className="relative z-[1] -mt-1 grid grid-cols-3 gap-2 bg-bg px-4 pt-2">
+        {([
+          ['scan', 'Из банка', ScanText],
+          ['checkup', 'Сверка', Scale],
+          ['sync', 'Чат', MessagesSquare],
+        ] as const).map(([id, label, Icon], i) => (
+          <motion.button key={id} type="button" whileTap={{ scale: 0.95 }} onClick={() => runQuick(id)}
+            initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: 0.25 + i * 0.06 }}
+            className="flex h-[50px] items-center justify-center gap-2 rounded-[17px] border border-line bg-surface text-[14px] font-medium shadow-[0_6px_18px_-14px_rgba(10,36,51,.5)]">
+            <Icon size={18} strokeWidth={1.6} className="text-sea" /> {label}
+          </motion.button>
+        ))}
       </div>
 
-      <div className="mt-4 px-4">
+      <div className="relative z-[1] bg-bg px-4 pt-4">
         <CardStack cards={cards} open={open} onOpen={id => ui.set({ stackOpen: id ?? '' })} />
       </div>
 
-      <button type="button" onClick={() => ui.setTab('plan')} className="mx-4 mt-4 flex w-[calc(100%-2rem)] items-center justify-between gap-3 rounded-[20px] px-4 py-3 text-left text-[13px] text-muted">
+      <button type="button" onClick={() => ui.setTab('plan')} className="relative z-[1] mx-4 mt-4 flex w-[calc(100%-2rem)] items-center justify-between gap-3 rounded-[20px] px-4 py-3 text-left text-[13px] text-muted">
         <span className="min-w-0">
           <span className="block text-ink">Этап {phase.id}: {phase.title}</span>
           {phase.id < planPhase.id && planPhase.id > 0 && <span className="block text-warn">по плану уже этап {planPhase.id}</span>}
@@ -333,5 +346,77 @@ function WishRow({ id }: { id: string }) {
         {ready && <button type="button" onClick={() => set({ add: { amount: w.amount, category: w.category, note: w.title, wishId: w.id } })} className="rounded-full border border-line px-3 py-1.5 text-[12.5px] font-medium">Купить</button>}
       </div>
     </div>
+  );
+}
+
+/** Стеклянная полоса сверху: когда сцена ушла за край, остаток недели и дня остаются на виду */
+function CompactBar({ weekLeft, dayLeft, show }: { weekLeft: number; dayLeft: number; show: boolean }) {
+  return (
+    <AnimatePresence>
+      {show && (
+        <motion.button type="button" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} aria-label="Наверх"
+          initial={{ y: -24, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -24, opacity: 0 }} transition={spring}
+          className="fixed inset-x-0 top-[env(safe-area-inset-top)] z-30 mx-auto flex w-full max-w-md items-center justify-between gap-3 border-b border-line bg-bg/80 px-5 py-2.5 text-left backdrop-blur-xl backdrop-saturate-150">
+          <span>
+            <span className="block text-[11.5px] text-muted">{weekLeft < 0 ? 'перерасход недели' : 'на неделю'}</span>
+            <span className={`figure block text-[19px] leading-tight ${weekLeft < 0 ? 'text-neg' : ''}`}><Roll value={Math.abs(weekLeft)} /></span>
+          </span>
+          <span className="text-right">
+            <span className="block text-[11.5px] text-muted">{dayLeft < 0 ? 'сверх лимита дня' : 'на сегодня'}</span>
+            <span className={`figure block text-[19px] leading-tight ${dayLeft < 0 ? 'text-neg' : 'text-sea'}`}><Roll value={Math.abs(dayLeft)} /></span>
+          </span>
+        </motion.button>
+      )}
+    </AnimatePresence>
+  );
+}
+
+/** Фонари набережной — дни недели. Нажатие на фонарь — сколько потрачено в тот день */
+function Lamps({ monday, todayIdx, limit, dayNorm }: { monday: string; todayIdx: number; limit: number; dayNorm: number }) {
+  const expenses = useStore(s => s.expenses);
+  const [open, setOpen] = useState<number | null>(null);
+  const spent = useMemo(() => [0, 1, 2, 3, 4, 5, 6].map(i => {
+    const d = addDays(monday, i);
+    return expenses.filter(e => e.date === d && countsWeekly(e)).reduce((s, e) => s + e.amount, 0);
+  }), [expenses, monday]);
+  useEffect(() => {
+    if (open == null) return;
+    const t = window.setTimeout(() => setOpen(null), 4200);
+    return () => clearTimeout(t);
+  }, [open]);
+  const avg = limit / 7;
+  return (
+    <>
+      {[0, 1, 2, 3, 4, 5, 6].map(i => {
+        const p = lampAt(i);
+        const date = addDays(monday, i);
+        const future = i > todayIdx;
+        return (
+          <button key={i} type="button" onClick={() => setOpen(open === i ? null : i)} aria-label={`${weekdayFull(date)}: ${future ? 'впереди' : `потрачено ${Math.round(spent[i])} ₽`}`}
+            className="pointer-events-auto absolute size-11 -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }} />
+        );
+      })}
+      <AnimatePresence>
+        {open != null && (() => {
+          const p = lampAt(open);
+          const date = addDays(monday, open);
+          const future = open > todayIdx, isToday = open === todayIdx;
+          const v = spent[open];
+          const ref = isToday ? dayNorm : avg;
+          const over = !future && v > ref + 0.5;
+          return (
+            <motion.div key={open} initial={{ opacity: 0, y: 8, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 6, scale: 0.95 }} transition={spring}
+              className="absolute z-10 w-[176px] -translate-x-1/2 rounded-2xl border px-3.5 py-2.5 text-[13px] leading-snug shadow-lg backdrop-blur-md"
+              style={{ left: `clamp(100px, ${p.x * 100}%, calc(100% - 100px))`, bottom: `${(1 - p.y) * 100 + 7}%`, background: 'var(--pill)', borderColor: 'var(--pill-border)', color: 'var(--scene-ink)' }}>
+              <div className="text-[12px] first-letter:uppercase" style={{ color: 'var(--scene-muted)' }}>{isToday ? 'сегодня' : weekdayFull(date)}, {Number(date.slice(8))}-е</div>
+              {future
+                ? <div className="mt-0.5 font-medium">впереди, в среднем <Money value={avg} /> в день</div>
+                : <div className="mt-0.5 font-medium" style={{ color: over ? 'var(--ring-neg)' : undefined }}>потрачено <Money value={v} />{isToday ? <> из <Money value={dayNorm} /></> : null}</div>}
+              {!future && !isToday && <div className="mt-0.5 text-[11.5px]" style={{ color: 'var(--scene-muted)' }}>{v === 0 ? 'день без трат' : v > avg ? `больше среднего дня на ${Math.round(v - avg).toLocaleString('ru-RU')} ₽` : 'в пределах среднего дня'}</div>}
+            </motion.div>
+          );
+        })()}
+      </AnimatePresence>
+    </>
   );
 }

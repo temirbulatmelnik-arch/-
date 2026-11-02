@@ -248,7 +248,7 @@ const DAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
 /**
  * Сцена «Недели»: today — индекс дня недели (пн = 0), children — текст поверх неба (дата, остаток).
  */
-export function WeekScene({ today, children }: { today: number; children: ReactNode }) {
+export function WeekScene({ today, children, overlay }: { today: number; children: ReactNode; overlay?: ReactNode }) {
   const { left, right, replay } = useLift();
   const { sun, moon, warm } = useSunset(130, 16_000, 34);
   return (
@@ -339,9 +339,14 @@ export function WeekScene({ today, children }: { today: number; children: ReactN
       <button type="button" onClick={replay} aria-label="Развести мост заново" className="absolute inset-x-0 top-[38%] bottom-[16%]" />
       {/* текст над небом не перехватывает нажатия: сцена под ним разводит мост заново */}
       <div className="pointer-events-none absolute inset-x-0 top-0">{children}</div>
+      {/* поверх всего — фонари-кнопки дней недели */}
+      {overlay && <div className="pointer-events-none absolute inset-0">{overlay}</div>}
     </div>
   );
 }
+
+/** Где на сцене фонарь дня i (пн = 0): доли ширины и высоты картинки */
+export const lampAt = (i: number) => ({ x: (18 + (i + 0.5) * (354 / 7)) / 390, y: (430 - 34) / 478 });
 
 /** Узкая панорама для шапок «Платежей», «Плана» и «Бюджета»: закат, город, полоска воды */
 export function SkyHeader({ title, subtitle, action }: { title: ReactNode; subtitle?: ReactNode; action?: ReactNode }) {

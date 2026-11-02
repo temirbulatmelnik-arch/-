@@ -177,7 +177,8 @@ function Body() {
 export function usePlanUpdates() {
   const ready = useStore(s => s.ready);
   useEffect(() => {
-    if (!ready || !navigator.onLine) return;
+    // в демо-макете нет ни плана с сайта, ни файла обмена
+    if (!ready || !navigator.onLine || import.meta.env.VITE_DEMO) return;
     let cancelled = false;
     (async () => {
       try {
@@ -201,7 +202,8 @@ export function usePlanUpdates() {
 export function useInbox() {
   const ready = useStore(s => s.ready);
   useEffect(() => {
-    if (!ready || !navigator.onLine) return;
+    // в демо-макете нет ни плана с сайта, ни файла обмена
+    if (!ready || !navigator.onLine || import.meta.env.VITE_DEMO) return;
     let cancelled = false;
     (async () => {
       try {

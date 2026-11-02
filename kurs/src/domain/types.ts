@@ -169,6 +169,8 @@ export interface Settings {
   /** последний применённый (или отложенный) файл обмена, доставленный с сайта */
   inboxSeen?: string;
   badge: boolean;
+  /** какую версию знакомства с новым интерфейсом уже видели */
+  tourSeen?: number;
 }
 
 export interface IncomeTemplate {

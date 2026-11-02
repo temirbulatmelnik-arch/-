@@ -1,10 +1,13 @@
-// План: долги и прогноз, чек-лист и стратегия из аудита, этапы и правила.
-import { Check, Gift, Lock, MessagesSquare, Plus, Target } from 'lucide-react';
+// «Долги» — тает ли долг. Общий долг досчитывает вниз от начального, фарватер: долги буями по порядку закрытия,
+// судно — у текущей цели, впереди гавань «Свобода». Ниже — «Долги / План / Чек-лист», листаются пальцем.
+import { Anchor, Check, Gift, Lock, Plus, Ship, Target } from 'lucide-react';
+import { motion } from 'motion/react';
+import { item, list as listAnim, Pager, spring, useTween } from '../components/motion';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { DebtChart } from '../components/DebtChart';
-import { SkyButton, SkyHeader } from '../components/Petersburg';
-import { Bar, Chip, Empty, LinkButton, Money, SectionTitle, Segmented } from '../components/ui';
+import { SkyHeader } from '../components/Petersburg';
+import { Bar, Chip, Empty, LinkButton, Money, SectionTitle } from '../components/ui';
 import { bridgeState } from '../domain/bridge';
 import { eventsBetween } from '../domain/calendar';
 import { addDays, addMonths, ddmm, monthIn, monthKey, monthName } from '../domain/dates';
@@ -35,23 +38,100 @@ export function Plan() {
 
   return (
     <div>
-      <SkyHeader title="План" subtitle="Выход из долгов" action={
-        <div className="flex gap-2">
-          <SkyButton onClick={() => set({ sync: true })} label="Связь с чатом «Финансы»"><MessagesSquare size={17} strokeWidth={1.5} /></SkyButton>
-          <button type="button" onClick={() => set({ bonus: {} })} className="flex h-10 items-center gap-1.5 rounded-full bg-ink px-4 text-[13.5px] font-medium text-bg"><Gift size={15} strokeWidth={1.8} /> Премия</button>
-        </div>
+      <SkyHeader title="Долги" subtitle="Курс к свободе" action={
+        <motion.button type="button" whileTap={{ scale: 0.95 }} onClick={() => set({ bonus: {} })} className="flex h-10 items-center gap-1.5 rounded-full bg-ink px-4 text-[13.5px] font-medium text-bg"><Gift size={15} strokeWidth={1.8} /> Пришла премия</motion.button>
       } />
-      <div className="mt-3 px-4">
-        <Segmented<PlanView> value={view} onChange={v => set({ planView: v })} options={[
-          { id: 'debts', label: 'Долги' },
-          { id: 'checklist', label: <>Чек-лист{open ? <span className="ml-1 text-sea">{open}</span> : null}</> },
-          { id: 'strategy', label: 'Стратегия' },
-        ]} />
-      </div>
-      {view === 'debts' && <DebtsView />}
-      {view === 'checklist' && <ChecklistView />}
-      {view === 'strategy' && <StrategyView />}
+      <DebtHero />
+      <Pager<PlanView> className="mt-5" value={view} onChange={v => set({ planView: v })} pages={[
+        { id: 'debts', label: 'Долги', render: () => <DebtsView /> },
+        { id: 'strategy', label: 'План', render: () => <StrategyView /> },
+        { id: 'checklist', label: <>Чек-лист{open ? <span className="ml-1 text-sea">{open}</span> : null}</>, render: () => <ChecklistView /> },
+      ]} />
     </div>
+  );
+}
+
+/** Общий долг досчитывает вниз от начального и фарватер: долги буями по порядку закрытия, судно у текущей цели */
+function DebtHero() {
+  const now = useToday();
+  const [debts, incomes, reserve, plan, oneOff, templateFrom] = useStore(useShallow(s => [s.debts, s.incomes, s.reserve, s.planTrajectory, s.oneOff, s.templateFrom] as const));
+  const set = useUi(s => s.set);
+  const total = totalDebt(debts);
+  const start = plan[0]?.[1] ?? debts.reduce((s, d) => s + d.startBalance, 0);
+  const shown = useTween(total, start > total ? start : total, 1800);
+  const fc = useMemo(() => forecast({ debts, incomes, reserve, from: `${addMonths(monthKey(now), 1)}-01`, oneOff, templateFrom }), [debts, incomes, reserve, now, oneOff, templateFrom]);
+  const planEnd = plan.at(-1)?.[0];
+  const target = targetDebt(debts);
+  const route = [...debts].sort((a, b) => Number(b.closed) - Number(a.closed) || a.order - b.order);
+  const step = 96, W = 56 + route.length * step + 96, H = 150;
+  const pos = (i: number) => ({ x: 56 + i * step, y: 70 + Math.sin(i * 1.25 + 0.4) * 16 });
+  const ti = Math.max(0, route.findIndex(d => d.id === target?.id || (!target && !d.closed)));
+  const pts = route.map((_, i) => pos(i));
+  const path = pts.reduce((d, p, i) => (i ? `${d} S${p.x - step / 2} ${p.y + (i % 2 ? 22 : -22)} ${p.x} ${p.y}` : `M8 ${p.y + 6} Q${p.x / 2} ${p.y + 14} ${p.x} ${p.y}`), '') + ` S${W - 70} 48 ${W - 40} 62`;
+  return (
+    <section className="deep-card mx-4 mt-3 pt-5 pb-3">
+      <div className="px-5">
+        <div className="text-[13px] text-card-muted">Общий долг</div>
+        <Money value={shown} className="figure mt-1 block text-[42px] leading-none" />
+        {start > 0 && (
+          <div className="mt-4 h-[5px] overflow-hidden rounded-full bg-card/12">
+            <motion.div className="h-full rounded-full bg-card-sea" initial={{ width: 0 }} animate={{ width: `${Math.max(0, (1 - total / start) * 100)}%` }} transition={{ ...spring, delay: 0.4 }} />
+          </div>
+        )}
+        <div className="mt-3 grid grid-cols-2 gap-3 text-[12px] text-card-muted">
+          <div>Погашено с начала<Money value={Math.max(0, start - total)} className="mt-0.5 block text-[15px] text-card" /></div>
+          <div>Проценты в месяц<Money value={monthlyInterest(debts)} approx className="mt-0.5 block text-[15px] text-card" /></div>
+        </div>
+      </div>
+      {/* фарватер: листается вбок; буй — открыть долг, судно — у текущей цели, в конце — гавань «Свобода» */}
+      <div className="no-scrollbar mt-2 overflow-x-auto" data-noswipe>
+        <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="block" role="img" aria-label="Фарватер: долги по порядку закрытия">
+          <defs>
+            <linearGradient id="fw-done" x1="0" x2="1"><stop offset="0" stopColor="#4fd1ac" stopOpacity=".9" /><stop offset="1" stopColor="#4fd1ac" stopOpacity=".2" /></linearGradient>
+          </defs>
+          {/* лёгкая рябь фарватера */}
+          {[24, 112, 132].map((y, k) => <path key={y} d={`M0 ${y} q 24 -5 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0`} fill="none" stroke="var(--card-muted)" strokeOpacity={0.12 - k * 0.02} strokeWidth="1" />)}
+          <motion.path d={path} fill="none" stroke="var(--card-muted)" strokeOpacity=".5" strokeWidth="1.6" strokeDasharray="5 7"
+            initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 1.8, ease: [0.16, 1, 0.3, 1] }} />
+          {route.map((d, i) => {
+            const p = pts[i];
+            const cur = i === ti && !d.closed;
+            return (
+              <motion.g key={d.id} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: 0.25 + i * 0.07 }}
+                onClick={() => set({ debt: d.id })} style={{ cursor: 'pointer' }} role="button" aria-label={`${d.short}: ${d.closed ? 'закрыт' : `${Math.round(d.balance)} ₽`}`}>
+                <circle cx={p.x} cy={p.y} r="22" fill="transparent" />
+                {cur && <motion.circle cx={p.x} cy={p.y + 4} r="14" fill="none" stroke="#ffc49a" strokeWidth="1.5" initial={{ scale: 0.6, opacity: 0.9 }} animate={{ scale: 1.8, opacity: 0 }} transition={{ duration: 1.8, repeat: Infinity, ease: 'easeOut' }} style={{ transformOrigin: `${p.x}px ${p.y + 4}px` }} />}
+                {d.closed
+                  ? <><circle cx={p.x} cy={p.y} r="10" fill="#4fd1ac" /><path d={`M${p.x - 4.5} ${p.y} l3.2 3.3 l5.8 -6.4`} stroke="#0a2433" strokeWidth="2" fill="none" strokeLinecap="round" /></>
+                  : <g>
+                      <path d={`M${p.x - 8} ${p.y + 9} L${p.x} ${p.y - 13} L${p.x + 8} ${p.y + 9} Z`} fill={cur ? '#ffc49a' : '#ee6125'} />
+                      <path d={`M${p.x - 5.3} ${p.y + 1.5} H${p.x + 5.3}`} stroke="#fff" strokeOpacity=".7" strokeWidth="2" />
+                      <rect x={p.x - 10} y={p.y + 8} width="20" height="4" rx="2" fill="var(--card-muted)" />
+                    </g>}
+                <text x={p.x} y={p.y + 30} textAnchor="middle" fontSize="12" fontWeight={cur ? 600 : 400} fill="var(--card-ink)" opacity={d.closed ? 0.55 : 1} style={{ fontFamily: 'var(--font-sans)' }}>{d.short}</text>
+                {!d.closed && <text x={p.x} y={p.y + 45} textAnchor="middle" fontSize="11" fill="var(--card-muted)" style={{ fontFamily: 'var(--font-sans)' }}>{Math.round(d.balance / 1000).toLocaleString('ru-RU')} тыс.</text>}
+              </motion.g>
+            );
+          })}
+          <g transform={`translate(${W - 40} 62)`}>
+            <motion.circle r="18" fill="var(--card-sea)" initial={{ opacity: 0.1 }} animate={{ opacity: [0.12, 0.3, 0.12] }} transition={{ duration: 3, repeat: Infinity }} />
+            <foreignObject x="-10" y="-10" width="20" height="20"><Anchor size={20} color="var(--card-sea)" /></foreignObject>
+            <text y="36" textAnchor="middle" fontSize="12" fontWeight="600" fill="var(--card-sea)" style={{ fontFamily: 'var(--font-sans)' }}>Свобода</text>
+          </g>
+          {/* судно подплывает к текущей цели и покачивается на волне */}
+          <motion.g initial={{ x: 0, y: pts[0]?.y ?? 60 }} animate={{ x: (pts[ti]?.x ?? 56) - 40, y: (pts[ti]?.y ?? 60) - 34 }} transition={{ type: 'spring', stiffness: 50, damping: 14, delay: 0.6 }}>
+            <motion.g animate={{ y: [0, -3, 0], rotate: [-3, 3, -3] }} transition={{ duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}>
+              <foreignObject x="0" y="0" width="28" height="28"><Ship size={26} color="var(--card-ink)" /></foreignObject>
+            </motion.g>
+          </motion.g>
+        </svg>
+      </div>
+      <div className="mx-5 mt-1 border-t border-card-line pt-3 text-[12.5px] leading-snug text-card-muted">
+        {fc.freeMonth
+          ? <>Свобода по текущему темпу — <span className="text-card">{monthName(fc.freeMonth)}</span>{planEnd ? <>, по плану — {monthName(planEnd)}</> : null}.</>
+          : 'При текущих суммах долг не закрывается за 6 лет.'}
+      </div>
+    </section>
   );
 }
 
@@ -92,7 +172,6 @@ function DebtsView() {
   const set = useUi(s => s.set);
   const [adding, setAdding] = useState(false);
   const total = totalDebt(debts);
-  const start = plan[0]?.[1] ?? debts.reduce((s, d) => s + d.startBalance, 0);
   const target = targetDebt(debts);
   // текущий месяц уже идёт по календарю — модель считает со следующего
   const fc = useMemo(() => forecast({ debts, incomes, reserve, from: `${addMonths(monthKey(now), 1)}-01`, oneOff, templateFrom }), [debts, incomes, reserve, now, oneOff, templateFrom]);
@@ -105,27 +184,11 @@ function DebtsView() {
     return [...snapshots.map(s => [s.month, s.total] as [string, number]).filter(p => p[0] !== cur), [cur, Math.round(total)] as [string, number]].sort((a, b) => a[0].localeCompare(b[0]));
   }, [snapshots, total, now]);
   const forecastLine: [string, number][] = [fact[fact.length - 1], ...fc.trajectory.filter(p => p[0] > monthKey(now))];
-  const planEnd = plan.at(-1)?.[0];
   const openDebts = debts.filter(d => !d.closed).sort((a, b) => a.order - b.order);
   const closed = debts.filter(d => d.closed);
 
   return (
     <>
-      <section className="deep-card mx-4 mt-4 px-6 pt-6 pb-5">
-        <div className="text-[13px] text-card-muted">Общий долг</div>
-        <Money value={total} className="figure mt-1 block text-[46px] leading-none" />
-        {start > 0 && <Bar value={1 - total / start} tone="card" className="mt-5" />}
-        <div className="mt-4 grid grid-cols-2 gap-3 text-[12px] text-card-muted">
-          <div>Погашено с начала<Money value={Math.max(0, start - total)} className="mt-0.5 block text-[15px] text-card" /></div>
-          <div>Проценты в месяц<Money value={monthlyInterest(debts)} approx className="mt-0.5 block text-[15px] text-card" /></div>
-        </div>
-        <div className="mt-4 border-t border-card-line pt-3 text-[12.5px] leading-snug text-card-muted">
-          {fc.freeMonth
-            ? <>Свобода по текущему темпу — <span className="text-card">{monthName(fc.freeMonth)}</span>{planEnd ? <>, по плану — {monthName(planEnd)}</> : null}.</>
-            : 'При текущих суммах долг не закрывается за 6 лет.'}
-        </div>
-      </section>
-
       <BridgeCard />
 
       {target && (
@@ -150,11 +213,11 @@ function DebtsView() {
       )}
 
       <SectionTitle>По порядку закрытия</SectionTitle>
-      <div className="space-y-2.5 px-4">
+      <motion.div className="space-y-2.5 px-4" variants={listAnim} initial="hidden" animate="show">
         {openDebts.length === 0 && <Empty>{debts.length ? 'Все долги закрыты. Свобода.' : 'Долгов пока нет.'}</Empty>}
         {openDebts.map(d => <DebtCard key={d.id} d={d} next={next[d.id]} closeMonth={fc.closeMonth[d.id]} target={target?.id === d.id} onClick={() => set({ debt: d.id })} />)}
-        <button type="button" onClick={() => setAdding(true)} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-line text-[13.5px] text-muted"><Plus size={16} /> Добавить долг</button>
-      </div>
+        <motion.button variants={item} type="button" onClick={() => setAdding(true)} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-line text-[13.5px] text-muted"><Plus size={16} /> Добавить долг</motion.button>
+      </motion.div>
 
       {closed.length > 0 && (
         <>
@@ -178,7 +241,7 @@ function DebtCard({ d, next, closeMonth, target, onClick }: { d: Debt; next?: { 
   const progress = d.startBalance ? 1 - d.balance / d.startBalance : 0;
   const late = closeMonth && d.targetClose && closeMonth > d.targetClose;
   return (
-    <button type="button" onClick={onClick} className={`card block w-full p-4 text-left ${target ? 'border-sea/50' : ''}`}>
+    <motion.button variants={item} whileTap={{ scale: 0.98 }} type="button" onClick={onClick} className={`card block w-full p-4 text-left ${target ? 'border-sea/50' : ''}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-1.5">
@@ -195,7 +258,7 @@ function DebtCard({ d, next, closeMonth, target, onClick }: { d: Debt; next?: { 
         <span>{next ? <>платёж {next.dateMode === 'until' ? 'до ' : ''}{ddmm(next.date)}: <Money value={next.amount} approx={next.approx} className="text-ink" /></> : 'платежей в 45 дней нет'}</span>
         <span className={late ? 'text-warn' : ''}>{closeMonth ? `закроется ~${monthName(closeMonth)}` : 'срок не виден'}{late ? ` (план — ${monthName(d.targetClose!)})` : ''}</span>
       </div>
-    </button>
+    </motion.button>
   );
 }
 
@@ -223,15 +286,15 @@ function ChecklistView() {
             const done = isDone(c);
             const due = done ? null : checklistDue(c, now);
             return (
-              <button key={c.id} ref={c.id === focus ? focused : undefined} type="button" onClick={() => toggleCheck(c.id)} aria-pressed={done}
+              <motion.button layout transition={spring} key={c.id} ref={c.id === focus ? focused : undefined} type="button" onClick={() => toggleCheck(c.id)} aria-pressed={done}
                 className={`flex w-full items-start gap-3 px-4 py-3.5 text-left transition-colors duration-700 ${done ? 'opacity-50' : ''} ${c.id === focus ? 'bg-sea/12' : ''}`}>
-                <span className={`mt-0.5 grid size-6 shrink-0 place-items-center rounded-full border ${done ? 'border-transparent bg-pos text-white' : due === 'overdue' ? 'border-warn' : 'border-line'}`}>{done && <Check size={13} strokeWidth={2.5} />}</span>
+                <motion.span animate={{ scale: done ? [1, 1.3, 1] : 1 }} transition={{ duration: 0.35 }} className={`mt-0.5 grid size-6 shrink-0 place-items-center rounded-full border ${done ? 'border-transparent bg-pos text-white' : due === 'overdue' ? 'border-warn' : 'border-line'}`}>{done && <Check size={13} strokeWidth={2.5} />}</motion.span>
                 <span className="min-w-0 flex-1">
                   <span className={`block text-[14.5px] leading-snug ${done ? 'line-through decoration-1' : ''}`}>{c.title}</span>
                   {c.note && !done && <span className="mt-0.5 block text-[12.5px] leading-snug text-muted">{c.note}</span>}
                 </span>
                 {c.due && !done && <Chip tone={due === 'overdue' ? 'warn' : due === 'soon' ? 'sea' : 'neutral'} className="mt-0.5">{c.due.length === 7 ? monthName(c.due).split(' ')[0] : ddmm(c.due)}</Chip>}
-              </button>
+              </motion.button>
             );
           })}
         </div>
