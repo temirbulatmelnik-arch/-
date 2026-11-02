@@ -1,7 +1,7 @@
 // Месяц на «Платежах»: каждый день наполняется водой по деньгам на карте и в резерве,
 // под календарём — одна линия уровня с выводом словами. Одни данные, два взгляда.
 import { motion } from 'motion/react';
-import { useLayoutEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { LOW_WATER } from '../domain/cashflow';
 import { fromKey, weekday } from '../domain/dates';
 import { num } from '../domain/money';
@@ -36,6 +36,12 @@ export function MonthGrid({ month, days, top, now, selected, onSelect, onSwipe, 
 }) {
   const lead = (fromKey(`${month}-01`).getDay() + 6) % 7;
   const touch = useRef<number | null>(null);
+  // вода наполняет ячейки один раз на месяц: скрытая вкладка (display:none) при каждом показе перезапускала бы
+  // наполнение всех ячеек. Считаем окончания — после последнего класс sc-once снимает анимацию
+  const [filled, setFilled] = useState<string | null>(null);
+  const ends = useRef({ month, n: 0 });
+  if (ends.current.month !== month) ends.current = { month, n: 0 };
+  const fills = days.filter(d => d.total != null).length;
   return (
     <div onTouchStart={e => { touch.current = e.touches[0].clientX; }}
       onTouchEnd={e => {
@@ -47,7 +53,8 @@ export function MonthGrid({ month, days, top, now, selected, onSelect, onSwipe, 
       <div className="grid grid-cols-7 gap-1 text-center text-[12px] text-muted">
         {['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].map(d => <span key={d}>{d}</span>)}
       </div>
-      <div className="mt-1.5 grid grid-cols-7 gap-1">
+      <div className={`mt-1.5 grid grid-cols-7 gap-1 ${filled === month ? 'sc-once' : ''}`}
+        onAnimationEnd={e => { if (e.animationName === 'sc-fill' && ++ends.current.n >= fills) setFilled(month); }}>
         {Array.from({ length: lead }, (_, i) => <span key={`e${i}`} />)}
         {days.map((d, i) => {
           const n = Number(d.date.slice(8));
@@ -111,13 +118,27 @@ export function LevelChart({ days, selected, onSelect }: {
   const sel = idx.get(selected) ?? -1;
 
   // к выбранному дню (и при открытии) — плавно подъезжаем, он оказывается по центру
-  useLayoutEffect(() => {
+  const center = (smooth: boolean) => {
     const el = scroller.current;
-    if (!el || sel < 0) return;
+    if (!el || sel < 0 || !el.clientWidth) return false;
     const to = Math.max(0, cx(sel) - el.clientWidth / 2);
-    if (Math.abs(el.scrollLeft - to) > 2) el.scrollTo({ left: to, behavior: el.dataset.ready ? 'smooth' : 'auto' });
+    if (Math.abs(el.scrollLeft - to) > 2) el.scrollTo({ left: to, behavior: smooth ? 'smooth' : 'auto' });
     el.dataset.ready = '1';
+    return true;
+  };
+  useLayoutEffect(() => { center(!!scroller.current?.dataset.ready); }, [sel]);
+  // вкладка собрана скрытой (display:none) — ширины ещё нет; как только её показали, сразу встаём на выбранный день.
+  // ResizeObserver срабатывает после раскладки, до отрисовки — рывка не видно
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || el.dataset.ready) return;
+    const ro = new ResizeObserver(() => { if (center(false)) ro.disconnect(); });
+    ro.observe(el);
+    return () => ro.disconnect();
   }, [sel]);
+  // проявление линии и заливки — один раз: скрытая вкладка при каждом показе перезапускала бы CSS-анимации
+  const [drawn, setDrawn] = useState(false);
+  const fades = useRef(0);
 
   if (!known.length) return null;
   const pts = known.map(d => [cx(idx.get(d.date)!), y(d.total)] as const);
@@ -137,7 +158,8 @@ export function LevelChart({ days, selected, onSelect }: {
   return (
     <div ref={scroller} className="hs -mx-4 overflow-x-auto overscroll-x-contain" style={{ scrollSnapType: 'x proximity' }}>
       <div className="relative" style={{ width: W + 32, height: H, paddingLeft: 16 }}>
-        <svg width={W} height={H} className="absolute top-0 left-4 overflow-visible" aria-hidden="true">
+        <svg width={W} height={H} className={`absolute top-0 left-4 overflow-visible ${drawn ? 'sc-once' : ''}`} aria-hidden="true"
+          onAnimationEnd={e => { if (e.animationName === 'sc-fade' && ++fades.current >= 3) setDrawn(true); }}>
           <defs>
             <linearGradient id="lvl-up" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0" style={{ stopColor: 'var(--sea)', stopOpacity: 0.42 }} /><stop offset="1" style={{ stopColor: 'var(--sea)', stopOpacity: 0.04 }} />

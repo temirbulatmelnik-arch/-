@@ -1,7 +1,7 @@
 // Иллюстрация «Петербург»: закат над Невой, Петропавловка, Исаакий, Адмиралтейство, Дворцовый мост и «Лахта» вдали.
 // Мост на «Неделе» при входе разводится полностью, фонари набережной — дни недели. Цвета — из index.css (--sky-*, --city-*),
 // поэтому тёмная тема превращает закат в светлые сумерки без отдельной картинки; солнце в ней заменяет луна.
-import { useEffect, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 
 const f = (v: string): CSSProperties => ({ fill: `var(${v})` });
 const stop = (v: string, opacity?: number): CSSProperties => ({ stopColor: `var(${v})`, stopOpacity: opacity });
@@ -181,13 +181,12 @@ function tween(from: number, to: number, ms: number, ease: (k: number) => number
 const easeInOut = (k: number) => 0.5 - Math.cos(Math.PI * k) / 2;
 const easeOut = (k: number) => 1 - (1 - k) ** 3;
 
-/** Закат играется один раз за запуск приложения на каждый вид сцены (большая на «Сегодня», панорама в шапках).
- *  Вкладки живут в фоне и при каждом показе заново запускают эффекты — без этого закат шёл бы 9–16 секунд при каждом
- *  переключении и всё это время перерисовывал небо */
-const sunsetPlayed = new Set<string>();
+/** Закат на «Сегодня» играется один раз за запуск приложения: вкладка дальше живёт скрытой и не пересобирается,
+ *  а если сцену всё же соберут заново — сразу конечный кадр, без повторных 16 секунд перерисовки неба */
+let sunsetPlayed = false;
 
 /** Закат: солнце опускается на rise единиц за ms, небо разгорается; в тёмной теме за то же время поднимается луна */
-function useSunset(kind: 'scene' | 'header', rise: number, ms: number, moonRise: number) {
+function useSunset(rise: number, ms: number, moonRise: number) {
   const sun = useRef<SVGGElement>(null);
   const moon = useRef<SVGGElement>(null);
   const warm = useRef<SVGRectElement>(null);
@@ -198,10 +197,10 @@ function useSunset(kind: 'scene' | 'header', rise: number, ms: number, moonRise:
       moon.current?.setAttribute('transform', `translate(0 ${(moonRise * (1 - k)).toFixed(2)})`);
       warm.current?.setAttribute('opacity', k.toFixed(3));
     };
-    if (sunsetPlayed.has(kind)) { frame(1); return; }
-    sunsetPlayed.add(kind);
+    if (sunsetPlayed) { frame(1); return; }
+    sunsetPlayed = true;
     return tween(0, 1, ms, easeOut, frame);
-  }, [kind, rise, ms, moonRise]);
+  }, [rise, ms, moonRise]);
   return { sun, moon, warm };
 }
 
@@ -269,7 +268,7 @@ const DAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
  */
 export function WeekScene({ today, children, overlay }: { today: number; children: ReactNode; overlay?: ReactNode }) {
   const { left, right, replay } = useLift();
-  const { sun, moon, warm } = useSunset('scene', 130, 16_000, 34);
+  const { sun, moon, warm } = useSunset(130, 16_000, 34);
   return (
     <div className="relative">
       <svg viewBox="0 34 390 478" className="block h-auto w-full" role="img"
@@ -367,11 +366,13 @@ export function WeekScene({ today, children, overlay }: { today: number; childre
 /** Где на сцене фонарь дня i (пн = 0): доли ширины и высоты картинки */
 export const lampAt = (i: number) => ({ x: (18 + (i + 0.5) * (354 / 7)) / 390, y: (430 - 34) / 478 });
 
-/** Узкая панорама для шапок «Платежей», «Плана» и «Бюджета»: закат, город, полоска воды.
- *  Живые мелочи (звёзды, блики, чайка) — отдельные HTML-слои поверх картинки: их прозрачность и сдвиг крутит видеокарта,
+/** Узкая панорама для шапок «Платежей», «Плана» и «Бюджета»: вечернее небо (конечный кадр заката), город, полоска
+ *  воды. Закат здесь не проигрывается: вкладки собираются в фоне, и анимация шла бы впустую. Живые мелочи (звёзды, блики, чайка) — отдельные HTML-слои поверх картинки: их прозрачность и сдвиг крутит видеокарта,
  *  и картинка неба не перерисовывается каждый кадр (анимации внутри SVG на iPhone идут через основной поток) */
 export function SkyHeader({ title, subtitle, action }: { title: ReactNode; subtitle?: ReactNode; action?: ReactNode }) {
-  const { sun, moon, warm } = useSunset('header', 26, 9000, 10);
+  // у каждой шапки свои имена градиентов: вкладки живут одновременно, и при общих именах браузер брал бы градиенты
+  // из скрытой вкладки — там они не рисуются, и небо выходило пустым
+  const id = `sh${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   // шапка ушла за край — мелочи замирают
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -385,24 +386,24 @@ export function SkyHeader({ title, subtitle, action }: { title: ReactNode; subti
     <header ref={ref} className="relative overflow-hidden">
       <svg viewBox="0 0 390 160" className="block h-auto w-full" aria-hidden="true">
         <defs>
-          <SkyGradients id="sh" />
-          <clipPath id="sh-skyclip"><rect width="390" height="149" /></clipPath>
+          <SkyGradients id={id} />
+          <clipPath id={`${id}-skyclip`}><rect width="390" height="149" /></clipPath>
         </defs>
-        <rect width="390" height="149" fill="url(#sh-sky)" />
-        <rect ref={warm} opacity="0" width="390" height="149" fill="url(#sh-warm)" />
-        <g clipPath="url(#sh-skyclip)">
-          <g ref={sun} className="scene-day" transform="translate(0 -26)">
-            <circle cx="340" cy="146" r="70" fill="url(#sh-halo)" opacity=".9" />
-            <circle cx="340" cy="146" r="11" fill="url(#sh-sun)" />
+        <rect width="390" height="149" fill={`url(#${id}-sky)`} />
+        <rect width="390" height="149" fill={`url(#${id}-warm)`} />
+        <g clipPath={`url(#${id}-skyclip)`}>
+          <g className="scene-day">
+            <circle cx="340" cy="146" r="70" fill={`url(#${id}-halo)`} opacity=".9" />
+            <circle cx="340" cy="146" r="11" fill={`url(#${id}-sun)`} />
           </g>
-          <g ref={moon} className="scene-night" transform="translate(0 10)">
-            <circle cx="340" cy="112" r="55" fill="url(#sh-moonhalo)" opacity=".9" />
-            <g transform="translate(340 112) scale(.7) translate(-246 -268)"><Moon id="sh" /></g>
+          <g className="scene-night">
+            <circle cx="340" cy="112" r="55" fill={`url(#${id}-moonhalo)`} opacity=".9" />
+            <g transform="translate(340 112) scale(.7) translate(-246 -268)"><Moon id={id} /></g>
           </g>
         </g>
         <rect x="0" y="145" width="390" height="4" style={f('--city-far')} opacity=".55" />
-        <g transform="translate(186 9.4) scale(.42)"><City id="sh" still /></g>
-        <rect y="148" width="390" height="12" fill="url(#sh-water)" />
+        <g transform="translate(186 9.4) scale(.42)"><City id={id} still /></g>
+        <rect y="148" width="390" height="12" fill={`url(#${id}-water)`} />
       </svg>
       {/* координаты — в долях картинки 390×160 */}
       <div aria-hidden="true" className="pointer-events-none absolute inset-0">

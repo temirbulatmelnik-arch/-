@@ -11,7 +11,12 @@ import { Money } from './ui';
 
 type Series = [string, number][];
 
-const W = 360, H = 250, PAD = { l: 52, r: 12, t: 14, b: 30 };
+const W = 360, H = 250, PAD = { l: 40, r: 14, t: 26, b: 30 };
+
+/** Сумма коротко, для плашек: «2,05 млн», «850 тыс.» */
+const compact = (v: number) => (Math.abs(v) >= 1e6
+  ? `${(v / 1e6).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} млн`
+  : `${Math.round(v / 1e3).toLocaleString('ru-RU')} тыс.`);
 
 /** Значение ряда в месяце: точное или линейная интерполяция между соседними точками */
 function valueAt(s: Series, m: string): number | null {
@@ -62,14 +67,21 @@ export function DebtChart({ plan, fact, forecast, baseline }: { plan: Series; fa
   const planNow = fact.length ? valueAt(plan, fact.at(-1)![0]) : null;
   const diff = factNow != null && planNow != null ? factNow - planNow : null;
 
+  // ось: числа без единиц, единица — одна, над осью; иначе «2,09 млн ₽» не помещается слева и обрезается
+  const unit = max >= 1e6 ? 1e6 : 1e3;
+  const axis = (v: number) => (v / unit).toLocaleString('ru-RU', { maximumFractionDigits: unit === 1e6 ? (max - min < 1e6 ? 2 : 1) : 0 });
   const step = range === 'year' ? 3 : 12;
-  const ticks = months.filter((m, i) => (range === 'year' ? i % step === 0 : m.endsWith('-01') && monthsBetween(start, m) >= 3) || m === start);
+  // подписи месяцев: каждый третий месяц года или январи всего плана; слишком близкие к предыдущей — пропускаем
+  const ticks: string[] = [];
+  for (const m of months.filter((m, i) => m === start || (range === 'year' ? i % step === 0 : m.endsWith('-01')))) {
+    if (!ticks.length || x(m) - x(ticks[ticks.length - 1]) >= 46) ticks.push(m);
+  }
   const grid = [0, 0.5, 1].map(f => min + (max - min) * f);
   const shown = hover ?? now;
   const rows = [
     { name: 'План', color: 'var(--chart-plan)', v: valueAt(plan, shown) },
     { name: fact.some(f => f[0] === shown) ? 'Факт' : 'Прогноз', color: 'var(--chart-fact)', v: valueAt(fact, shown) ?? valueAt(forecast, shown) },
-    { name: 'Только минималки', color: 'var(--chart-base)', v: valueAt(baseline, shown) },
+    { name: 'Минималки', color: 'var(--chart-base)', v: valueAt(baseline, shown) },
   ].filter(r => r.v != null);
 
   return (
@@ -96,7 +108,7 @@ export function DebtChart({ plan, fact, forecast, baseline }: { plan: Series; fa
         {rows.map(r => (
           <div key={r.name} className="min-w-0 rounded-[14px] bg-surface-2/70 px-2.5 py-2">
             <div className="flex items-center gap-1.5 truncate text-[11.5px] text-muted"><span className="size-2 shrink-0 rounded-full" style={{ background: r.color }} />{r.name}</div>
-            <div className="font-display mt-0.5 truncate text-[14.5px] font-medium">{rubShort(r.v!)}</div>
+            <div className="mt-0.5 truncate text-[15px] font-semibold tabular-nums">{compact(r.v!)}</div>
           </div>
         ))}
       </div>
@@ -107,10 +119,11 @@ export function DebtChart({ plan, fact, forecast, baseline }: { plan: Series; fa
           {grid.map(v => (
             <g key={v}>
               <line x1={PAD.l} x2={W - PAD.r} y1={y(v)} y2={y(v)} stroke="var(--line)" strokeWidth={1} />
-              <text x={PAD.l - 8} y={y(v) + 4} textAnchor="end" fontSize={12} fill="var(--muted)" style={{ fontFamily: 'var(--font-sans)' }}>{rubShort(v)}</text>
+              <text x={PAD.l - 7} y={y(v) + 4} textAnchor="end" fontSize={12} fill="var(--muted)" style={{ fontFamily: 'var(--font-sans)' }}>{axis(v)}</text>
             </g>
           ))}
-          {ticks.map(m => <text key={m} x={x(m)} y={H - 8} fontSize={12} textAnchor={m === start ? 'start' : 'middle'} fill="var(--muted)" style={{ fontFamily: 'var(--font-sans)' }}>{monthShort(m)}</text>)}
+          <text x={2} y={12} fontSize={11.5} fill="var(--faint)" style={{ fontFamily: 'var(--font-sans)' }}>{unit === 1e6 ? 'млн ₽' : 'тыс. ₽'}</text>
+          {ticks.map(m => <text key={m} x={x(m)} y={H - 8} fontSize={12} textAnchor={m === start ? 'start' : x(m) > W - PAD.r - 20 ? 'end' : 'middle'} fill="var(--muted)" style={{ fontFamily: 'var(--font-sans)' }}>{monthShort(m)}</text>)}
           <motion.g key={range} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3, ease: ease.out }}>
             <path d={path(S.base)} fill="none" stroke="var(--chart-base)" strokeWidth={2} strokeDasharray="5 5" strokeLinecap="round" />
             <path d={path(S.plan)} fill="none" stroke="var(--chart-plan)" strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" />

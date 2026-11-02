@@ -52,7 +52,7 @@ export function Island({ show }: { show: boolean }) {
             drag={open ? 'y' : false} dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0.3, bottom: 0.05 }} onDragEnd={(_, i) => { if (i.offset.y < -24 || i.velocity.y < -300) setOpen(false); }}
             initial={{ opacity: 0, y: -16, scale: 0.92 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -12, scale: 0.94, transition: { duration: 0.16 } }}
             transition={morph} style={{ borderRadius: open ? 32 : 24 }}
-            className={`fixed left-0 right-0 top-[calc(env(safe-area-inset-top)+16px)] z-[45] mx-auto overflow-hidden bg-[#06141d] text-white shadow-[0_18px_40px_-18px_rgba(0,0,0,.7)] select-none ${open ? 'w-[min(92vw,392px)] cursor-grab' : 'w-fit cursor-pointer'}`}>
+            className={`fixed left-0 right-0 top-[calc(env(safe-area-inset-top)+22px)] z-[45] mx-auto overflow-hidden bg-[#06141d] text-white shadow-[0_18px_40px_-18px_rgba(0,0,0,.7)] select-none ${open ? 'w-[min(92vw,392px)] cursor-grab' : 'w-fit cursor-pointer'}`}>
             <AnimatePresence mode="popLayout" initial={false}>
               {!open ? (
                 <motion.div key="pill" layout="position" initial={{ opacity: 0, filter: 'blur(4px)' }} animate={{ opacity: 1, filter: 'blur(0px)' }} exit={{ opacity: 0, filter: 'blur(4px)' }} transition={{ duration: 0.2 }}

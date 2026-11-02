@@ -1,5 +1,5 @@
 import { MotionConfig } from 'motion/react';
-import { Activity, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { startTransition, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Island } from './components/Island';
 import { Salute } from './components/Salute';
 import { TABS, TabBar } from './components/TabBar';
@@ -70,6 +70,29 @@ const SHEETS = (
   </>
 );
 
+/** Какие вкладки уже собраны. Открытая — сразу; остальные — по одной в фоне после первого кадра, низким приоритетом
+ *  (startTransition: сборка уступает касаниям и кадрам анимации). Дальше вкладки не разбираются.
+ *  React Activity здесь не подходит: при каждом показе он заново запускает все эффекты вкладки, и замер показал
+ *  вдвое более долгое переключение */
+function useMountedTabs(tab: Tab, ready: boolean): ReadonlySet<Tab> {
+  const [mounted, setMounted] = useState<ReadonlySet<Tab>>(() => new Set([tab]));
+  const add = (t: Tab) => setMounted(m => (m.has(t) ? m : new Set(m).add(t)));
+  useEffect(() => { add(tab); }, [tab]);
+  useEffect(() => {
+    if (!ready) return;
+    let i = 0, timer = 0;
+    const next = () => {
+      const t = ORDER[i++];
+      if (!t) return;
+      startTransition(() => add(t));
+      timer = window.setTimeout(next, 250);
+    };
+    timer = window.setTimeout(next, 700);
+    return () => clearTimeout(timer);
+  }, [ready]);
+  return mounted;
+}
+
 /** Каждая вкладка помнит, докуда её прокрутили: вернулись — тот же вид, как в приложениях iOS */
 function useTabScroll(tab: Tab) {
   const saved = useRef<Partial<Record<Tab, number>>>({});
@@ -97,6 +120,7 @@ export default function App() {
   const toast = useUi(s => s.toast);
   const set = useUi(s => s.set);
   useTabScroll(tab);
+  const mounted = useMountedTabs(tab, ready);
   // «Остров» появляется, когда шапка вкладки (на «Сегодня» — сцена) ушла за верхний край
   const mark = useRef<HTMLDivElement>(null);
   const [island, setIsland] = useState(false);
@@ -135,14 +159,10 @@ export default function App() {
         <Island show={island} />
         <Salute />
         <div aria-hidden="true" className="fixed inset-x-0 top-0 z-40 h-[env(safe-area-inset-top)]" style={{ background: 'var(--sky-1)' }} />
-        {/* Все вкладки живут сразу: скрытые готовятся заранее в фоне и не пересобираются при переключении
-            (React Activity). Переключение мгновенное, как у вкладок iOS: без въезда и проявления — частое действие
+        {/* Все вкладки живут сразу, скрытые — блоками с hidden: переключение только показывает готовое, без
+            пересборки и без перезапуска эффектов. Мгновенно, как у вкладок iOS: без въезда — частое действие
             не должно ждать анимацию */}
-        {ORDER.map(t => (
-          <Activity key={t} mode={t === tab ? 'visible' : 'hidden'}>
-            <main>{SCREENS[t]}</main>
-          </Activity>
-        ))}
+        {ORDER.map(t => (mounted.has(t) || t === tab) && <main key={t} hidden={t !== tab}>{SCREENS[t]}</main>)}
 
         <TabBar />
 

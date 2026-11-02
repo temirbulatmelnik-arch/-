@@ -154,14 +154,6 @@ button, [role="button"], [role="tab"] { -webkit-user-select: none; user-select: 
 h1, h2, h3 { text-wrap: balance; }
 p { text-wrap: pretty; }
 
-/* Вкладки сменяются как в iOS — мгновенно, новая чуть въезжает со стороны нажатия. CSS-анимация идёт мимо
-   основного потока, а заполнение backwards не оставляет transform после конца (иначе «плавающие» элементы съедут) */
-@keyframes tab-in-r { from { opacity: 0; transform: translateX(10px); } }
-@keyframes tab-in-l { from { opacity: 0; transform: translateX(-10px); } }
-@keyframes fade-in { from { opacity: 0; } }
-.tab-in-r { animation: tab-in-r 200ms var(--ease-out) backwards; }
-.tab-in-l { animation: tab-in-l 200ms var(--ease-out) backwards; }
-
 /* Параллакс сцены «Сегодня» — по прокрутке силами браузера (scroll-driven animation), без событий прокрутки */
 @supports (animation-timeline: scroll()) {
   @keyframes sc-parallax { to { transform: translateY(210px); } }
@@ -274,6 +266,8 @@ button:disabled { cursor: default; }
 .hs { scrollbar-width: none; }
 .hs::-webkit-scrollbar { display: none; }
 .sc-fade { animation: sc-fade 1s .8s ease-out both; }
+/* разовое появление уже сыграло — при новом показе вкладки не повторяется */
+.sc-once .sc-fill, .sc-once .sc-fade, .sc-once .sc-draw-line { animation: none; }
 /* огни «Лахты» вспыхивают все вместе, как заградительные огни высоток */
 .sc-lakhta { animation: sc-lakhta 1.6s linear infinite; }
 .sc-pop { animation: sc-pop .6s cubic-bezier(.2, .8, .2, 1) both; }
@@ -312,5 +306,4 @@ button:disabled { cursor: default; }
 @media (prefers-reduced-motion: reduce) {
   .sc-halo, .sc-cloud, .sc-gull, .sh-gull, .sc-flap, .sc-refl, .sc-glit, .sc-tw, .sc-glow, .sc-blink, .sc-wave, .sc-ring, .sc-lakhta, .fw-ping, .fw-pulse, .fw-bob { animation: none !important; }
   .sc-parallax { animation: none !important; }
-  .tab-in-r, .tab-in-l { animation-name: fade-in; }
 }
