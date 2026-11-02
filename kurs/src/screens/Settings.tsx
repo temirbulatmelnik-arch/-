@@ -6,6 +6,7 @@ import { ddmmyyyy, today } from '../domain/dates';
 import { downloadFile } from '../domain/ics';
 import { INSTALL_URL } from '../install/platform';
 import { useStore } from '../store/store';
+import { CATEGORY } from '../domain/plan';
 import { toast, useUi } from '../store/ui';
 import { enableBadge, exportCalendar, updateBadge } from './reminders';
 
@@ -118,6 +119,25 @@ function Body() {
             </button>
           ))}
         </div>
+      </Section>
+
+      <Section title="Память продавцов">
+        <p className="text-[13.5px] leading-snug text-muted">Сменили категорию при разборе скриншота — приложение запомнит продавца. «Это я» — переводы на своё имя не считаются тратами.</p>
+        {Object.keys(s.merchantMemory).length === 0
+          ? <p className="text-[12.5px] text-faint">Пока пусто: правила появятся после первого разбора текста со скриншота.</p>
+          : (
+            <div className="divide-hair -mx-1">
+              {Object.entries(s.merchantMemory).sort(([a], [b]) => a.localeCompare(b)).map(([k, rule]) => (
+                <div key={k} className="flex items-center justify-between gap-3 px-1 py-2 text-[13.5px]">
+                  <span className="min-w-0 truncate">{k.replace(/^person:/, '')}{k.startsWith('person:') ? <span className="text-faint"> (человек)</span> : null}</span>
+                  <span className="flex shrink-0 items-center gap-3">
+                    <span className="text-muted">{rule === 'self' ? 'это я' : rule === 'skip' ? 'пропускать' : CATEGORY[rule].short}</span>
+                    <button type="button" onClick={() => s.remember(k, null)} className="text-[12.5px] font-medium text-neg">Забыть</button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
       </Section>
 
       <Section title="Данные" id="backup">

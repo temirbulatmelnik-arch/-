@@ -11,7 +11,7 @@ import type { Bridge } from '../domain/bridge';
 import { fixDefaultCategories } from '../domain/categorize';
 import { dropChatTwins } from '../domain/exchange';
 import { freshReserve, type Checkup } from '../domain/ledger';
-import type { CalEvent, CardBalance, ChecklistItem, Debt, DebtSnapshot, EventMark, Expense, FixedItem, IncomeTemplate, PlanSeed, ReserveMove, Settings, StrategySection, WeekClosure, WeeklyOverride, WishItem } from '../domain/types';
+import type { CalEvent, CardBalance, ChecklistItem, Debt, DebtSnapshot, EventMark, Expense, FixedItem, IncomeTemplate, MemoryRule, PlanSeed, ReserveMove, Settings, StrategySection, WeekClosure, WeeklyOverride, WishItem } from '../domain/types';
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
@@ -60,6 +60,8 @@ interface Data {
   cardBalance: CardBalance | null;
   /** мост на кредитке до премии; null — нет */
   bridge: Bridge | null;
+  /** память продавцов: название → категория, «это я» или «пропускать» */
+  merchantMemory: Record<string, MemoryRule>;
   /** воскресные сверки с банком: журнал и точка отсчёта учёта по счетам */
   checkups: Checkup[];
   /** последние импорты из чата со снимком данных до них — чтобы откатить неверный блок */
@@ -75,6 +77,10 @@ interface Actions {
   /** изменения из файла обмена с чатом: резерв и копилка пишутся в журнал, долги — в снимок месяца */
   /** summary — запомнить импорт и снимок данных до него (хранятся последние 5) */
   applySync: (patch: Partial<Data>, summary?: string) => void;
+  /** запомнить снимок данных до импорта из банка — откатить можно так же, как импорт из чата */
+  beginImport: (summary: string) => void;
+  /** запомнить продавца; null — забыть */
+  remember: (key: string, rule: MemoryRule | null) => void;
   /** вернуть данные к снимку до импорта; этот и более поздние импорты уходят из журнала */
   rollbackImport: (id: string) => void;
   toggleCheck: (id: string) => void;
@@ -130,7 +136,7 @@ const nowIso = () => new Date().toISOString();
 const EMPTY: Data = {
   ready: false, asOf: today(), debts: [], incomes: [], fixed: [], oneOff: [], templateFrom: monthKey(today()),
   weeklyOverrides: [], planTrajectory: [], baselineTrajectory: [], reserve: 0, reserveLog: [], expenses: [], marks: {}, wishes: [], snapshots: [], overrides: {}, plan: null,
-  planRev: 0, planCode: '', checklist: [], strategy: [], rules: [], checks: {}, savings: 0, savingsLog: [], closures: {}, cardBalance: null, bridge: null, checkups: [], imports: [],
+  planRev: 0, planCode: '', checklist: [], strategy: [], rules: [], checks: {}, savings: 0, savingsLog: [], closures: {}, cardBalance: null, bridge: null, checkups: [], merchantMemory: {}, imports: [],
   settings: DEFAULT_SETTINGS,
 };
 
@@ -207,6 +213,16 @@ export const useStore = create<State>()(
           next.savingsLog = [...s.savingsLog, { id: uid(), date: today(), amount: patch.savings - s.savings, note: 'Сверка из чата «Финансы»' }];
         }
         return patch.debts ? { ...next, ...withSnapshot(patch.debts, s.snapshots) } : next;
+      }),
+      beginImport: summary => set(s => {
+        const { imports, settings, planCode, ready, ...snapshot } = pickData(s);
+        void settings; void planCode; void ready;
+        return { imports: [...imports, { id: uid(), at: nowIso(), summary, snapshot }].slice(-5) };
+      }),
+      remember: (key, rule) => set(s => {
+        const merchantMemory = { ...s.merchantMemory };
+        if (rule) merchantMemory[key] = rule; else delete merchantMemory[key];
+        return { merchantMemory };
       }),
       rollbackImport: id => set(s => {
         const i = s.imports.findIndex(r => r.id === id);

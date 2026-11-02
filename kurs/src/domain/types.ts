@@ -103,6 +103,9 @@ export interface EventMark {
   at: string;
 }
 
+/** Память продавцов: категория, «это я» (перевод себе) или «пропускать» */
+export type MemoryRule = CategoryId | 'self' | 'skip';
+
 export interface ReserveMove {
   id: string;
   date: string;

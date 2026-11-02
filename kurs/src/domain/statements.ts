@@ -18,6 +18,15 @@ export interface DraftTx {
   fingerprint: string;
   /** поступление, а не трата */
   income?: boolean;
+  /** что предложило приложение — если человек сменит категорию, запомнить продавца */
+  suggested?: CategoryId;
+  /** название для памяти продавцов */
+  nameKey?: string;
+  /** та же трата уже внесена вручную или из чата: привязать к ней отпечаток */
+  linkId?: string;
+  /** сумма из заголовка дня */
+  fromHeader?: boolean;
+  creditCard?: string;
 }
 
 let seq = 0;

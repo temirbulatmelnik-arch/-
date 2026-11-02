@@ -5,7 +5,8 @@ import { useRef, useState, type ReactNode } from 'react';
 import { Chip, Money, PrimaryButton, SecondaryButton, Sheet } from '../components/ui';
 import { ddmm, fromKey, today } from '../domain/dates';
 import { CATEGORIES } from '../domain/plan';
-import { fromAi, fromDrafts, type Proposal, type Review } from '../domain/proposals';
+import { fromAi, fromBank, fromDrafts, type AnyProposal } from '../domain/proposals';
+import { parseBankText } from '../domain/bankText';
 import { draft, parseCsv, parseText } from '../domain/statements';
 import type { CategoryId, Source } from '../domain/types';
 import { weekToClose } from '../domain/weekly';
@@ -22,11 +23,12 @@ export function ImportSheet() {
   );
 }
 
+type Review = { summary: string; warnings: string[]; items: AnyProposal[] };
 type Step = { s: 'pick' } | { s: 'text' } | { s: 'busy'; label: string } | { s: 'review'; review: Review } | { s: 'error'; text: string };
 
 function ctx() {
   const st = useStore.getState();
-  return { cal: st, marks: st.marks, expenses: st.expenses, reserve: st.reserve, now: today() };
+  return { cal: st, marks: st.marks, expenses: st.expenses, reserve: st.reserve, now: today(), memory: st.merchantMemory };
 }
 
 function Flow() {
@@ -132,7 +134,7 @@ function Flow() {
       </Option>
 
       <Option icon={<ClipboardPaste size={19} strokeWidth={1.5} />} title="Текст со скриншота" tag="на телефоне"
-        text="В «Фото» удерживайте палец на тексте → «Выбрать всё» → «Скопировать» и вставьте сюда."
+        text="ВТБ «История», Сбер, Т-Банк: в «Фото» удерживайте палец на тексте → «Выбрать всё» → «Скопировать» и вставьте сюда. Категории банка, переводы себе, погашения и повторы приложение разберёт само."
         onClick={() => setStep({ s: 'text' })} />
 
       <Option icon={<FileSpreadsheet size={19} strokeWidth={1.5} />} title="Файл CSV" tag="на телефоне"
@@ -166,6 +168,9 @@ function TextPaste({ onDone, onBack }: { onDone: (r: Review) => void; onBack: ()
   };
   const run = () => {
     const c = ctx();
+    // ВТБ, Сбер, Т-Банк: операции с категориями банка, сумма дня, обязательный платёж, остатки
+    const bank = parseBankText(text, c.now);
+    if (bank.ops.length || bank.dues.length || bank.balances.card != null || bank.balances.reserve != null) { onDone(fromBank(bank, c)); return; }
     const rows = parseText(text, c.now);
     if (!rows.length) { toast('Не нашёл сумм вида «−350 ₽». Проверьте текст'); return; }
     onDone(fromDrafts(rows, c, `Из текста: ${rows.length} операций. Проверьте даты и категории.`));
@@ -186,18 +191,37 @@ const SOURCE_LABEL: Record<Source, string> = { life: 'карта жизни', cr
 const NEXT_SOURCE: Record<Source, Source> = { life: 'credit', credit: 'reserve', reserve: 'life' };
 
 function ReviewList({ review, onBack }: { review: Review; onBack: () => void }) {
-  const [items, setItems] = useState<Proposal[]>(review.items);
+  const [items, setItems] = useState<AnyProposal[]>(review.items);
   const set = useUi(s => s.set);
-  const patch = (id: string, p: Partial<Proposal>) => setItems(list => list.map(i => (i.id === id ? ({ ...i, ...p } as Proposal) : i)));
+  const patch = (id: string, p: Partial<AnyProposal>) => setItems(list => list.map(i => (i.id === id ? ({ ...i, ...p } as AnyProposal) : i)));
   const on = items.filter(i => i.on);
   const spent = on.reduce((s, i) => s + (i.type === 'tx' ? i.tx.amount : 0), 0);
 
   const apply = () => {
     const store = useStore.getState();
+    // снимок до изменений — неверный импорт откатывается в «Связи с чатом» → «Последние импорты»
+    store.beginImport(`Из банка: ${review.summary}`);
+    let bonus: AnyProposal | undefined;
     const txs = on.flatMap(i => (i.type === 'tx' ? [i.tx] : []));
-    if (txs.length) store.addExpenses(txs.map(t => ({ date: t.date, amount: t.amount, category: t.category, note: t.merchant, source: t.source, origin: 'ai' as const, fingerprint: t.fingerprint })));
-    let bonus: Proposal | undefined;
+    const people = on.flatMap(i => (i.type === 'person' && i.choice === 'spend' ? [i] : []));
+    if (txs.length || people.length) store.addExpenses([
+      ...txs.map(t => ({ date: t.date, amount: t.amount, category: t.category, note: t.merchant, source: t.source, origin: (t.nameKey ? 'text' : 'ai') as 'text' | 'ai', fingerprint: t.fingerprint, ...(t.creditCard ? { creditCard: t.creditCard } : {}) })),
+      ...people.map(p => ({ date: p.date, amount: p.amount, category: p.category, note: p.name, source: 'life' as const, origin: 'text' as const, fingerprint: p.fingerprint })),
+    ]);
+    // та же трата уже внесена вручную или из чата — привязать отпечаток, чтобы следующий скриншот её узнал
+    for (const i of items) if (i.type === 'tx' && i.tx.linkId) store.updateExpense(i.tx.linkId, { fingerprint: i.tx.fingerprint });
+    // память продавцов: сменили категорию — запомнить
+    for (const t of txs) if (t.nameKey && t.suggested && t.category !== t.suggested) store.remember(t.nameKey, t.category);
     for (const i of on) {
+      if (i.type === 'person' && (i.choice === 'self')) store.remember(i.key, 'self');
+      if (i.type === 'mark' && i.selfKey && !store.merchantMemory[i.selfKey]) store.remember(i.selfKey, 'self');
+      if (i.type === 'transfer') {
+        if (i.dir === 'toCard') { if (i.event) store.markEvent(i.event, true, i.amount); else store.moveReserve(-i.amount, 'Перевод из резерва на карту', i.amount); }
+        else store.moveReserve(i.amount, 'Перевод с карты в резерв', -i.amount);
+      }
+      if (i.type === 'refund') { if (i.amount >= i.expense.amount - 0.5) store.removeExpense(i.expense.id); else store.updateExpense(i.expense.id, { amount: Math.round((i.expense.amount - i.amount) * 100) / 100 }); }
+      if (i.type === 'interest') store.moveReserve(i.amount, 'Проценты на накопительный');
+      if (i.type === 'due') store.setOverride(i.event.key, { amount: i.amount, date: i.date });
       if (i.type === 'debt') {
         store.updateDebt(i.debt.id, { balance: i.balance });
         if (i.event && i.minPayment > 0) store.setOverride(i.event.key, { amount: i.minPayment, ...(i.dueDate ? { date: i.dueDate } : {}) });
@@ -219,7 +243,7 @@ function ReviewList({ review, onBack }: { review: Review; onBack: () => void }) 
     else set({ scan: false });
   };
 
-  const groups: [string, Proposal['type'][]][] = [['Платежи и долги', ['mark', 'debt']], ['Поступления', ['income']], ['Счета', ['card', 'reserve']], ['Траты', ['tx']]];
+  const groups: [string, AnyProposal['type'][]][] = [['Платежи и долги', ['mark', 'debt', 'due']], ['Переводы', ['person', 'transfer']], ['Поступления и возвраты', ['income', 'refund', 'interest']], ['Счета', ['card', 'reserve']], ['Траты', ['tx']], ['Не траты', ['info']]];
 
   return (
     <div className="space-y-4 pt-1">
@@ -240,9 +264,9 @@ function ReviewList({ review, onBack }: { review: Review; onBack: () => void }) 
             </div>
             <div className="card divide-hair overflow-hidden">
               {list.map(i => (
-                <div key={i.id} className={`flex items-start gap-3 px-3.5 py-3 ${i.on ? '' : 'opacity-50'}`}>
-                  <button type="button" onClick={() => patch(i.id, { on: !i.on })} aria-label={i.on ? 'Не применять' : 'Применить'}
-                    className={`mt-0.5 grid size-6 shrink-0 place-items-center rounded-md border ${i.on ? 'border-transparent bg-ink text-bg' : 'border-line text-transparent'}`}><Check size={13} strokeWidth={2.5} /></button>
+                <div key={i.id} className={`flex items-start gap-3 px-3.5 py-3 ${i.on || i.type === 'person' ? '' : 'opacity-50'}`}>
+                  {i.type !== 'info' && i.type !== 'person' && <button type="button" onClick={() => patch(i.id, { on: !i.on })} aria-label={i.on ? 'Не применять' : 'Применить'}
+                    className={`mt-0.5 grid size-6 shrink-0 place-items-center rounded-md border ${i.on ? 'border-transparent bg-ink text-bg' : 'border-line text-transparent'}`}><Check size={13} strokeWidth={2.5} /></button>}
                   <div className="min-w-0 flex-1"><ProposalBody p={i} onPatch={p => patch(i.id, p)} /></div>
                 </div>
               ))}
@@ -259,8 +283,49 @@ function ReviewList({ review, onBack }: { review: Review; onBack: () => void }) 
   );
 }
 
-function ProposalBody({ p, onPatch }: { p: Proposal; onPatch: (x: Partial<Proposal>) => void }) {
+function ProposalBody({ p, onPatch }: { p: AnyProposal; onPatch: (x: Partial<AnyProposal>) => void }) {
   switch (p.type) {
+    case 'person': {
+      const opts: [NonNullable<typeof p.choice>, string][] = p.incoming ? [['self', 'Это я'], ['other', 'Не я']] : [['self', 'Перевод себе'], ['spend', 'Трата']];
+      return (
+        <div>
+          <div className="flex items-start justify-between gap-2">
+            <span className="min-w-0 truncate text-[14px] font-medium">{p.name}</span>
+            <Money value={p.amount} sign={p.incoming} className={`shrink-0 text-[14px] ${p.incoming ? 'text-pos' : ''}`} />
+          </div>
+          <div className="mt-0.5 text-[12px] text-muted">{ddmm(p.date)}, {p.incoming ? 'перевод от человека: от себя — не доход' : 'перевод человеку: себе — не трата'}</div>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {opts.map(([id, label]) => (
+              <button key={id} type="button" onClick={() => onPatch({ choice: p.choice === id ? null : id, on: p.choice !== id } as Partial<AnyProposal>)}
+                className={`rounded-lg px-2.5 py-1 text-[12.5px] font-medium ${p.choice === id ? 'bg-ink text-bg' : 'bg-surface-2'}`}>{label}</button>
+            ))}
+            {p.choice === 'spend' && (
+              <select value={p.category} onChange={e => onPatch({ category: e.target.value as CategoryId } as Partial<AnyProposal>)} className="rounded-lg bg-surface-2 px-2 py-1 text-[12px] font-medium">
+                {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.short}</option>)}
+              </select>
+            )}
+          </div>
+        </div>
+      );
+    }
+    case 'transfer':
+      return (
+        <div className="text-[13.5px] leading-snug">
+          <div className="flex items-start justify-between gap-2"><span className="font-medium">Между своими счетами, {ddmm(p.date)}</span><Money value={p.amount} className="shrink-0" /></div>
+          <button type="button" onClick={() => onPatch({ dir: p.dir === 'toCard' ? 'toReserve' : 'toCard' } as Partial<AnyProposal>)} className="mt-1.5 rounded-lg bg-surface-2 px-2.5 py-1 text-[12.5px] font-medium">
+            {p.dir === 'toCard' ? 'Из резерва на карту' : 'С карты в резерв'} ⇄
+          </button>
+          {p.dir === 'toCard' && p.event && <div className="mt-1 text-[12px] text-muted">Отметит пополнение карты {ddmm(p.event.date)}.</div>}
+        </div>
+      );
+    case 'refund':
+      return <div className="text-[13.5px] leading-snug"><span className="font-medium">Возврат {p.name}</span> <Money value={p.amount} sign className="text-pos" /> {p.amount >= p.expense.amount - 0.5 ? 'убирает' : 'уменьшает'} трату «{p.expense.note ?? 'без названия'}» {ddmm(p.expense.date)} на <Money value={p.expense.amount} /></div>;
+    case 'interest':
+      return <div className="text-[13.5px] leading-snug"><span className="font-medium">Проценты {ddmm(p.date)}:</span> <Money value={p.amount} sign className="text-pos" /> в резерв</div>;
+    case 'due':
+      return <div className="text-[13.5px] leading-snug"><span className="font-medium">{p.debt.short}:</span> платёж до {ddmm(p.date)} — <Money value={p.event.amount} approx={p.event.approx} /> → <span className="text-ink"><Money value={p.amount} /></span></div>;
+    case 'info':
+      return <div className="flex items-start justify-between gap-2 text-[13px] leading-snug text-muted"><span className="min-w-0">{ddmm(p.date)} {p.text}</span><Money value={p.amount} className="shrink-0" /></div>;
     case 'tx':
       return (
         <div>
@@ -270,11 +335,11 @@ function ProposalBody({ p, onPatch }: { p: Proposal; onPatch: (x: Partial<Propos
           </div>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[12px]">
             <span className="text-muted">{ddmm(p.tx.date)}</span>
-            <select value={p.tx.category} onChange={e => onPatch({ tx: { ...p.tx, category: e.target.value as CategoryId } } as Partial<Proposal>)}
+            <select value={p.tx.category} onChange={e => onPatch({ tx: { ...p.tx, category: e.target.value as CategoryId } } as Partial<AnyProposal>)}
               className="rounded-lg bg-surface-2 px-2 py-1 text-[12px] font-medium">
               {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.short}</option>)}
             </select>
-            <button type="button" onClick={() => onPatch({ tx: { ...p.tx, source: NEXT_SOURCE[p.tx.source] } } as Partial<Proposal>)}
+            <button type="button" onClick={() => onPatch({ tx: { ...p.tx, source: NEXT_SOURCE[p.tx.source] } } as Partial<AnyProposal>)}
               className={`rounded-lg px-2 py-1 font-medium ${p.tx.source === 'credit' ? 'bg-neg/12 text-neg' : 'bg-surface-2'}`}>{SOURCE_LABEL[p.tx.source]}</button>
             {p.tx.duplicate && <Chip tone="warn">уже есть</Chip>}
             {p.tx.skip && <Chip>не трата?</Chip>}

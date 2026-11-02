@@ -2,15 +2,18 @@
 // Человек смотрит список, снимает лишние галочки и нажимает «Применить».
 import type { AiResult } from './ai';
 import { eventsBetween, type CalendarInput } from './calendar';
-import { fingerprint } from './categorize';
-import { addDays, daysBetween } from './dates';
+import { bankCat, isPerson, normName, type BankOp, type BankParse } from './bankText';
+import { categorize, fingerprint } from './categorize';
+import { addDays, daysBetween, ddmm } from './dates';
+import { rub } from './money';
 import { draft, type DraftTx } from './statements';
-import type { CalEvent, Debt, EventMark, Expense } from './types';
+import type { CalEvent, CategoryId, Debt, EventMark, Expense, MemoryRule, Source } from './types';
 
 export type Proposal =
   | { id: string; type: 'tx'; on: boolean; tx: DraftTx }
   | { id: string; type: 'debt'; on: boolean; debt: Debt; balance: number; minPayment: number; dueDate: string; event: CalEvent | null }
-  | { id: string; type: 'mark'; on: boolean; event: CalEvent; amount: number }
+  /** selfKey — перевод на своё имя закрыл платёж: запомнить, что это я */
+  | { id: string; type: 'mark'; on: boolean; event: CalEvent; amount: number; selfKey?: string }
   | { id: string; type: 'income'; on: boolean; event: CalEvent | null; amount: number; date: string; bonus: boolean }
   | { id: string; type: 'reserve'; on: boolean; balance: number }
   | { id: string; type: 'card'; on: boolean; balance: number; date: string };
@@ -139,4 +142,193 @@ function guessDebt(text: string, debts: Debt[]): string {
     if (pick) return pick.id;
   }
   return '';
+}
+
+/* ---------- Текст со скриншота банка (ВТБ, Сбер, Т-Банк) ---------- */
+
+export type BankProposal =
+  /** перевод человеку: себе (не трата) или трата — решает человек */
+  | { id: string; type: 'person'; on: boolean; name: string; key: string; amount: number; date: string; incoming: boolean; choice: 'self' | 'spend' | 'other' | null; category: CategoryId; fingerprint: string }
+  /** между своими счетами: резерв ↔ карта; пополнение по воскресеньям закрывает отметку wk: */
+  | { id: string; type: 'transfer'; on: boolean; amount: number; date: string; dir: 'toCard' | 'toReserve'; event: CalEvent | null }
+  /** возврат гасит трату */
+  | { id: string; type: 'refund'; on: boolean; amount: number; date: string; name: string; expense: Expense }
+  /** проценты на накопительный — в резерв */
+  | { id: string; type: 'interest'; on: boolean; amount: number; date: string }
+  /** точный обязательный платёж с экрана банка */
+  | { id: string; type: 'due'; on: boolean; debt: Debt; event: CalEvent; amount: number; date: string }
+  /** не трата и ничего менять не нужно — показать, почему */
+  | { id: string; type: 'info'; on: false; text: string; amount: number; date: string };
+
+export type AnyProposal = Proposal | BankProposal;
+
+export interface BankCtx extends Ctx {
+  memory: Record<string, MemoryRule>;
+}
+
+/** Категория банка → категория плана (правила протокола) */
+const SPEND: Record<string, CategoryId> = {
+  'Транспорт': 'transport', 'Супермаркеты': 'groceries', 'Кафе и рестораны': 'fun', 'Фастфуд': 'fun', 'Алкоголь': 'fun', 'Табак': 'tobacco',
+  'Аптеки': 'health', 'Медицина': 'health', 'Красота': 'beauty', 'Такси': 'taxi', 'Маркетплейсы': 'shopping', 'Дом и ремонт': 'shopping',
+  'Украшения и бижутерия': 'shopping', 'Одежда': 'shopping', 'Одежда и обувь': 'shopping', 'Турагентства': 'fun', 'Развлечения': 'fun',
+  'Цифровой контент': 'fixed', 'Связь': 'fixed', 'Животные': 'shopping', 'Образование': 'fun', 'Спорт': 'fixed', 'Прочие расходы': 'fun',
+  'Наличные': 'fun', 'Отели': 'fun', 'Авиабилеты': 'fun', 'Ж/д билеты': 'transport', 'Топливо': 'transport', 'Автоуслуги': 'transport',
+};
+const TO_PERSON = new Set(['Переводы людям', 'Перевод по СБП', 'Переводы', 'Входящие переводы']);
+const DEBT_PAY = new Set(['Погашение кредита', 'Списание кредита', 'Платежи и переводы']);
+const REFUND = new Set(['Возврат средств', 'Другие зачисления', 'Кэшбэк']);
+const INTEREST = new Set(['Выплата процентов', 'Вклады и накопления']);
+const SALARY = new Set(['Поступление заработной платы', 'Зарплата']);
+
+/** Платёж в календаре на ту же сумму (±1 ₽) в пределах ±days дней: неоплаченный — отметить, оплаченный — уже учтён */
+function samePayment(ctx: Ctx, date: string, amount: number, days: number, pred: (e: CalEvent) => boolean = () => true): { event: CalEvent; done: boolean } | null {
+  const list = eventsBetween(ctx.cal, addDays(date, -days), addDays(date, days)).filter(e => e.kind === 'payment' && pred(e));
+  const near = (e: CalEvent) => Math.abs(daysBetween(e.date, date));
+  const open = list.filter(e => !ctx.marks[e.key]?.done && Math.abs(e.amount - amount) <= 1).sort((a, b) => near(a) - near(b))[0];
+  if (open) return { event: open, done: false };
+  const done = list.filter(e => ctx.marks[e.key]?.done && Math.abs((ctx.marks[e.key].amount ?? e.amount) - amount) <= 1)[0];
+  return done ? { event: done, done: true } : null;
+}
+
+/** Траты, которые уже есть: тот же отпечаток или та же дата и сумма (каждая внесённая закрывает одну строку скриншота) */
+function dedupe(txs: DraftTx[], expenses: Expense[]): DraftTx[] {
+  const pool = new Map<string, Expense[]>();
+  for (const e of expenses) {
+    const k = `${e.date}|${Math.round(e.amount * 100)}`;
+    pool.set(k, [...(pool.get(k) ?? []), e]);
+  }
+  const take = (k: string, pick: (e: Expense) => boolean) => {
+    const list = pool.get(k) ?? [];
+    const i = list.findIndex(pick);
+    return i < 0 ? null : list.splice(i, 1)[0];
+  };
+  const out = txs.map(t => ({ ...t }));
+  // сначала точные отпечатки, потом свободные по дате и сумме — так вторая поездка не «съедает» первую
+  for (const t of out) if (take(`${t.date}|${Math.round(t.amount * 100)}`, e => e.fingerprint === t.fingerprint)) t.duplicate = true;
+  for (const t of out) {
+    if (t.duplicate) continue;
+    const e = take(`${t.date}|${Math.round(t.amount * 100)}`, x => !x.fingerprint?.includes('#')) ?? null;
+    if (e) { t.duplicate = true; if (!e.fingerprint?.includes('#')) t.linkId = e.id; }
+  }
+  return out;
+}
+
+export function fromBank(p: BankParse, ctx: BankCtx): { summary: string; warnings: string[]; items: AnyProposal[] } {
+  const items: AnyProposal[] = [];
+  const warnings: string[] = [];
+  const debts = ctx.cal.debts;
+  const bankWord = p.bank === 'tbank' ? 'Т-БАНК' : p.bank === 'sber' ? 'СБЕР' : p.bank === 'vtb' ? 'ВТБ' : '';
+  const creditId = p.credit && bankWord ? guessDebt(`${bankWord} КРЕДИТНАЯ КАРТА`, debts.filter(d => d.kind === 'card')) : '';
+  const source: Source = creditId ? 'credit' : 'life';
+  const info = (text: string, o: BankOp) => items.push({ id: pid(), type: 'info', on: false, text, amount: o.amount, date: o.date });
+  const spends: DraftTx[] = [];
+
+  for (const o of p.ops) {
+    const cat = o.cat ?? bankCat(o.name) ?? '';
+    const key = normName(o.name);
+    const mem = ctx.memory[key];
+    const fp = `${fingerprint(o.date, o.amount, o.name)}#${o.ord}`;
+    const incoming = o.sign === '+';
+    const person = isPerson(o.name);
+
+    if (mem === 'skip') { info(`${o.name}: пропуск по памяти`, o); continue; }
+
+    if (cat === 'Между своими счетами' || /между своими/i.test(o.name)) {
+      if (creditId) {
+        const debt = debts.find(d => d.id === creditId)!;
+        if (incoming) {
+          const ev = matchEvent(ctx, o.date, e => e.kind === 'payment' && e.debtId === creditId);
+          if (ev && Math.abs(daysBetween(ev.date, o.date)) <= 10) items.push({ id: pid(), type: 'mark', on: true, event: ev, amount: o.amount });
+          else info(`Пополнение ${debt.short} — погашение, отметка в календаре уже есть или не нашлась`, o);
+        } else info(`С ${debt.short} между счетами — это долг, а не трата`, o);
+        continue;
+      }
+      const dir = o.sign === '-' ? 'toReserve' : 'toCard';
+      const wk = dir === 'toCard' ? eventsBetween(ctx.cal, addDays(o.date, -2), addDays(o.date, 1)).find(e => e.kind === 'weekly' && !ctx.marks[e.key]?.done) ?? null : null;
+      items.push({ id: pid(), type: 'transfer', on: true, amount: o.amount, date: o.date, dir, event: wk });
+      continue;
+    }
+
+    if (TO_PERSON.has(cat) || person) {
+      if (incoming) {
+        if (mem === 'self') { info(`Перевод от себя (${o.name}) — не доход`, o); continue; }
+        items.push({ id: pid(), type: 'person', on: false, name: o.name, key, amount: o.amount, date: o.date, incoming: true, choice: null, category: 'fun', fingerprint: fp });
+        continue;
+      }
+      if (creditId) { warnings.push(`${ddmm(o.date)}: перевод ${rub(o.amount)} с кредитки — это новый долг, а не трата.`); info(`Перевод с кредитки ${o.name}`, o); continue; }
+      const pay = samePayment(ctx, o.date, o.amount, 3);
+      if (pay && !pay.done) { items.push({ id: pid(), type: 'mark', on: true, event: pay.event, amount: o.amount, selfKey: key }); continue; }
+      if (pay?.done) { info(`${pay.event.title}: уже отмечено, перевод себе — не трата`, o); continue; }
+      if (mem === 'self') { info(`Перевод себе (${o.name}) — не трата`, o); continue; }
+      const choice = mem ? 'spend' : null;
+      items.push({ id: pid(), type: 'person', on: !!choice, name: o.name, key, amount: o.amount, date: o.date, incoming: false, choice, category: mem ?? 'fun', fingerprint: fp });
+      continue;
+    }
+
+    if (cat === 'Услуги банка') { info(`${o.name}: плата банку по кредитке — видна в долге, не трата из недельных денег`, o); continue; }
+    if (DEBT_PAY.has(cat) || /погашени|списание кредита/i.test(o.name)) {
+      if (cat === 'Платежи и переводы' && !/яндекс|сплит|кредит/i.test(o.name)) { /* обычный платёж — дальше как трата */ } else {
+        const debtId = guessDebt(`${o.name} ${bankWord} ${cat}`, debts);
+        const pay = debtId ? samePayment(ctx, o.date, o.amount, 7, e => e.debtId === debtId) ?? (() => {
+          const ev = matchEvent(ctx, o.date, e => e.kind === 'payment' && e.debtId === debtId);
+          return ev && Math.abs(daysBetween(ev.date, o.date)) <= 7 ? { event: ev, done: false } : null;
+        })() : null;
+        if (pay && !pay.done) items.push({ id: pid(), type: 'mark', on: true, event: pay.event, amount: o.amount });
+        else info(`${o.name}: погашение${pay?.done ? ', уже отмечено' : ''} — не трата`, o);
+        continue;
+      }
+    }
+    if (INTEREST.has(cat) && incoming) { items.push({ id: pid(), type: 'interest', on: true, amount: o.amount, date: o.date }); continue; }
+    if (SALARY.has(cat) || (incoming && /зарплат|заработн|аванс/i.test(o.name))) {
+      const ev = matchEvent(ctx, o.date, e => e.kind === 'income');
+      items.push({ id: pid(), type: 'income', on: !!ev, event: ev, amount: o.amount, date: o.date, bonus: !!ev?.incomeKind && BONUS.includes(ev.incomeKind) });
+      continue;
+    }
+    if (REFUND.has(cat) || (incoming && (SPEND[cat] || !cat))) {
+      const exp = ctx.expenses.filter(e => e.date <= o.date && e.date >= addDays(o.date, -7) && (Math.abs(e.amount - o.amount) <= 1 || normName(e.note ?? '') === key))
+        .sort((a, b) => b.date.localeCompare(a.date))[0];
+      if (exp) items.push({ id: pid(), type: 'refund', on: true, amount: o.amount, date: o.date, name: o.name, expense: exp });
+      else info(`${o.name}: +${rub(o.amount)} — возврат или зачисление, трату под него не нашёл`, o);
+      continue;
+    }
+    if (incoming) { info(`${o.name}: +${rub(o.amount)}`, o); continue; }
+
+    // подписки и связь: сначала обязательные платежи календаря
+    if (cat === 'Цифровой контент' || cat === 'Связь') {
+      const fix = samePayment(ctx, o.date, o.amount, 5, e => e.key.startsWith('fix:'));
+      if (fix && !fix.done) { items.push({ id: pid(), type: 'mark', on: true, event: fix.event, amount: o.amount }); continue; }
+      if (fix?.done) { info(`${fix.event.title}: уже отмечено`, o); continue; }
+    }
+    const suggested: CategoryId = (mem && mem !== 'self' ? mem : null) ?? SPEND[cat] ?? categorize(o.name) ?? 'fun';
+    spends.push({ ...draft(o.date, o.amount, o.name, { category: suggested, source }), fingerprint: fp, skip: false, suggested, nameKey: key, ...(o.fromHeader ? { fromHeader: true } : {}), ...(creditId ? { creditCard: creditId } : {}) });
+  }
+
+  const txs = dedupe(spends, ctx.expenses);
+  items.unshift(...txs.map(tx => ({ id: pid(), type: 'tx' as const, on: !tx.duplicate, tx })));
+
+  for (const d of p.dues) {
+    const debtId = guessDebt(`${bankWord} ${/кредитн/i.test(d.text) || p.bank === 'sber' ? 'КРЕДИТНАЯ КАРТА' : ''}`, debts);
+    const debt = debts.find(x => x.id === debtId);
+    const ev = debt ? matchEvent({ ...ctx, marks: {} }, d.date, e => e.kind === 'payment' && e.debtId === debt.id && !e.key.endsWith(':close')) : null;
+    if (debt && ev) items.push({ id: pid(), type: 'due', on: Math.abs(ev.amount - d.amount) >= 1 || ev.date !== d.date, debt, event: ev, amount: d.amount, date: d.date });
+  }
+  if (p.balances.card != null) items.push({ id: pid(), type: 'card', on: true, balance: p.balances.card, date: ctx.now });
+  if (p.balances.reserve != null) items.push({ id: pid(), type: 'reserve', on: Math.abs(p.balances.reserve - ctx.reserve) >= 1, balance: p.balances.reserve });
+
+  // полнота: сумма списаний дня против заголовка
+  for (const d of p.days) {
+    if (d.total == null) continue;
+    if (d.total - d.out > 1) warnings.push(`Часть ${ddmm(d.date)} не видна: не хватает ${rub(d.total - d.out)} — пришлите ещё скриншот этого дня.`);
+    else if (d.out - d.total > 1) warnings.push(`${ddmm(d.date)}: операций на ${rub(d.out)}, а в заголовке дня ${rub(d.total)} — проверьте суммы.`);
+  }
+  for (const t of txs) if (t.fromHeader) warnings.push(`${ddmm(t.date)} «${t.merchant}»: сумма взята из заголовка дня — проверьте копейки.`);
+
+  const newTx = txs.filter(t => !t.duplicate);
+  const marks = items.filter(i => i.type === 'mark').length;
+  const transfers = items.filter(i => i.type === 'transfer' || i.type === 'person' || (i.type === 'info' && /перевод/i.test(i.text))).length;
+  const parts = [`траты: ${newTx.length} на ${rub(newTx.reduce((s, t) => s + t.amount, 0))}`, marks ? `отметок платежей: ${marks}` : '', transfers ? `переводов: ${transfers}` : '',
+    txs.length - newTx.length ? `повторов пропущено: ${txs.length - newTx.length}` : ''].filter(Boolean);
+  const bankName = { vtb: 'ВТБ', sber: 'Сбер', tbank: 'Т-Банк', unknown: 'банк' }[p.bank];
+  const summary = `${bankName}${creditId ? `, кредитка ${debts.find(d => d.id === creditId)?.short ?? ''}` : ''}: ${parts.join(', ')}.`;
+  return { summary: summary.charAt(0).toUpperCase() + summary.slice(1), warnings, items };
 }
