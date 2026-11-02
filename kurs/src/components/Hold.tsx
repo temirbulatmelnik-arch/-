@@ -23,6 +23,9 @@ export function Hold({ children, actions, preview, className = '' }: { children:
   const fired = useRef(false);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [pressing, setPressing] = useState(false);
+  // портал живёт, пока меню открыто или доигрывает исчезновение
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { if (rect) setMounted(true); }, [rect]);
 
   const cancel = () => { window.clearTimeout(timer.current); window.clearTimeout(pressTimer.current); start.current = null; setPressing(false); };
   const down = (e: React.PointerEvent) => {
@@ -58,8 +61,8 @@ export function Hold({ children, actions, preview, className = '' }: { children:
       onClickCapture={e => { if (fired.current) { e.stopPropagation(); e.preventDefault(); fired.current = false; } }}
       onContextMenu={e => e.preventDefault()} className={`select-none [-webkit-touch-callout:none] ${className}`}>
       <motion.div animate={{ scale: pressing ? 0.975 : 1 }} transition={{ duration: pressing ? 0.28 : 0.15, ease: [0.23, 1, 0.32, 1] }}>{children}</motion.div>
-      {createPortal(
-        <AnimatePresence>
+      {mounted && createPortal(
+        <AnimatePresence onExitComplete={() => setMounted(false)}>
           {rect && (
             <motion.div key="hold" className="fixed inset-0 z-[58]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.16 } }} onClick={() => setRect(null)}>
               <div className="absolute inset-0 bg-[rgba(4,14,22,.35)] backdrop-blur-[10px]" />

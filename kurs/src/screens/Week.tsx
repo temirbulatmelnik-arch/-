@@ -75,7 +75,8 @@ export function Week() {
   const [expenses, debts, marks, wishes, reserve, settings, overrides, startTotal, closures, checklist, checks, toggleCheck, bridge, checkups] = useStore(useShallow(s => [
     s.expenses, s.debts, s.marks, s.wishes, s.reserve, s.settings, s.weeklyOverrides, s.planTrajectory[0]?.[1] ?? 0, s.closures, s.checklist, s.checks, s.toggleCheck, s.bridge, s.checkups,
   ] as const));
-  const ui = useUi();
+  // только нужное из состояния интерфейса: иначе весь экран перерисовывался бы при каждом переключении вкладки и листе
+  const ui = { set: useUi(s => s.set), setTab: useUi(s => s.setTab), stackOpen: useUi(s => s.stackOpen) };
   const todayIdx = (fromKey(now).getDay() + 6) % 7;
   // сцена уходит медленнее страницы, сверху проявляется стеклянная полоса с остатком
   // без событий прокрутки (fixing-motion-performance): параллакс — CSS scroll-timeline (.sc-parallax),

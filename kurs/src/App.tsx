@@ -1,5 +1,5 @@
 import { MotionConfig } from 'motion/react';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Activity, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Island } from './components/Island';
 import { Salute } from './components/Salute';
 import { TABS, TabBar } from './components/TabBar';
@@ -45,6 +45,30 @@ function useTheme() {
 }
 
 const ORDER: Tab[] = TABS.map(t => t.id);
+const SCREENS: Record<Tab, ReactNode> = { week: <Week />, payments: <Payments />, budget: <Budget />, plan: <Plan /> };
+/** Все листы — один постоянный элемент: при смене вкладки или тоста оболочка их не перерисовывает,
+ *  каждый лист сам следит за своим кусочком состояния */
+const SHEETS = (
+  <>
+    <CheckupSheet />
+    <AddExpenseSheet />
+    <ImportSheet />
+    <EventSheet />
+    <BonusSheet />
+    <DebtSheet />
+    <ReserveSheet />
+    <SettingsSheet />
+    <WeekSheet />
+    <TodaySheet />
+    <SavingsSheet />
+    <CardSheet />
+    <FixedSheet />
+    <SyncSheet />
+    <UnlockSheet />
+    <HubSheet />
+    <Tour />
+  </>
+);
 
 /** Каждая вкладка помнит, докуда её прокрутили: вернулись — тот же вид, как в приложениях iOS */
 function useTabScroll(tab: Tab) {
@@ -69,7 +93,9 @@ export default function App() {
   useSundayCheckup();
   const ready = useStore(s => s.ready);
   const tourSeen = useStore(s => s.settings.tourSeen ?? 0);
-  const { tab, toast, set } = useUi();
+  const tab = useUi(s => s.tab);
+  const toast = useUi(s => s.toast);
+  const set = useUi(s => s.set);
   useTabScroll(tab);
   // «Остров» появляется, когда шапка вкладки (на «Сегодня» — сцена) ушла за верхний край
   const mark = useRef<HTMLDivElement>(null);
@@ -81,11 +107,6 @@ export default function App() {
     io.observe(el);
     return () => io.disconnect();
   }, [ready]);
-  // новая вкладка въезжает со стороны нажатия
-  const index = ORDER.indexOf(tab);
-  const last = useRef(index);
-  const dir = index >= last.current ? 1 : -1;
-  useEffect(() => { last.current = index; }, [index]);
 
   useEffect(() => {
     // просим браузер не вычищать данные при нехватке места
@@ -114,33 +135,18 @@ export default function App() {
         <Island show={island} />
         <Salute />
         <div aria-hidden="true" className="fixed inset-x-0 top-0 z-40 h-[env(safe-area-inset-top)]" style={{ background: 'var(--sky-1)' }} />
-        {/* вкладки — как в iOS: сразу, новая чуть въезжает со стороны нажатия (index.css, tab-in-*) */}
-        <main key={tab} className={dir > 0 ? 'tab-in-r' : 'tab-in-l'}>
-          {tab === 'week' && <Week />}
-          {tab === 'payments' && <Payments />}
-          {tab === 'budget' && <Budget />}
-          {tab === 'plan' && <Plan />}
-        </main>
+        {/* Все вкладки живут сразу: скрытые готовятся заранее в фоне и не пересобираются при переключении
+            (React Activity). Переключение мгновенное, как у вкладок iOS: без въезда и проявления — частое действие
+            не должно ждать анимацию */}
+        {ORDER.map(t => (
+          <Activity key={t} mode={t === tab ? 'visible' : 'hidden'}>
+            <main>{SCREENS[t]}</main>
+          </Activity>
+        ))}
 
         <TabBar />
 
-        <CheckupSheet />
-        <AddExpenseSheet />
-        <ImportSheet />
-        <EventSheet />
-        <BonusSheet />
-        <DebtSheet />
-        <ReserveSheet />
-        <SettingsSheet />
-        <WeekSheet />
-        <TodaySheet />
-        <SavingsSheet />
-        <CardSheet />
-        <FixedSheet />
-        <SyncSheet />
-        <UnlockSheet />
-        <HubSheet />
-        <Tour />
+        {SHEETS}
         <Toast text={toast} onDone={() => set({ toast: null })} />
       </div>
     </MotionConfig>

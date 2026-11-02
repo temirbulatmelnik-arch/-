@@ -2,7 +2,8 @@
 // судно — у текущей цели, впереди гавань «Свобода». Ниже — «Долги / План / Чек-лист», листаются пальцем.
 import { Anchor, Check, Gift, Lock, Plus, Ship, Target } from 'lucide-react';
 import { motion } from 'motion/react';
-import { item, list as listAnim, Pager, spring, useTween } from '../components/motion';
+import { CountTo, item, list as listAnim, Pager, spring } from '../components/motion';
+import type { Forecast } from '../domain/forecast';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { DebtChart } from '../components/DebtChart';
@@ -51,15 +52,28 @@ export function Plan() {
   );
 }
 
+/** Прогноз по модели плана — один на вкладку и сохраняется между открытиями: те же данные — тот же ответ */
+let fcCache: { key: unknown[]; value: Forecast } | null = null;
+function useDebtForecast(): Forecast {
+  const now = useToday();
+  const [debts, incomes, reserve, oneOff, templateFrom] = useStore(useShallow(s => [s.debts, s.incomes, s.reserve, s.oneOff, s.templateFrom] as const));
+  return useMemo(() => {
+    const from = `${addMonths(monthKey(now), 1)}-01`;
+    const key = [debts, incomes, reserve, oneOff, templateFrom, from];
+    if (fcCache && fcCache.key.every((k, i) => k === key[i])) return fcCache.value;
+    const value = forecast({ debts, incomes, reserve, from, oneOff, templateFrom });
+    fcCache = { key, value };
+    return value;
+  }, [debts, incomes, reserve, oneOff, templateFrom, now]);
+}
+
 /** Общий долг досчитывает вниз от начального и фарватер: долги буями по порядку закрытия, судно у текущей цели */
 function DebtHero() {
-  const now = useToday();
-  const [debts, incomes, reserve, plan, oneOff, templateFrom] = useStore(useShallow(s => [s.debts, s.incomes, s.reserve, s.planTrajectory, s.oneOff, s.templateFrom] as const));
+  const [debts, plan] = useStore(useShallow(s => [s.debts, s.planTrajectory] as const));
   const set = useUi(s => s.set);
   const total = totalDebt(debts);
   const start = plan[0]?.[1] ?? debts.reduce((s, d) => s + d.startBalance, 0);
-  const shown = useTween(total, start > total ? start : total, 1800);
-  const fc = useMemo(() => forecast({ debts, incomes, reserve, from: `${addMonths(monthKey(now), 1)}-01`, oneOff, templateFrom }), [debts, incomes, reserve, now, oneOff, templateFrom]);
+  const fc = useDebtForecast();
   const planEnd = plan.at(-1)?.[0];
   const target = targetDebt(debts);
   const route = [...debts].sort((a, b) => Number(b.closed) - Number(a.closed) || a.order - b.order);
@@ -72,7 +86,7 @@ function DebtHero() {
     <section className="deep-card mx-4 mt-3 pt-5 pb-3">
       <div className="px-5">
         <div className="text-[13px] text-card-muted">Общий долг</div>
-        <Money value={shown} className="figure mt-1 block text-[42px] leading-none" />
+        <CountTo to={total} from={start > total ? start : total} className="figure mt-1 block text-[42px] leading-none" />
         {start > 0 && (
           <div className="mt-4 h-[5px] overflow-hidden rounded-full bg-card/12">
             <motion.div className="h-full rounded-full bg-card-sea" initial={{ width: 0 }} animate={{ width: `${Math.max(0, (1 - total / start) * 100)}%` }} transition={{ ...spring, delay: 0.4 }} />
@@ -83,48 +97,50 @@ function DebtHero() {
           <div>Проценты в месяц<Money value={monthlyInterest(debts)} approx className="mt-0.5 block text-[15px] text-card" /></div>
         </div>
       </div>
-      {/* фарватер: листается вбок; буй — открыть долг, судно — у текущей цели, в конце — гавань «Свобода» */}
+      {/* фарватер: листается вбок; буй — открыть долг, судно — у текущей цели, в конце — гавань «Свобода».
+          Бесконечные мелочи (круги у буя, пульс гавани, качка судна) — HTML-слои с CSS-анимацией: их крутит
+          видеокарта, а не скрипт на каждом кадре, и картинка фарватера не перерисовывается */}
       <div className="no-scrollbar mt-2 overflow-x-auto" data-noswipe>
-        <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="block" role="img" aria-label="Фарватер: долги по порядку закрытия">
-          <defs>
-            <linearGradient id="fw-done" x1="0" x2="1"><stop offset="0" stopColor="#4fd1ac" stopOpacity=".9" /><stop offset="1" stopColor="#4fd1ac" stopOpacity=".2" /></linearGradient>
-          </defs>
-          {/* лёгкая рябь фарватера */}
-          {[24, 112, 132].map((y, k) => <path key={y} d={`M0 ${y} q 24 -5 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0`} fill="none" stroke="var(--card-muted)" strokeOpacity={0.12 - k * 0.02} strokeWidth="1" />)}
-          <motion.path d={path} fill="none" stroke="var(--card-muted)" strokeOpacity=".5" strokeWidth="1.6" strokeDasharray="5 7"
-            initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 1.8, ease: [0.16, 1, 0.3, 1] }} />
-          {route.map((d, i) => {
-            const p = pts[i];
-            const cur = i === ti && !d.closed;
-            return (
-              <motion.g key={d.id} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: 0.25 + i * 0.07 }}
-                onClick={() => set({ debt: d.id })} style={{ cursor: 'pointer' }} role="button" aria-label={`${d.short}: ${d.closed ? 'закрыт' : `${Math.round(d.balance)} ₽`}`}>
-                <circle cx={p.x} cy={p.y} r="22" fill="transparent" />
-                {cur && <motion.circle cx={p.x} cy={p.y + 4} r="14" fill="none" stroke="#ffc49a" strokeWidth="1.5" initial={{ scale: 0.6, opacity: 0.9 }} animate={{ scale: 1.8, opacity: 0 }} transition={{ duration: 1.8, repeat: Infinity, ease: 'easeOut' }} style={{ transformOrigin: `${p.x}px ${p.y + 4}px` }} />}
-                {d.closed
-                  ? <><circle cx={p.x} cy={p.y} r="10" fill="#4fd1ac" /><path d={`M${p.x - 4.5} ${p.y} l3.2 3.3 l5.8 -6.4`} stroke="#0a2433" strokeWidth="2" fill="none" strokeLinecap="round" /></>
-                  : <g>
-                      <path d={`M${p.x - 8} ${p.y + 9} L${p.x} ${p.y - 13} L${p.x + 8} ${p.y + 9} Z`} fill={cur ? '#ffc49a' : '#ee6125'} />
-                      <path d={`M${p.x - 5.3} ${p.y + 1.5} H${p.x + 5.3}`} stroke="#fff" strokeOpacity=".7" strokeWidth="2" />
-                      <rect x={p.x - 10} y={p.y + 8} width="20" height="4" rx="2" fill="var(--card-muted)" />
-                    </g>}
-                <text x={p.x} y={p.y + 30} textAnchor="middle" fontSize="12" fontWeight={cur ? 600 : 400} fill="var(--card-ink)" opacity={d.closed ? 0.55 : 1} style={{ fontFamily: 'var(--font-sans)' }}>{d.short}</text>
-                {!d.closed && <text x={p.x} y={p.y + 45} textAnchor="middle" fontSize="11" fill="var(--card-muted)" style={{ fontFamily: 'var(--font-sans)' }}>{Math.round(d.balance / 1000).toLocaleString('ru-RU')} тыс.</text>}
-              </motion.g>
-            );
-          })}
-          <g transform={`translate(${W - 40} 62)`}>
-            <motion.circle r="18" fill="var(--card-sea)" initial={{ opacity: 0.1 }} animate={{ opacity: [0.12, 0.3, 0.12] }} transition={{ duration: 3, repeat: Infinity }} />
-            <foreignObject x="-10" y="-10" width="20" height="20"><Anchor size={20} color="var(--card-sea)" /></foreignObject>
-            <text y="36" textAnchor="middle" fontSize="12" fontWeight="600" fill="var(--card-sea)" style={{ fontFamily: 'var(--font-sans)' }}>Свобода</text>
-          </g>
+        <div className="relative" style={{ width: W, height: H }}>
+          <span aria-hidden="true" className="fw-pulse absolute size-9 rounded-full bg-card-sea" style={{ left: W - 40 - 18, top: 62 - 18 }} />
+          {route[ti] && !route[ti].closed && (
+            <span aria-hidden="true" className="fw-ping absolute size-7 rounded-full border-[1.5px] border-[#ffc49a]" style={{ left: pts[ti].x - 14, top: pts[ti].y + 4 - 14 }} />
+          )}
+          <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="relative block" role="img" aria-label="Фарватер: долги по порядку закрытия">
+            {/* лёгкая рябь фарватера */}
+            {[24, 112, 132].map((y, k) => <path key={y} d={`M0 ${y} q 24 -5 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0`} fill="none" stroke="var(--card-muted)" strokeOpacity={0.12 - k * 0.02} strokeWidth="1" />)}
+            <motion.path d={path} fill="none" stroke="var(--card-muted)" strokeOpacity=".5" strokeWidth="1.6" strokeDasharray="5 7"
+              initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 1.8, ease: [0.16, 1, 0.3, 1] }} />
+            {route.map((d, i) => {
+              const p = pts[i];
+              const cur = i === ti && !d.closed;
+              return (
+                <motion.g key={d.id} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: 0.25 + i * 0.07 }}
+                  onClick={() => set({ debt: d.id })} style={{ cursor: 'pointer' }} role="button" aria-label={`${d.short}: ${d.closed ? 'закрыт' : `${Math.round(d.balance)} ₽`}`}>
+                  <circle cx={p.x} cy={p.y} r="22" fill="transparent" />
+                  {d.closed
+                    ? <><circle cx={p.x} cy={p.y} r="10" fill="#4fd1ac" /><path d={`M${p.x - 4.5} ${p.y} l3.2 3.3 l5.8 -6.4`} stroke="#0a2433" strokeWidth="2" fill="none" strokeLinecap="round" /></>
+                    : <g>
+                        <path d={`M${p.x - 8} ${p.y + 9} L${p.x} ${p.y - 13} L${p.x + 8} ${p.y + 9} Z`} fill={cur ? '#ffc49a' : '#ee6125'} />
+                        <path d={`M${p.x - 5.3} ${p.y + 1.5} H${p.x + 5.3}`} stroke="#fff" strokeOpacity=".7" strokeWidth="2" />
+                        <rect x={p.x - 10} y={p.y + 8} width="20" height="4" rx="2" fill="var(--card-muted)" />
+                      </g>}
+                  <text x={p.x} y={p.y + 30} textAnchor="middle" fontSize="12" fontWeight={cur ? 600 : 400} fill="var(--card-ink)" opacity={d.closed ? 0.55 : 1} style={{ fontFamily: 'var(--font-sans)' }}>{d.short}</text>
+                  {!d.closed && <text x={p.x} y={p.y + 45} textAnchor="middle" fontSize="11" fill="var(--card-muted)" style={{ fontFamily: 'var(--font-sans)' }}>{Math.round(d.balance / 1000).toLocaleString('ru-RU')} тыс.</text>}
+                </motion.g>
+              );
+            })}
+            <g transform={`translate(${W - 40} 62)`}>
+              <Anchor x={-10} y={-10} width={20} height={20} color="var(--card-sea)" />
+              <text y="36" textAnchor="middle" fontSize="12" fontWeight="600" fill="var(--card-sea)" style={{ fontFamily: 'var(--font-sans)' }}>Свобода</text>
+            </g>
+          </svg>
           {/* судно подплывает к текущей цели и покачивается на волне */}
-          <motion.g initial={{ x: 0, y: pts[0]?.y ?? 60 }} animate={{ x: (pts[ti]?.x ?? 56) - 40, y: (pts[ti]?.y ?? 60) - 34 }} transition={{ type: 'spring', stiffness: 50, damping: 14, delay: 0.6 }}>
-            <motion.g animate={{ y: [0, -3, 0], rotate: [-3, 3, -3] }} transition={{ duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}>
-              <foreignObject x="0" y="0" width="28" height="28"><Ship size={26} color="var(--card-ink)" /></foreignObject>
-            </motion.g>
-          </motion.g>
-        </svg>
+          <motion.div aria-hidden="true" className="pointer-events-none absolute top-0 left-0" initial={{ x: 0, y: pts[0]?.y ?? 60 }}
+            animate={{ x: (pts[ti]?.x ?? 56) - 40, y: (pts[ti]?.y ?? 60) - 34 }} transition={{ type: 'spring', stiffness: 50, damping: 14, delay: 0.6 }}>
+            <div className="fw-bob"><Ship size={26} color="var(--card-ink)" /></div>
+          </motion.div>
+        </div>
       </div>
       <div className="mx-5 mt-1 border-t border-card-line pt-3 text-[12.5px] leading-snug text-card-muted">
         {fc.freeMonth
@@ -168,13 +184,13 @@ function BridgeCard() {
 function DebtsView() {
   const now = useToday();
   const cal = useCal();
-  const [debts, incomes, reserve, plan, baseline, snapshots, oneOff, templateFrom] = useStore(useShallow(s => [s.debts, s.incomes, s.reserve, s.planTrajectory, s.baselineTrajectory, s.snapshots, s.oneOff, s.templateFrom] as const));
+  const [debts, plan, baseline, snapshots] = useStore(useShallow(s => [s.debts, s.planTrajectory, s.baselineTrajectory, s.snapshots] as const));
   const set = useUi(s => s.set);
   const [adding, setAdding] = useState(false);
   const total = totalDebt(debts);
   const target = targetDebt(debts);
   // текущий месяц уже идёт по календарю — модель считает со следующего
-  const fc = useMemo(() => forecast({ debts, incomes, reserve, from: `${addMonths(monthKey(now), 1)}-01`, oneOff, templateFrom }), [debts, incomes, reserve, now, oneOff, templateFrom]);
+  const fc = useDebtForecast();
   const next = useMemo(() => {
     const ev = eventsBetween(cal, now, addDays(now, 45)).filter(e => e.kind === 'payment' && e.debtId);
     return Object.fromEntries(debts.map(d => [d.id, ev.find(e => e.debtId === d.id)]));
@@ -213,7 +229,7 @@ function DebtsView() {
       )}
 
       <SectionTitle>По порядку закрытия</SectionTitle>
-      <motion.div className="space-y-2.5 px-4" variants={listAnim} initial="hidden" animate="show">
+      <motion.div className="space-y-2.5 px-4" variants={listAnim} initial={false} animate="show">
         {openDebts.length === 0 && <Empty>{debts.length ? 'Все долги закрыты. Свобода.' : 'Долгов пока нет.'}</Empty>}
         {openDebts.map((d, i) => <DebtCard key={d.id} n={i + 1} d={d} next={next[d.id]} closeMonth={fc.closeMonth[d.id]} target={target?.id === d.id} onClick={() => set({ debt: d.id })} />)}
         <motion.button variants={item} type="button" onClick={() => setAdding(true)} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-line text-[13.5px] text-muted"><Plus size={16} /> Добавить долг</motion.button>

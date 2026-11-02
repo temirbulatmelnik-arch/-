@@ -7,7 +7,7 @@ import { today } from '../domain/dates';
 import { weekToClose } from '../domain/weekly';
 import { useStore } from '../store/store';
 import { useUi, type Tab } from '../store/ui';
-import { ease, fling, snappy, spring } from './motion';
+import { ease, fling, snappy } from './motion';
 import { BridgeIcon } from './Petersburg';
 import { haptic } from './haptics';
 
@@ -25,6 +25,9 @@ export function checkupMonday(): string {
   const done = { ...s.closures, ...Object.fromEntries(s.checkups.map(c => [c.monday, c])) } as typeof s.closures;
   return weekToClose(today(), done);
 }
+
+/** Колонка вкладки в сетке панели: две слева, «плюс» посередине, две справа */
+const COL: Record<Tab, number> = { week: 0, payments: 1, budget: 3, plan: 4 };
 
 const HOLD_MS = 420;
 const RING = 2 * Math.PI * 34;
@@ -46,7 +49,9 @@ export function runQuick(id: string) {
 }
 
 export function TabBar() {
-  const { tab, setTab, set } = useUi();
+  const tab = useUi(s => s.tab);
+  const setTab = useUi(s => s.setTab);
+  const set = useUi(s => s.set);
   const [fan, setFan] = useState(false);
   // удержание «плюса»: кольцо вокруг него заполняется, пока палец на кнопке, — видно, что сейчас раскроется веер
   const [holding, setHolding] = useState(false);
@@ -74,7 +79,6 @@ export function TabBar() {
       <motion.button key={t.id} type="button" whileTap={{ scale: 0.94 }} transition={snappy} aria-current={active ? 'page' : undefined}
         onClick={() => (active ? window.scrollTo({ top: 0, behavior: 'smooth' }) : setTab(t.id))}
         className={`relative flex flex-col items-center gap-[3px] rounded-[22px] py-2 text-[10.5px] font-medium transition-colors ${active ? 'text-ink' : 'text-faint'}`}>
-        {active && <motion.span layoutId="tab-bg" className="absolute inset-0 rounded-[22px] bg-surface-2" transition={spring} />}
         <motion.span key={String(active)} initial={active ? { y: 2, scale: 0.9 } : false} animate={{ y: 0, scale: 1 }} transition={{ type: 'spring', bounce: 0.3, duration: 0.3 }} className="relative">
           <t.icon size={21} strokeWidth={active ? 1.9 : 1.5} className={active ? 'text-sea' : ''} />
         </motion.span>
@@ -113,7 +117,12 @@ export function TabBar() {
 
       <nav className="pb-safe pointer-events-none fixed inset-x-0 bottom-0 z-40" aria-label="Разделы">
         <div className="pointer-events-auto relative mx-auto mb-2.5 w-[min(94%,404px)]">
-          <div className="glass grid grid-cols-5 items-end rounded-[28px] border border-line bg-surface/85 p-1.5 shadow-[0_16px_40px_-14px_rgba(4,14,22,.45)] backdrop-blur-xl backdrop-saturate-150">
+          <div className="glass relative grid grid-cols-5 items-end rounded-[28px] border border-line bg-surface/85 p-1.5 shadow-[0_16px_40px_-14px_rgba(4,14,22,.45)] backdrop-blur-xl backdrop-saturate-150">
+            {/* подложка активной вкладки едет за пальцем обычным CSS-переходом: только transform, на видеокарте.
+                Раньше это была общая layout-анимация motion — она пересчитывала положение сотен элементов страницы
+                при каждом переключении и давала заметную задержку */}
+            <span aria-hidden="true" className="pointer-events-none absolute inset-y-1.5 left-1.5 w-[calc((100%-12px)/5)] rounded-[22px] bg-surface-2 transition-transform duration-[380ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none"
+              style={{ transform: `translateX(${COL[tab] * 100}%)` }} />
             {TABS.slice(0, 2).map(tabButton)}
             <span aria-hidden="true" />
             {TABS.slice(2).map(tabButton)}
