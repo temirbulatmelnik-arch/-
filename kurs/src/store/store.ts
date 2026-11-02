@@ -11,6 +11,7 @@ import type { Bridge } from '../domain/bridge';
 import { fixDefaultCategories } from '../domain/categorize';
 import { dropChatTwins } from '../domain/exchange';
 import { freshReserve, type Checkup } from '../domain/ledger';
+import { salute } from './events';
 import type { CalEvent, CardBalance, ChecklistItem, Debt, DebtSnapshot, EventMark, Expense, FixedItem, IncomeTemplate, MemoryRule, PlanSeed, ReserveMove, Settings, StrategySection, WeekClosure, WeeklyOverride, WishItem } from '../domain/types';
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -310,6 +311,8 @@ export const useStore = create<State>()(
             const interest = debt.rule.type === 'schedule' ? 0 : (debt.balance * debt.rate) / 12;
             const closing = e.key.endsWith(':close') || paid >= debt.balance - 1;
             debts = s.debts.map(d => (d.id === debt.id ? patchDebt(d, closing ? 0 : d.balance + interest - paid) : d));
+            // долг закрыт — салют над Невой
+            if (closing && !debt.closed) salute('big');
           }
         } else {
           delete marks[e.key];
@@ -347,6 +350,7 @@ export const useStore = create<State>()(
       applyBonus: ({ amount, reserveAfter, allocations, title, eventKey }) => set(s => {
         let debts = s.debts;
         for (const a of allocations) debts = debts.map(d => (d.id === a.debtId ? patchDebt(d, d.balance - a.amount, true) : d));
+        if (debts.some(d => d.closed && !s.debts.find(x => x.id === d.id)?.closed)) salute('big');
         const sent = allocations.reduce((t, a) => t + a.amount, 0);
         const names = allocations.map(a => s.debts.find(d => d.id === a.debtId)?.short).filter(Boolean).join(', ');
         const marks = eventKey ? { ...s.marks, [eventKey]: { done: true, amount, at: nowIso() } } : s.marks;

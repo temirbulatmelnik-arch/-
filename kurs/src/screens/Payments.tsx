@@ -1,8 +1,11 @@
 // «Платежи» — хватит ли денег на всё, что спишется. Три вида, листаются пальцем:
 // «Месяц» — календарь с водой и линия денег, выбранный день; «Хватит ли» — счета и прогноз покрытия до премии;
 // «Список» — все платежи месяца по датам, отметка «оплачено» свайпом вправо.
-import { BellRing, Check, ChevronLeft, ChevronRight, Repeat, Scale, Undo2 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { BellRing, CalendarArrowUp, Check, ChevronLeft, ChevronRight, PencilLine, Repeat, Scale, Undo2 } from 'lucide-react';
+import { Hold } from '../components/Hold';
+import { toast } from '../store/ui';
+import { AnimatePresence, motion } from 'motion/react';
+import { haptic } from '../components/haptics';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { CoverageCard } from '../components/Coverage';
@@ -99,10 +102,18 @@ function SwipeEvent({ e, mark, now, showDate = false }: { e: CalEvent; mark?: Ev
   const toggle = useToggle();
   const done = !!mark?.done;
   const g = eventGroup(e);
+  const label = done ? 'Снять отметку' : g === 'income' ? 'Пришло' : g === 'weekly' ? 'Долил' : 'Оплачено';
+  const later = () => { useStore.getState().setOverride(e.key, { date: addDays(e.date, 1) }); toast(`${e.title}: перенесено на ${dayMonth(addDays(e.date, 1))}`); };
   return (
-    <SwipeRow left={{ label: done ? 'Снять отметку' : g === 'income' ? 'Пришло' : g === 'weekly' ? 'Долил' : 'Оплачено', icon: done ? <Undo2 size={17} /> : <Check size={17} />, tone: done ? 'ink' : 'pos', onAction: () => toggle(e) }}>
-      <EventRow e={e} mark={mark} now={now} showDate={showDate} onClick={() => set({ event: e })} onToggle={() => toggle(e)} />
-    </SwipeRow>
+    <Hold preview={<div className="pointer-events-none"><EventRow e={e} mark={mark} now={now} showDate onClick={() => {}} /></div>} actions={[
+      { label, icon: done ? <Undo2 size={17} /> : <Check size={17} />, onSelect: () => toggle(e) },
+      { label: 'Сумма и дата', icon: <PencilLine size={17} />, onSelect: () => set({ event: e }) },
+      ...(!done && e.kind === 'payment' ? [{ label: 'Перенести на завтра', icon: <CalendarArrowUp size={17} />, onSelect: later }] : []),
+    ]}>
+      <SwipeRow left={{ label, icon: done ? <Undo2 size={17} /> : <Check size={17} />, tone: done ? 'ink' : 'pos', onAction: () => toggle(e) }}>
+        <EventRow e={e} mark={mark} now={now} showDate={showDate} onClick={() => set({ event: e })} onToggle={() => toggle(e)} />
+      </SwipeRow>
+    </Hold>
   );
 }
 
@@ -113,7 +124,7 @@ function MonthView({ month, days, events, selected, onSelect, onShift, said }: {
   const marks = useStore(s => s.marks);
   const top = Math.max(LOW_WATER * 1.25, ...days.map(d => d.total ?? 0));
   const sel = days.find(d => d.date === selected);
-  const dayEvents = events.filter(e => e.date === selected);
+  const [opened, setOpened] = useState<string | null>(null);
   return (
     <>
       {/* вывод по воде в календаре: деньги на карте и в резерве день за днём */}
@@ -123,7 +134,7 @@ function MonthView({ month, days, events, selected, onSelect, onShift, said }: {
       )}
       <section className="mt-3 px-3" data-noswipe>
         <motion.div key={month} initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ type: 'spring', stiffness: 300, damping: 30 }}>
-          <MonthGrid month={month} days={days} top={top} now={now} selected={selected} onSelect={onSelect} onSwipe={onShift} />
+          <MonthGrid month={month} days={days} top={top} now={now} selected={selected} onSelect={onSelect} onSwipe={onShift} opened={opened} onOpen={d => { setOpened(d); haptic(); }} />
         </motion.div>
       </section>
       <section className="mx-4 mt-5" data-noswipe>
@@ -133,18 +144,56 @@ function MonthView({ month, days, events, selected, onSelect, onShift, said }: {
         </div>
         <div className="mt-2"><LevelChart month={month} days={days} top={top} selected={selected} onSelect={onSelect} /></div>
       </section>
-      <section className="mt-5">
-        <motion.div key={selected} initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} transition={{ type: 'spring', stiffness: 420, damping: 36 }}>
-          <div className="mb-2 px-5 font-display text-[16px] font-medium first-letter:uppercase">{selected === now ? 'Сегодня, ' : ''}{dayMonth(selected)}, {weekdayFull(selected)}</div>
-          {dayEvents.length ? (
-            <div className="card divide-hair mx-4 overflow-hidden">
-              {dayEvents.map(e => <SwipeEvent key={e.key} e={e} mark={marks[e.key]} now={now} />)}
-            </div>
-          ) : <p className="px-5 text-[14px] text-muted">Ничего не уходит и не приходит.</p>}
-          {dayEvents.some(e => !marks[e.key]?.done) && <p className="px-5 pt-2 text-[12px] text-faint">Сдвиньте строку вправо — отметить оплату.</p>}
-        </motion.div>
-      </section>
+      <p className="px-5 pt-3 text-[12.5px] text-faint">Нажмите на день — он раскроется: что уходит, что приходит, сколько останется.</p>
+      <AnimatePresence>
+        {opened && <DayCard key={opened} date={opened} day={days.find(d => d.date === opened)} events={events.filter(e => e.date === opened)} marks={marks} now={now} onClose={() => setOpened(null)} />}
+      </AnimatePresence>
     </>
+  );
+}
+
+/** Карточка дня: вырастает из ячейки календаря и уходит обратно в неё (навык apple-design: из источника в источник) */
+function DayCard({ date, day, events, marks, now, onClose }: { date: string; day?: DayMoney; events: CalEvent[]; marks: Record<string, EventMark>; now: string; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  const low = day?.total != null && day.total < LOW_WATER;
+  const level = day?.total == null ? 0 : Math.max(0.06, Math.min(1, Math.max(0, day.total) / Math.max(LOW_WATER * 4, day.total)));
+  return (
+    <motion.div className="fixed inset-0 z-[56]" initial={{ opacity: 1 }} exit={{ opacity: 1 }}>
+      <motion.div className="absolute inset-0 bg-[rgba(4,14,22,.4)] backdrop-blur-[6px]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
+      <motion.div layoutId={`day-${date}`} className="absolute inset-x-4 top-[18%] overflow-hidden rounded-[30px] bg-surface shadow-[0_30px_60px_-24px_rgba(4,14,22,.7)]"
+        transition={{ type: 'spring', bounce: 0.15, duration: 0.45 }}
+        drag="y" dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0.05, bottom: 0.6 }} onDragEnd={(_, i) => { if (i.offset.y > 80 || i.velocity.y > 400) onClose(); }}>
+        {/* вода дня: сколько на карте и в резерве к вечеру */}
+        <motion.div className="pointer-events-none absolute inset-x-0 bottom-0" initial={{ height: 0 }} animate={{ height: `${level * 100}%` }} transition={{ type: 'spring', bounce: 0.2, duration: 0.9, delay: 0.15 }}
+          style={{ background: `linear-gradient(180deg, var(${low ? '--water-low-a' : '--water-a'}), var(${low ? '--water-low-b' : '--water-b'}))` }} />
+        <motion.div className="relative" initial={{ opacity: 0 }} animate={{ opacity: 1, transition: { delay: 0.12, duration: 0.2 } }} exit={{ opacity: 0, transition: { duration: 0.08 } }}>
+          <div className="flex items-start justify-between gap-3 px-5 pt-5">
+            <div>
+              <div className="font-display text-[44px] leading-none font-medium">{Number(date.slice(8))}</div>
+              <div className="mt-1 text-[14px] text-muted first-letter:uppercase">{date === now ? 'сегодня, ' : ''}{weekdayFull(date)}, {dayMonth(date)}</div>
+            </div>
+            {day?.total != null && (
+              <div className="text-right">
+                <div className="text-[11.5px] text-muted">к вечеру на карте<br />и в резерве</div>
+                <Money value={day.total} className={`figure mt-0.5 block text-[20px] ${day.total < 0 ? 'text-neg' : low ? 'text-warn' : ''}`} />
+              </div>
+            )}
+          </div>
+          <div className="mt-4 max-h-[46dvh] overflow-y-auto overscroll-contain px-2 pb-3">
+            {events.length ? (
+              <div className="divide-hair overflow-hidden rounded-[20px] bg-surface/90">
+                {events.map(e => <SwipeEvent key={e.key} e={e} mark={marks[e.key]} now={now} />)}
+              </div>
+            ) : <p className="px-3 pb-3 text-[14.5px] text-muted">Ничего не уходит и не приходит.</p>}
+            {events.some(e => !marks[e.key]?.done) && <p className="px-3 pt-2 text-[12px] text-faint">Сдвиньте строку вправо — отметить. Удержите — ещё действия.</p>}
+          </div>
+        </motion.div>
+      </motion.div>
+    </motion.div>
   );
 }
 

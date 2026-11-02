@@ -10,6 +10,7 @@ import { checkupPlan, ledger, MATCH, weekLeftover, type Ledger } from '../domain
 import { num, parseAmount, round } from '../domain/money';
 import { weekReport } from '../domain/weekly';
 import { useStore } from '../store/store';
+import { salute } from '../store/events';
 import { toast, useUi } from '../store/ui';
 
 /** учёт по счетам: что должно быть в банке сейчас */
@@ -108,6 +109,8 @@ function Body({ monday }: { monday: string }) {
       topUp, toReserve, creditCard: led.creditCard?.id,
     }, transfer ? { monday, limit: r.limit, spent: r.spent, left: r.left, transferred: 0 } : null);
     toast(transfer ? (closures[monday] ? 'Сверка сохранена' : 'Сверка сохранена, неделя закрыта') : 'Остатки сохранены, перевод — позже');
+    // неделя закрыта в плюс — маленький салют
+    if (transfer && r.left >= 0) window.setTimeout(() => salute('small'), 300);
     set({ checkup: null });
   };
 

@@ -5,14 +5,15 @@ import { Anchor, Gift, MessagesSquare, Plus, Scale, ScanText } from 'lucide-reac
 import { useEffect, useState, type ReactNode } from 'react';
 import { Roll, spring } from '../components/motion';
 import { useStore } from '../store/store';
+import { salute } from '../store/events';
 import { useUi } from '../store/ui';
 
-export const TOUR_VERSION = 3;
+export const TOUR_VERSION = 4;
 
 const SLIDES: { title: string; text: string; art: () => ReactNode }[] = [
-  { title: 'Сегодня — сколько можно', text: 'Сверху остаток недели и кольцо дня. Фонари — дни недели: ведите пальцем вдоль набережной, и подпись покажет траты каждого дня. Потяните сцену вниз — мост сведётся, а приложение проверит обновления.', art: () => <ArtToday /> },
+  { title: 'Сегодня — сколько можно', text: 'Сверху остаток недели и кольцо дня. Фонари — дни недели: ведите пальцем вдоль набережной, и подпись покажет траты каждого дня. Потяните сцену вниз — мост сведётся, а приложение проверит обновления. Прокрутите — сверху появится «Остров» с деньгами на сегодня, нажмите на него.', art: () => <ArtToday /> },
   { title: '«+» — записать трату', text: 'Одно нажатие — сумма, категория, готово. Удержите «+», и раскроются остальные действия: из банка, сверка, чат, премия.', art: () => <ArtPlus /> },
-  { title: 'Платежи — хватит ли денег', text: 'Три вида, листаются пальцем: месяц с водой в днях, «Хватит ли» — ответ одной фразой и линия резерва, которую можно вести пальцем, и список. Платёж отмечается свайпом вправо.', art: () => <ArtPay /> },
+  { title: 'Платежи — хватит ли денег', text: 'Три вида, листаются пальцем: месяц с водой в днях, «Хватит ли» — ответ одной фразой и линия резерва, которую можно вести пальцем, и список. Нажмите на день — он раскроется прямо из календаря. Строку можно сдвинуть вправо — «оплачено» — или удержать: появится меню.', art: () => <ArtPay /> },
   { title: 'Траты и Долги', text: '«Траты» — куда ушли деньги по категориям, поиск, свайп влево — изменить или удалить. «Долги» — общий долг тает, по фарватеру к свободе.', art: () => <ArtDebts /> },
 ];
 
@@ -23,7 +24,8 @@ export function Tour() {
   const [dir, setDir] = useState(1);
   useEffect(() => { if (open) setI(0); }, [open]);
   const finish = () => { useStore.getState().setSettings({ tourSeen: TOUR_VERSION }); set({ tour: false }); };
-  const go = (n: number) => { if (n < 0) return; if (n >= SLIDES.length) { finish(); return; } setDir(n > i ? 1 : -1); setI(n); };
+  // дошли до конца — маленький салют: первое знакомство случается один раз
+  const go = (n: number) => { if (n < 0) return; if (n >= SLIDES.length) { finish(); window.setTimeout(() => salute('small'), 350); return; } setDir(n > i ? 1 : -1); setI(n); };
   const end = (_: unknown, info: PanInfo) => {
     if (info.offset.x < -60 || info.velocity.x < -400) go(i + 1);
     else if (info.offset.x > 60 || info.velocity.x > 400) go(i - 1);

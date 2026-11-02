@@ -81,16 +81,12 @@ export function Week() {
   // без событий прокрутки (fixing-motion-performance): параллакс — CSS scroll-timeline (.sc-parallax),
   // полоса и пауза бесконечных анимаций — по видимости сцены (IntersectionObserver)
   const sceneRef = useRef<HTMLDivElement>(null);
-  const markRef = useRef<HTMLDivElement>(null);
-  const [compact, setCompact] = useState(false);
   useEffect(() => {
-    const mark = markRef.current, scene = sceneRef.current;
-    if (!mark || !scene) return;
-    const bar = new IntersectionObserver(([e]) => setCompact(!e.isIntersecting && e.boundingClientRect.top < 0));
+    const scene = sceneRef.current;
+    if (!scene) return;
     const pause = new IntersectionObserver(([e]) => scene.classList.toggle('sc-paused', !e.isIntersecting));
-    bar.observe(mark);
     pause.observe(scene);
-    return () => { bar.disconnect(); pause.disconnect(); };
+    return () => pause.disconnect();
   }, []);
 
   // потянуть сцену вниз: мост сводится вслед за пальцем; отпустили за порогом — проверка новой редакции плана
@@ -282,8 +278,6 @@ export function Week() {
 
   return (
     <div className="relative">
-      <CompactBar weekLeft={week.left} dayLeft={today.left} show={compact} />
-      <div ref={markRef} aria-hidden="true" className="pointer-events-none absolute top-[330px] h-px w-px" />
       <div ref={sceneRef} className="sc-parallax" style={{ background: 'var(--sky-1)' }}>
       <div ref={pullRef} className="relative">
       <AnimatePresence>
@@ -415,28 +409,6 @@ function WishRow({ id }: { id: string }) {
         {ready && <button type="button" onClick={() => set({ add: { amount: w.amount, category: w.category, note: w.title, wishId: w.id } })} className="rounded-full border border-line px-3 py-1.5 text-[12.5px] font-medium">Купить</button>}
       </div>
     </div>
-  );
-}
-
-/** Стеклянная полоса сверху: когда сцена ушла за край, остаток недели и дня остаются на виду */
-function CompactBar({ weekLeft, dayLeft, show }: { weekLeft: number; dayLeft: number; show: boolean }) {
-  return (
-    <AnimatePresence>
-      {show && (
-        <motion.button type="button" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} aria-label="Наверх"
-          initial={{ y: -24, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -24, opacity: 0 }} transition={spring}
-          className="glass fixed inset-x-0 top-[env(safe-area-inset-top)] z-30 mx-auto flex w-full max-w-md items-center justify-between gap-3 border-b border-line bg-bg/80 px-5 py-2.5 text-left backdrop-blur-xl backdrop-saturate-150">
-          <span>
-            <span className="block text-[11.5px] text-muted">{weekLeft < 0 ? 'перерасход недели' : 'на неделю'}</span>
-            <span className={`figure block text-[19px] leading-tight ${weekLeft < 0 ? 'text-neg' : ''}`}><Roll value={Math.abs(weekLeft)} /></span>
-          </span>
-          <span className="text-right">
-            <span className="block text-[11.5px] text-muted">{dayLeft < 0 ? 'сверх лимита дня' : 'на сегодня'}</span>
-            <span className={`figure block text-[19px] leading-tight ${dayLeft < 0 ? 'text-neg' : 'text-sea'}`}><Roll value={Math.abs(dayLeft)} /></span>
-          </span>
-        </motion.button>
-      )}
-    </AnimatePresence>
   );
 }
 

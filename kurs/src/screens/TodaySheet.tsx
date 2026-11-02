@@ -1,7 +1,8 @@
 // Траты за сегодня: окно по нажатию на кольцо дня и тело карточки «Сегодня» на «Неделе».
 // Сверху — сколько потрачено из лимита дня и что это значит, ниже — траты дня; оплаченное из резерва в лимит не входит —
 // оно отдельно.
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { Copy, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Hold } from '../components/Hold';
 import { AnimatePresence, motion } from 'motion/react';
 import { spring, SwipeRow } from '../components/motion';
 import { useMemo } from 'react';
@@ -66,12 +67,18 @@ export function TodayDetails({ summary }: { summary?: boolean }) {
             <AnimatePresence initial={false}>
               {counted.map(e => (
                 <motion.div key={e.id} layout initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, height: 0 }} transition={spring}>
-                  <SwipeRow rowClass="bg-bg" right={[
-                    { label: 'Изменить', icon: <Pencil size={16} />, tone: 'sea', onAction: () => edit(e) },
-                    { label: 'Удалить', icon: <Trash2 size={16} />, tone: 'neg', onAction: () => { useStore.getState().removeExpense(e.id); toast(`Удалено: ${e.note || CATEGORY[e.category].short}`); } },
+                  <Hold preview={<div className="pointer-events-none"><ExpenseRow e={e} /></div>} actions={[
+                    { label: 'Изменить', icon: <Pencil size={17} />, onSelect: () => edit(e) },
+                    { label: 'Повторить ещё раз', icon: <Copy size={17} />, onSelect: () => { useStore.getState().addExpenses([{ date: e.date, amount: e.amount, category: e.category, note: e.note, source: e.source, origin: 'manual' }]); toast('Записано ещё раз'); } },
+                    { label: 'Удалить', icon: <Trash2 size={17} />, danger: true, onSelect: () => { useStore.getState().removeExpense(e.id); toast(`Удалено: ${e.note || CATEGORY[e.category].short}`); } },
                   ]}>
-                    <ExpenseRow e={e} onClick={() => edit(e)} />
-                  </SwipeRow>
+                    <SwipeRow rowClass="bg-bg" right={[
+                      { label: 'Изменить', icon: <Pencil size={16} />, tone: 'sea', onAction: () => edit(e) },
+                      { label: 'Удалить', icon: <Trash2 size={16} />, tone: 'neg', onAction: () => { useStore.getState().removeExpense(e.id); toast(`Удалено: ${e.note || CATEGORY[e.category].short}`); } },
+                    ]}>
+                      <ExpenseRow e={e} onClick={() => edit(e)} />
+                    </SwipeRow>
+                  </Hold>
                 </motion.div>
               ))}
             </AnimatePresence>

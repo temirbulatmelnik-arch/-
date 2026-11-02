@@ -1,5 +1,6 @@
 // Месяц на «Платежах»: каждый день наполняется водой по деньгам на карте и в резерве,
 // под календарём — одна линия уровня с выводом словами. Одни данные, два взгляда.
+import { motion } from 'motion/react';
 import { useLayoutEffect, useRef } from 'react';
 import { LOW_WATER } from '../domain/cashflow';
 import { fromKey, weekday } from '../domain/dates';
@@ -27,9 +28,11 @@ export function short(n: number): string {
 
 const WAVE = 'M0 4 Q7.5 1 15 4 T30 4 T45 4 T60 4 T75 4 T90 4 T105 4 T120 4';
 
-export function MonthGrid({ month, days, top, now, selected, onSelect, onSwipe }: {
+export function MonthGrid({ month, days, top, now, selected, onSelect, onSwipe, onOpen, opened }: {
   month: string; days: DayMoney[]; top: number; now: string; selected: string;
   onSelect: (d: string) => void; onSwipe: (dir: 1 | -1) => void;
+  /** нажатие на день — раскрыть его карточку прямо из ячейки */
+  onOpen?: (d: string) => void; opened?: string | null;
 }) {
   const lead = (fromKey(`${month}-01`).getDay() + 6) % 7;
   const touch = useRef<number | null>(null);
@@ -54,8 +57,10 @@ export function MonthGrid({ month, days, top, now, selected, onSelect, onSwipe }
           const aria = [`${n}`, !isWorkday(d.date) && 'выходной', d.out > 0 && `уходит ${num(d.out)} ₽${d.paid ? ', оплачено' : ''}`,
             d.in > 0 && `приходит ${num(d.in)} ₽`, d.total != null && `на карте и в резерве ${num(d.total)} ₽`].filter(Boolean).join(', ');
           return (
-            <button key={d.date} type="button" onClick={() => onSelect(d.date)} aria-label={aria} aria-pressed={on}
+            <button key={d.date} type="button" onClick={() => { onSelect(d.date); onOpen?.(d.date); }} aria-label={aria} aria-pressed={on}
               className="relative flex h-[54px] flex-col items-start gap-px overflow-hidden rounded-t-[16px] rounded-b-[6px] border border-line bg-surface px-[5px] pt-1 text-left [text-shadow:0_0_3px_var(--surface),0_0_2px_var(--surface)]">
+              {/* опора для раскрытия: карточка дня вырастает из этой ячейки и возвращается в неё */}
+              {opened !== d.date && <motion.span layoutId={`day-${d.date}`} className="absolute inset-0 rounded-t-[15px] rounded-b-[5px] bg-surface" transition={{ type: 'spring', bounce: 0.15, duration: 0.45 }} />}
               {level > 0 && (
                 <span className="sc-fill absolute inset-x-0 bottom-0" style={{
                   height: `${level}%`, animationDelay: `${0.1 + i * 0.03}s`, opacity: d.past ? 0.5 : 1,

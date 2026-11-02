@@ -1,12 +1,16 @@
 // Кольцо дня на «Неделе»: стеклянный круг над небом сцены, внутри — сколько ещё можно потратить сегодня; нажатие — траты дня.
 // Трата — дуга тает вместе с числом; перерасход — красная дуга в обратную сторону. Дуга считается от досчитывающегося
 // числа и рисуется атрибутом, а не CSS-переходом: Safari на iPhone не всегда анимирует переходы на элементах SVG.
+import { motion } from 'motion/react';
 import type { CSSProperties } from 'react';
 import { rub } from '../domain/money';
 import { Money } from './ui';
 import { useCountUp } from './useCountUp';
 
 const C = 70, R = 58, L = 2 * Math.PI * R;
+/** вода внутри кольца: радиус, волна на поверхности (две волны на ширину — бесшовный сдвиг на половину) */
+const WR = R - 7;
+const WAVE = `M0 6 ${Array.from({ length: 8 }, () => 'q 8.75 -6 17.5 0 t 17.5 0').join(' ')} V${2 * WR + 14} H0 Z`;
 const v = (name: string): CSSProperties => ({ stopColor: `var(${name})` });
 
 function Arc({ frac, reverse, stroke }: { frac: number; reverse?: boolean; stroke: string }) {
@@ -35,6 +39,21 @@ export function DayRing({ day, left, onClick }: { day: number; left: number; onC
             <stop offset="0" style={v('--ring-1')} /><stop offset=".6" style={v('--ring-2')} /><stop offset="1" style={v('--ring-3')} />
           </linearGradient>
         </defs>
+        <defs>
+          <clipPath id="day-water"><circle cx={C} cy={C} r={WR} /></clipPath>
+          <linearGradient id="day-water-g" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" style={{ stopColor: over ? 'var(--ring-over)' : 'var(--ring-1)' }} stopOpacity=".42" />
+            <stop offset="1" style={{ stopColor: over ? 'var(--ring-over)' : 'var(--ring-2)' }} stopOpacity=".16" />
+          </linearGradient>
+        </defs>
+        {/* вода: уровень — сколько осталось на сегодня; трата — вода опускается с лёгким покачиванием */}
+        <g clipPath="url(#day-water)">
+          <motion.g initial={false} animate={{ y: C - WR + (1 - Math.max(0.05, over ? 0.06 : frac)) * 2 * WR - 6 }} transition={{ type: 'spring', bounce: 0.3, duration: 1.4 }}>
+            <g className="sc-wave" style={{ transformBox: 'fill-box' }}>
+              <path d={WAVE} fill="url(#day-water-g)" transform={`translate(${C - WR - 2} 0)`} />
+            </g>
+          </motion.g>
+        </g>
         <circle cx={C} cy={C} r={R} fill="none" stroke="#fff" strokeWidth="7" style={{ strokeOpacity: 'var(--ring-track)' }} />
         <Arc frac={frac} stroke="url(#day-ring)" />
         <Arc frac={overFrac} reverse stroke="var(--ring-over)" />

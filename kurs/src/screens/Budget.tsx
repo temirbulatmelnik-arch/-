@@ -1,7 +1,8 @@
 // «Траты» — куда ушли деньги. Месяц против лимитов этапа: «прилив» из цветов категорий, категории с полосами,
 // недели месяца, поиск и фильтры, все траты по дням. Нажатие на категорию — фильтр; свайп влево — изменить, удалить.
 import { AnimatePresence, motion } from 'motion/react';
-import { ChevronLeft, ChevronRight, CreditCard, Pencil, Search, Trash2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Copy, CreditCard, Pencil, Search, Trash2, X } from 'lucide-react';
+import { Hold } from '../components/Hold';
 import { useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { item, list as listAnim, Roll, spring, SwipeRow } from '../components/motion';
@@ -61,6 +62,11 @@ export function Budget() {
   }, [filtered]);
   const filteredSum = filtered.reduce((s, e) => s + e.amount, 0);
   const remove = (e: Expense) => { useStore.getState().removeExpense(e.id); toast(`Удалено: ${e.note || CATEGORY[e.category].short}`); };
+  // та же покупка ещё раз (кофе, проезд) — одним движением
+  const repeat = (e: Expense) => {
+    useStore.getState().addExpenses([{ date: now, amount: e.amount, category: e.category, note: e.note, source: e.source, origin: 'manual', ...(e.creditCard ? { creditCard: e.creditCard } : {}) }]);
+    toast(`Записано ещё раз: ${e.note || CATEGORY[e.category].short}`);
+  };
 
   return (
     <div>
@@ -202,12 +208,18 @@ export function Budget() {
                   <AnimatePresence initial={false}>
                     {list.map(e => (
                       <motion.div key={e.id} layout exit={{ opacity: 0, height: 0 }} transition={spring}>
-                        <SwipeRow right={[
-                          { label: 'Изменить', icon: <Pencil size={16} />, tone: 'sea', onAction: () => set({ add: { edit: e } }) },
-                          { label: 'Удалить', icon: <Trash2 size={16} />, tone: 'neg', onAction: () => remove(e) },
+                        <Hold preview={<div className="pointer-events-none"><ExpenseRow e={e} /></div>} actions={[
+                          { label: 'Изменить', icon: <Pencil size={17} />, onSelect: () => set({ add: { edit: e } }) },
+                          { label: 'Повторить сегодня', icon: <Copy size={17} />, onSelect: () => repeat(e) },
+                          { label: 'Удалить', icon: <Trash2 size={17} />, danger: true, onSelect: () => remove(e) },
                         ]}>
-                          <ExpenseRow e={e} onClick={() => set({ add: { edit: e } })} />
-                        </SwipeRow>
+                          <SwipeRow right={[
+                            { label: 'Изменить', icon: <Pencil size={16} />, tone: 'sea', onAction: () => set({ add: { edit: e } }) },
+                            { label: 'Удалить', icon: <Trash2 size={16} />, tone: 'neg', onAction: () => remove(e) },
+                          ]}>
+                            <ExpenseRow e={e} onClick={() => set({ add: { edit: e } })} />
+                          </SwipeRow>
+                        </Hold>
                       </motion.div>
                     ))}
                   </AnimatePresence>
@@ -216,7 +228,7 @@ export function Budget() {
             ))}
           </motion.div>
         )}
-        {byDay.length > 0 && <p className="px-6 pt-1 text-center text-[11.5px] text-faint">Сдвиньте трату влево — изменить или удалить.</p>}
+        {byDay.length > 0 && <p className="px-6 pt-1 text-center text-[11.5px] text-faint">Сдвиньте трату влево — изменить или удалить. Удержите — ещё «Повторить сегодня».</p>}
       </section>
     </div>
   );
