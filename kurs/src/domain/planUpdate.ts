@@ -29,8 +29,10 @@ export function mergeSeed(s: PlanState, seed: PlanSeed): Partial<PlanState> {
   const debts = seed.debts.map(d => {
     const l = local.get(d.id);
     if (!l) return d;
-    // остаток, закрытие и дата обновления — то, что человек вёл в приложении
-    return { ...d, balance: l.balance, closed: l.closed, closedOn: l.closedOn, updatedAt: l.updatedAt, rule: d.rule.type === 'annuity' && l.rule.type === 'annuity' ? l.rule : d.rule };
+    // остаток, закрытие, дата обновления и лимит кредитки — то, что человек вёл в приложении (лимит указывают
+    // при сверке с банком, и он точнее, чем в плане)
+    return { ...d, balance: l.balance, closed: l.closed, closedOn: l.closedOn, updatedAt: l.updatedAt, rule: d.rule.type === 'annuity' && l.rule.type === 'annuity' ? l.rule : d.rule,
+      ...(l.limit != null ? { limit: l.limit } : {}) };
   });
   for (const l of s.debts) if (!seed.debts.some(d => d.id === l.id)) debts.push(l);
   return {

@@ -388,6 +388,12 @@ describe('новая редакция плана', () => {
     expect(m.fixed).toHaveLength(1);
     expect(m.checklist![0].id).toBe('z');
   });
+
+  it('лимит кредитки, указанный на телефоне, обновление плана не перетирает', () => {
+    const local = { ...state, debts: DEBTS.map(d => (d.id === 'alfa' ? { ...d, limit: 120_000 } : d)) };
+    const seed = { asOf: '2026-10-22', debts: DEBTS.map(d => (d.id === 'alfa' ? { ...d, limit: undefined } : d)), incomes: [], fixed: [], oneOff: [], templateFrom: '2027-01', reserve: 0, plan: PLAN, weeklyOverrides: [], planTrajectory: [], baselineTrajectory: [] };
+    expect(mergeSeed(local, seed).debts!.find(d => d.id === 'alfa')!.limit).toBe(120_000);
+  });
 });
 
 describe('рабочие дни', () => {
