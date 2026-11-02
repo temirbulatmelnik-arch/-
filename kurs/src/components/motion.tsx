@@ -82,6 +82,21 @@ export function useTween(value: number, start?: number, ms = 1000): number {
   return shown;
 }
 
+/** Сумма досчитывает от from до to без перерисовки React: значение движения пишется прямо в текст */
+export function CountTo({ to, from, className = '', ms = 1000 }: { to: number; from: number; className?: string; ms?: number }) {
+  const mv = useMotionValue(from);
+  const text = useTransform(mv, v => num(Math.round(v)));
+  useEffect(() => {
+    const c = animate(mv, to, { duration: ms / 1000, ease: [0.16, 1, 0.3, 1] });
+    return () => c.stop();
+  }, [to, ms, mv]);
+  return (
+    <span className={`whitespace-nowrap tabular-nums ${className}`} aria-label={`${num(Math.round(to))} ₽`}>
+      <motion.span aria-hidden="true">{text}</motion.span><span aria-hidden="true" className="ml-[0.12em] text-[0.62em] font-normal opacity-55">₽</span>
+    </span>
+  );
+}
+
 /* ---------- Свайп строки ---------- */
 
 export interface SwipeAction {
@@ -188,5 +203,13 @@ export function Pager<T extends string>({ value, onChange, pages, className = ''
 /* ---------- Появление списков ---------- */
 
 /** Первое появление списка: строки приходят снизу по очереди, быстро; дальше — без задержек */
+/** Каскад появления списка: при первом показе вкладки его нет — содержимое сразу на месте, вкладка открывается
+ *  мгновенно; при смене фильтра или месяца — есть, это ответ на действие. Вернуть в initial у motion-обёртки списка */
+export function useEnter(): 'hidden' | false {
+  const shown = useRef(false);
+  useEffect(() => { shown.current = true; }, []);
+  return shown.current ? 'hidden' : false;
+}
+
 export const list = { hidden: {}, show: { transition: { staggerChildren: 0.035, delayChildren: 0.05 } } };
 export const item = { hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0, transition: { duration: 0.28, ease: ease.out } } };

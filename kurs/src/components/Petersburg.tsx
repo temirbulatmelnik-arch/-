@@ -1,7 +1,7 @@
 // Иллюстрация «Петербург»: закат над Невой, Петропавловка, Исаакий, Адмиралтейство, Дворцовый мост и «Лахта» вдали.
 // Мост на «Неделе» при входе разводится полностью, фонари набережной — дни недели. Цвета — из index.css (--sky-*, --city-*),
 // поэтому тёмная тема превращает закат в светлые сумерки без отдельной картинки; солнце в ней заменяет луна.
-import { useEffect, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 
 const f = (v: string): CSSProperties => ({ fill: `var(${v})` });
 const stop = (v: string, opacity?: number): CSSProperties => ({ stopColor: `var(${v})`, stopOpacity: opacity });
@@ -181,16 +181,26 @@ function tween(from: number, to: number, ms: number, ease: (k: number) => number
 const easeInOut = (k: number) => 0.5 - Math.cos(Math.PI * k) / 2;
 const easeOut = (k: number) => 1 - (1 - k) ** 3;
 
+/** Закат на «Сегодня» играется один раз за запуск приложения: вкладка дальше живёт скрытой и не пересобирается,
+ *  а если сцену всё же соберут заново — сразу конечный кадр, без повторных 16 секунд перерисовки неба */
+let sunsetPlayed = false;
+
 /** Закат: солнце опускается на rise единиц за ms, небо разгорается; в тёмной теме за то же время поднимается луна */
 function useSunset(rise: number, ms: number, moonRise: number) {
   const sun = useRef<SVGGElement>(null);
   const moon = useRef<SVGGElement>(null);
   const warm = useRef<SVGRectElement>(null);
-  useEffect(() => tween(0, 1, ms, easeOut, k => {
-    sun.current?.setAttribute('transform', `translate(0 ${(-rise * (1 - k)).toFixed(2)})`);
-    moon.current?.setAttribute('transform', `translate(0 ${(moonRise * (1 - k)).toFixed(2)})`);
-    warm.current?.setAttribute('opacity', k.toFixed(3));
-  }), [rise, ms, moonRise]);
+  // до отрисовки: если закат уже был, сразу ставим конечный кадр — без вспышки начального неба
+  useLayoutEffect(() => {
+    const frame = (k: number) => {
+      sun.current?.setAttribute('transform', `translate(0 ${(-rise * (1 - k)).toFixed(2)})`);
+      moon.current?.setAttribute('transform', `translate(0 ${(moonRise * (1 - k)).toFixed(2)})`);
+      warm.current?.setAttribute('opacity', k.toFixed(3));
+    };
+    if (sunsetPlayed) { frame(1); return; }
+    sunsetPlayed = true;
+    return tween(0, 1, ms, easeOut, frame);
+  }, [rise, ms, moonRise]);
   return { sun, moon, warm };
 }
 
@@ -356,41 +366,62 @@ export function WeekScene({ today, children, overlay }: { today: number; childre
 /** Где на сцене фонарь дня i (пн = 0): доли ширины и высоты картинки */
 export const lampAt = (i: number) => ({ x: (18 + (i + 0.5) * (354 / 7)) / 390, y: (430 - 34) / 478 });
 
-/** Узкая панорама для шапок «Платежей», «Плана» и «Бюджета»: закат, город, полоска воды */
+/** Узкая панорама для шапок «Платежей», «Плана» и «Бюджета»: вечернее небо (конечный кадр заката), город, полоска
+ *  воды. Закат здесь не проигрывается: вкладки собираются в фоне, и анимация шла бы впустую. Живые мелочи (звёзды, блики, чайка) — отдельные HTML-слои поверх картинки: их прозрачность и сдвиг крутит видеокарта,
+ *  и картинка неба не перерисовывается каждый кадр (анимации внутри SVG на iPhone идут через основной поток) */
 export function SkyHeader({ title, subtitle, action }: { title: ReactNode; subtitle?: ReactNode; action?: ReactNode }) {
-  const { sun, moon, warm } = useSunset(26, 9000, 10);
+  // у каждой шапки свои имена градиентов: вкладки живут одновременно, и при общих именах браузер брал бы градиенты
+  // из скрытой вкладки — там они не рисуются, и небо выходило пустым
+  const id = `sh${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
+  // шапка ушла за край — мелочи замирают
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(([e]) => el.classList.toggle('sc-paused', !e.isIntersecting));
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
   return (
-    <header className="relative">
+    <header ref={ref} className="relative overflow-hidden">
       <svg viewBox="0 0 390 160" className="block h-auto w-full" aria-hidden="true">
         <defs>
-          <SkyGradients id="sh" />
-          <clipPath id="sh-skyclip"><rect width="390" height="149" /></clipPath>
+          <SkyGradients id={id} />
+          <clipPath id={`${id}-skyclip`}><rect width="390" height="149" /></clipPath>
         </defs>
-        <rect width="390" height="149" fill="url(#sh-sky)" />
-        <rect ref={warm} opacity="0" width="390" height="149" fill="url(#sh-warm)" />
-        <g className="scene-night" fill="#fff">
-          {HEADER_STARS.map(([x, y], i) => <circle key={i} className="sc-tw" style={{ animationDelay: `${-(i * 0.47) % 3.5}s` }} cx={x} cy={y} r=".8" opacity=".5" />)}
-        </g>
-        <g clipPath="url(#sh-skyclip)">
-          <g ref={sun} className="scene-day" transform="translate(0 -26)">
-            <circle className="sc-halo" cx="340" cy="146" r="70" fill="url(#sh-halo)" />
-            <circle cx="340" cy="146" r="11" fill="url(#sh-sun)" />
+        <rect width="390" height="149" fill={`url(#${id}-sky)`} />
+        <rect width="390" height="149" fill={`url(#${id}-warm)`} />
+        <g clipPath={`url(#${id}-skyclip)`}>
+          <g className="scene-day">
+            <circle cx="340" cy="146" r="70" fill={`url(#${id}-halo)`} opacity=".9" />
+            <circle cx="340" cy="146" r="11" fill={`url(#${id}-sun)`} />
           </g>
-          <g ref={moon} className="scene-night" transform="translate(0 10)">
-            <circle className="sc-halo" cx="340" cy="112" r="55" fill="url(#sh-moonhalo)" />
-            <g transform="translate(340 112) scale(.7) translate(-246 -268)"><Moon id="sh" /></g>
+          <g className="scene-night">
+            <circle cx="340" cy="112" r="55" fill={`url(#${id}-moonhalo)`} opacity=".9" />
+            <g transform="translate(340 112) scale(.7) translate(-246 -268)"><Moon id={id} /></g>
           </g>
-        </g>
-        <g className="sc-gull" style={{ stroke: 'var(--city-near)', animationDuration: '32s' }} fill="none" strokeLinecap="round">
-          <path d="M0 122 Q3.5 118.5 7 122 Q10.5 118.5 14 122" strokeWidth="1.3" />
         </g>
         <rect x="0" y="145" width="390" height="4" style={f('--city-far')} opacity=".55" />
-        <g transform="translate(186 9.4) scale(.42)"><City id="sh" still /></g>
-        <rect y="148" width="390" height="12" fill="url(#sh-water)" />
-        <g style={{ stroke: 'var(--glint)' }} strokeWidth="1.2" strokeLinecap="round">
-          <path className="sc-glit" d="M330 151 h18" /><path className="sc-glit" style={{ animationDelay: '-.9s' }} d="M322 155 h12" /><path className="sc-glit" style={{ animationDelay: '-1.7s' }} d="M344 157 h16" />
-        </g>
+        <g transform="translate(186 9.4) scale(.42)"><City id={id} still /></g>
+        <rect y="148" width="390" height="12" fill={`url(#${id}-water)`} />
       </svg>
+      {/* координаты — в долях картинки 390×160 */}
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+        <div className="scene-night">
+          {HEADER_STARS.map(([x, y], i) => (
+            <span key={i} className="sc-tw absolute aspect-square w-[0.42%] rounded-full bg-white"
+              style={{ left: `${(x - 0.8) / 3.9}%`, top: `${(y - 0.8) / 1.6}%`, animationDelay: `${-(i * 0.47) % 3.5}s` }} />
+          ))}
+        </div>
+        <div className="sh-gull absolute inset-x-0" style={{ top: `${117.5 / 1.6}%` }}>
+          <svg viewBox="-0.5 117.5 15 5" className="block h-auto w-[3.85%]" fill="none" strokeLinecap="round" style={{ stroke: 'var(--city-near)' }}>
+            <path d="M0 122 Q3.5 118.5 7 122 Q10.5 118.5 14 122" strokeWidth="1.3" />
+          </svg>
+        </div>
+        {([[330, 151, 18, 0], [322, 155, 12, -0.9], [344, 157, 16, -1.7]] as const).map(([x, y, w, d]) => (
+          <span key={x} className="sc-glit absolute rounded-full" style={{ left: `${x / 3.9}%`, top: `${(y - 0.6) / 1.6}%`, width: `${w / 3.9}%`, height: `${1.2 / 1.6}%`, background: 'var(--glint)', animationDelay: `${d}s` }} />
+        ))}
+      </div>
       <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-3 px-5 pt-4">
         <div className="min-w-0" style={{ color: 'var(--scene-ink)' }}>
           <h1 className="font-display text-[24px] leading-tight font-medium first-letter:uppercase">{title}</h1>

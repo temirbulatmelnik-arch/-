@@ -154,14 +154,6 @@ button, [role="button"], [role="tab"] { -webkit-user-select: none; user-select: 
 h1, h2, h3 { text-wrap: balance; }
 p { text-wrap: pretty; }
 
-/* Вкладки сменяются как в iOS — мгновенно, новая чуть въезжает со стороны нажатия. CSS-анимация идёт мимо
-   основного потока, а заполнение backwards не оставляет transform после конца (иначе «плавающие» элементы съедут) */
-@keyframes tab-in-r { from { opacity: 0; transform: translateX(10px); } }
-@keyframes tab-in-l { from { opacity: 0; transform: translateX(-10px); } }
-@keyframes fade-in { from { opacity: 0; } }
-.tab-in-r { animation: tab-in-r 200ms var(--ease-out) backwards; }
-.tab-in-l { animation: tab-in-l 200ms var(--ease-out) backwards; }
-
 /* Параллакс сцены «Сегодня» — по прокрутке силами браузера (scroll-driven animation), без событий прокрутки */
 @supports (animation-timeline: scroll()) {
   @keyframes sc-parallax { to { transform: translateY(210px); } }
@@ -249,6 +241,16 @@ button:disabled { cursor: default; }
 .sc-halo { transform-box: fill-box; transform-origin: center; animation: sc-halo 7s ease-in-out infinite; }
 .sc-cloud { transform-box: view-box; animation: sc-cloud 26s ease-in-out infinite alternate; }
 .sc-gull { transform-box: view-box; animation: sc-gull 40s linear infinite; }
+/* чайка в шапке — HTML-слой во всю ширину шапки: сдвиг в долях её ширины, крутит видеокарта */
+@keyframes sh-gull { from { transform: translateX(-16%); } to { transform: translateX(116%); } }
+.sh-gull { animation: sh-gull 32s linear infinite; }
+/* фарватер на «Долгах»: круги у текущего буя, пульс гавани «Свобода», качка судна — только transform и opacity */
+@keyframes fw-ping { from { transform: scale(.6); opacity: .9; } to { transform: scale(1.8); opacity: 0; } }
+@keyframes fw-pulse { 0%, 100% { opacity: .12; } 50% { opacity: .3; } }
+@keyframes fw-bob { 0%, 100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-3px) rotate(3deg); } }
+.fw-ping { animation: fw-ping 1.8s cubic-bezier(.16, 1, .3, 1) infinite; }
+.fw-pulse { opacity: .12; animation: fw-pulse 3s ease-in-out infinite; }
+.fw-bob { animation: fw-bob 3.2s ease-in-out infinite; }
 .sc-flap { transform-box: fill-box; transform-origin: center; animation: sc-flap .9s ease-in-out infinite; }
 .sc-refl { transform-box: view-box; transform-origin: 195px 330px; animation: sc-sway 6s ease-in-out infinite; }
 .sc-glit { animation: sc-glit 2.8s ease-in-out infinite; }
@@ -264,6 +266,8 @@ button:disabled { cursor: default; }
 .hs { scrollbar-width: none; }
 .hs::-webkit-scrollbar { display: none; }
 .sc-fade { animation: sc-fade 1s .8s ease-out both; }
+/* разовое появление уже сыграло — при новом показе вкладки не повторяется */
+.sc-once .sc-fill, .sc-once .sc-fade, .sc-once .sc-draw-line { animation: none; }
 /* огни «Лахты» вспыхивают все вместе, как заградительные огни высоток */
 .sc-lakhta { animation: sc-lakhta 1.6s linear infinite; }
 .sc-pop { animation: sc-pop .6s cubic-bezier(.2, .8, .2, 1) both; }
@@ -300,7 +304,6 @@ button:disabled { cursor: default; }
 /* «Уменьшение движения» на iPhone: замирают бесконечные мелочи (чайки, облака, блики, волны), а закат и развод моста
    (идут кадрами из Petersburg.tsx) и наполнение воды остаются — они медленные, без рывков и приближений */
 @media (prefers-reduced-motion: reduce) {
-  .sc-halo, .sc-cloud, .sc-gull, .sc-flap, .sc-refl, .sc-glit, .sc-tw, .sc-glow, .sc-blink, .sc-wave, .sc-ring, .sc-lakhta { animation: none !important; }
+  .sc-halo, .sc-cloud, .sc-gull, .sh-gull, .sc-flap, .sc-refl, .sc-glit, .sc-tw, .sc-glow, .sc-blink, .sc-wave, .sc-ring, .sc-lakhta, .fw-ping, .fw-pulse, .fw-bob { animation: none !important; }
   .sc-parallax { animation: none !important; }
-  .tab-in-r, .tab-in-l { animation-name: fade-in; }
 }

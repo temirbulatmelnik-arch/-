@@ -9,7 +9,7 @@ import { haptic } from '../components/haptics';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { CoverageCard } from '../components/Coverage';
-import { item, list as listAnim, Pager, Roll, SwipeRow } from '../components/motion';
+import { item, list as listAnim, Pager, Roll, SwipeRow, useEnter } from '../components/motion';
 import { LevelChart, MonthGrid, verdict, type DayMoney } from '../components/MoneyLevel';
 import { SkyButton, SkyHeader } from '../components/Petersburg';
 import { EventRow } from '../components/rows';
@@ -221,7 +221,7 @@ function CoverView() {
     <>
       <CoverageCard />
 
-      <motion.section className="mx-4 mt-6" variants={listAnim} initial="hidden" animate="show">
+      <motion.section className="mx-4 mt-6" variants={listAnim} initial={false} animate="show">
         <div className="mb-2 flex items-baseline justify-between px-1">
           <span className="text-[14px] font-medium">Счета по учёту</span>
           <span className="text-[12px] text-muted">{last ? `сверено ${ddmm(last.date)}` : 'сверки не было'}</span>
@@ -252,6 +252,7 @@ function CoverView() {
 
 function ListView({ month, events, total, incomes }: { month: string; events: CalEvent[]; total: number; incomes: number }) {
   const now = useToday();
+  const enter = useEnter();
   const cal = useCal();
   const [marks, cardBalance, reserve] = useStore(useShallow(s => [s.marks, s.cardBalance, s.reserve] as const));
   const set = useUi(s => s.set);
@@ -309,7 +310,7 @@ function ListView({ month, events, total, incomes }: { month: string; events: Ca
       </div>
 
       {byDate.length === 0 && <div className="mt-5 px-4"><Empty>В этом месяце ничего нет.</Empty></div>}
-      <motion.div key={`${month}-${filter}-${topUps}`} variants={listAnim} initial="hidden" animate="show">
+      <motion.div key={`${month}-${filter}-${topUps}`} variants={listAnim} initial={enter} animate="show">
         {byDate.map(([date, list]) => {
           const bal = flow?.byDay[date];
           const isToday = date === now;

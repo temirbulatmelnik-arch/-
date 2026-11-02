@@ -5,7 +5,7 @@ import { ChevronLeft, ChevronRight, Copy, CreditCard, Pencil, Search, Trash2, X 
 import { Hold } from '../components/Hold';
 import { useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { item, list as listAnim, Roll, spring, SwipeRow } from '../components/motion';
+import { item, list as listAnim, Roll, spring, SwipeRow, useEnter } from '../components/motion';
 import { SkyButton, SkyHeader } from '../components/Petersburg';
 import { ExpenseRow } from '../components/rows';
 import { CAT_COLOR, CatIcon, Empty, Money } from '../components/ui';
@@ -22,6 +22,7 @@ const SOURCES: { id: SourceFilter; label: string }[] = [{ id: 'all', label: 'В�
 
 export function Budget() {
   const now = useToday();
+  const enter = useEnter();
   const [expenses, debts, wishes, overrides] = useStore(useShallow(s => [s.expenses, s.debts, s.wishes, s.weeklyOverrides] as const));
   const set = useUi(s => s.set);
   const [month, setMonth] = useState(monthKey(now));
@@ -135,7 +136,7 @@ export function Budget() {
           <span className="text-[14px] font-medium">По категориям</span>
           {cat && <button type="button" onClick={() => setCat(null)} className="text-[13px] font-medium text-sea">Все категории</button>}
         </div>
-        <motion.div className="card divide-hair mx-4 overflow-hidden" variants={listAnim} initial="hidden" animate="show">
+        <motion.div className="card divide-hair mx-4 overflow-hidden" variants={listAnim} initial={false} animate="show">
           {rows.filter(r => r.spent > 0).sort((a, b) => b.spent - a.spent).map(r => {
             const over = r.spent > r.limit;
             const on = cat === r.id;
@@ -197,7 +198,7 @@ export function Budget() {
               : <button type="button" onClick={() => set({ add: {} })} className="h-11 w-full rounded-2xl bg-ink text-[14px] font-medium text-bg">Записать трату</button>}
           </div>
         ) : (
-          <motion.div key={`${month}${cat}${source}${needle}`} variants={listAnim} initial="hidden" animate="show">
+          <motion.div key={`${month}${cat}${source}${needle}`} variants={listAnim} initial={enter} animate="show">
             {byDay.map(([date, list]) => (
               <motion.div key={date} variants={item} className="mb-3">
                 <div className="mb-1.5 flex items-baseline justify-between px-5 text-[12.5px] text-muted">
@@ -207,7 +208,7 @@ export function Budget() {
                 <div className="card divide-hair mx-4 overflow-hidden">
                   <AnimatePresence initial={false}>
                     {list.map(e => (
-                      <motion.div key={e.id} layout exit={{ opacity: 0, height: 0 }} transition={spring}>
+                      <motion.div key={e.id} exit={{ opacity: 0, transition: { duration: 0.15 } }}>
                         <Hold preview={<div className="pointer-events-none"><ExpenseRow e={e} /></div>} actions={[
                           { label: 'Изменить', icon: <Pencil size={17} />, onSelect: () => set({ add: { edit: e } }) },
                           { label: 'Повторить сегодня', icon: <Copy size={17} />, onSelect: () => repeat(e) },

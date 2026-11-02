@@ -1,12 +1,22 @@
-// График общего долга: план, факт, прогноз при текущих суммах и «как сейчас» (только минималки).
-// Касание или ведение пальцем показывает значения за месяц.
+// «План и факт» — крупно и по делу: сверху одной фразой, где вы относительно плана; ниже линии плана, факта, прогноза
+// и «только минималки». По умолчанию — ближайший год (видно, что происходит сейчас), переключатель — весь план.
+// Ведите пальцем по графику — сверху значения месяца.
+import { motion } from 'motion/react';
 import { useMemo, useRef, useState } from 'react';
-import { addMonths, monthName, monthShort, monthsBetween } from '../domain/dates';
+import { addMonths, monthKey, monthName, monthShort, monthsBetween } from '../domain/dates';
 import { rub, rubShort } from '../domain/money';
+import { haptic } from './haptics';
+import { ease, spring } from './motion';
+import { Money } from './ui';
 
 type Series = [string, number][];
 
-const W = 340, H = 190, PAD = { l: 8, r: 8, t: 12, b: 22 };
+const W = 360, H = 250, PAD = { l: 40, r: 14, t: 26, b: 30 };
+
+/** Сумма коротко, для плашек: «2,05 млн», «850 тыс.» */
+const compact = (v: number) => (Math.abs(v) >= 1e6
+  ? `${(v / 1e6).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} млн`
+  : `${Math.round(v / 1e3).toLocaleString('ru-RU')} тыс.`);
 
 /** Значение ряда в месяце: точное или линейная интерполяция между соседними точками */
 function valueAt(s: Series, m: string): number | null {
@@ -18,78 +28,116 @@ function valueAt(s: Series, m: string): number | null {
   return a[1] + (b[1] - a[1]) * t;
 }
 
+/** Ряд, обрезанный по окну месяцев, с точками на краях окна */
+function clip(s: Series, from: string, to: string): Series {
+  const inside = s.filter(p => p[0] >= from && p[0] <= to);
+  const a = valueAt(s, from), b = valueAt(s, to);
+  if (a != null && inside[0]?.[0] !== from) inside.unshift([from, a]);
+  if (b != null && inside.at(-1)?.[0] !== to) inside.push([to, b]);
+  return inside;
+}
+
 export function DebtChart({ plan, fact, forecast, baseline }: { plan: Series; fact: Series; forecast: Series; baseline: Series }) {
-  const start = [plan[0]?.[0], fact[0]?.[0]].filter(Boolean).sort()[0] ?? fact[0][0];
-  const end = [plan.at(-1)?.[0], forecast.at(-1)?.[0], fact.at(-1)?.[0]].filter(Boolean).sort().at(-1)!;
+  const [range, setRange] = useState<'year' | 'all'>('year');
+  const first = [plan[0]?.[0], fact[0]?.[0]].filter(Boolean).sort()[0] ?? fact[0][0];
+  const last = [plan.at(-1)?.[0], forecast.at(-1)?.[0], fact.at(-1)?.[0]].filter(Boolean).sort().at(-1)!;
+  const now = fact.at(-1)?.[0] ?? monthKey(new Date().toISOString());
+  const start = range === 'year' ? (fact[0]?.[0] && monthsBetween(fact[0][0], now) <= 3 ? fact[0][0] : addMonths(now, -3)) : first;
+  const end = range === 'year' ? addMonths(start, 12) : last;
   const n = Math.max(1, monthsBetween(start, end));
   const months = useMemo(() => Array.from({ length: n + 1 }, (_, i) => addMonths(start, i)), [start, n]);
-  const max = Math.max(...plan.map(p => p[1]), ...fact.map(p => p[1]), ...baseline.map(p => p[1]), 1);
+  const S = useMemo(() => ({ plan: clip(plan, start, end), fact: clip(fact, start, end), forecast: clip(forecast, start, end), base: clip(baseline, start, end) }), [plan, fact, forecast, baseline, start, end]);
+  const vals = [...S.plan, ...S.fact, ...S.forecast, ...S.base].map(p => p[1]);
+  const max = Math.max(...vals, 1), min = range === 'year' ? Math.max(0, Math.min(...vals) * 0.96) : 0;
   const x = (m: string) => PAD.l + (monthsBetween(start, m) / n) * (W - PAD.l - PAD.r);
-  const y = (v: number) => PAD.t + (1 - v / max) * (H - PAD.t - PAD.b);
+  const y = (v: number) => PAD.t + (1 - (v - min) / (max - min || 1)) * (H - PAD.t - PAD.b);
   const path = (s: Series) => s.map((p, i) => `${i ? 'L' : 'M'}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join('');
-  const baseLine: Series = months.map(m => [m, valueAt(baseline, m)] as [string, number | null]).filter((p): p is [string, number] => p[1] != null);
 
   const [hover, setHover] = useState<string | null>(null);
   const svg = useRef<SVGSVGElement>(null);
   const onMove = (e: React.PointerEvent) => {
     const r = svg.current!.getBoundingClientRect();
     const t = ((e.clientX - r.left) / r.width * W - PAD.l) / (W - PAD.l - PAD.r);
-    setHover(months[Math.round(Math.min(1, Math.max(0, t)) * n)]);
+    const m = months[Math.round(Math.min(1, Math.max(0, t)) * n)];
+    if (m !== hover) { setHover(m); haptic(); }
   };
 
-  // подписи оси: начало и январи (январь вплотную к началу не подписываем — налезет)
-  const ticks = months.filter(m => m === start || (m.endsWith('-01') && monthsBetween(start, m) >= 5));
-  const rows = hover ? [
-    { name: 'План', color: 'var(--chart-plan)', v: valueAt(plan, hover) },
-    { name: 'Факт', color: 'var(--chart-fact)', v: valueAt(fact, hover) },
-    { name: 'Прогноз', color: 'var(--chart-fact)', v: fact.some(f => f[0] === hover) ? null : valueAt(forecast, hover) },
-    { name: 'Как сейчас', color: 'var(--chart-base)', v: valueAt(baseLine, hover) },
-  ].filter(r => r.v != null) : [];
+  // главное одной фразой: факт против плана в последнем известном месяце
+  const factNow = fact.at(-1)?.[1];
+  const planNow = fact.length ? valueAt(plan, fact.at(-1)![0]) : null;
+  const diff = factNow != null && planNow != null ? factNow - planNow : null;
+
+  // ось: числа без единиц, единица — одна, над осью; иначе «2,09 млн ₽» не помещается слева и обрезается
+  const unit = max >= 1e6 ? 1e6 : 1e3;
+  const axis = (v: number) => (v / unit).toLocaleString('ru-RU', { maximumFractionDigits: unit === 1e6 ? (max - min < 1e6 ? 2 : 1) : 0 });
+  const step = range === 'year' ? 3 : 12;
+  // подписи месяцев: каждый третий месяц года или январи всего плана; слишком близкие к предыдущей — пропускаем
+  const ticks: string[] = [];
+  for (const m of months.filter((m, i) => m === start || (range === 'year' ? i % step === 0 : m.endsWith('-01')))) {
+    if (!ticks.length || x(m) - x(ticks[ticks.length - 1]) >= 46) ticks.push(m);
+  }
+  const grid = [0, 0.5, 1].map(f => min + (max - min) * f);
+  const shown = hover ?? now;
+  const rows = [
+    { name: 'План', color: 'var(--chart-plan)', v: valueAt(plan, shown) },
+    { name: fact.some(f => f[0] === shown) ? 'Факт' : 'Прогноз', color: 'var(--chart-fact)', v: valueAt(fact, shown) ?? valueAt(forecast, shown) },
+    { name: 'Минималки', color: 'var(--chart-base)', v: valueAt(baseline, shown) },
+  ].filter(r => r.v != null);
 
   return (
     <div>
-      <div className="mb-2 flex flex-wrap gap-x-3 gap-y-1 text-[12px] font-semibold text-muted">
-        <Legend color="var(--chart-plan)">План</Legend>
-        <Legend color="var(--chart-fact)">Факт</Legend>
-        <Legend color="var(--chart-fact)" dashed>Прогноз</Legend>
-        <Legend color="var(--chart-base)" dashed>Только минималки</Legend>
+      {diff != null && (
+        <p className={`mb-3 text-[15px] leading-snug ${diff <= 0 ? 'text-pos' : 'text-warn'}`}>
+          {Math.abs(diff) < 1000 ? 'Идёте точно по плану.' : diff < 0 ? <>Долг на <Money value={-diff} className="font-semibold" /> меньше, чем по плану, — вы впереди.</> : <>Долг на <Money value={diff} className="font-semibold" /> больше, чем по плану.</>}
+        </p>
+      )}
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex rounded-[12px] bg-surface-2 p-[3px] text-[13px] font-medium" role="tablist">
+          {(['year', 'all'] as const).map(r => (
+            <button key={r} type="button" role="tab" aria-selected={range === r} onClick={() => { setRange(r); setHover(null); }}
+              className={`relative rounded-[9px] px-3.5 py-1.5 ${range === r ? 'text-ink' : 'text-muted'}`}>
+              {range === r && <motion.span layoutId="debt-range" className="absolute inset-0 rounded-[9px] bg-surface shadow-[0_1px_3px_rgba(10,36,51,.12)]" transition={spring} />}
+              <span className="relative">{r === 'year' ? 'Год' : 'Весь план'}</span>
+            </button>
+          ))}
+        </div>
+        <span className="text-[12.5px] text-muted first-letter:uppercase">{monthName(shown)}</span>
       </div>
-      <div className="relative">
+      {/* значения месяца под пальцем — крупно, над графиком, чтобы палец их не закрывал */}
+      <div className="mb-2 grid grid-cols-3 gap-2">
+        {rows.map(r => (
+          <div key={r.name} className="min-w-0 rounded-[14px] bg-surface-2/70 px-2.5 py-2">
+            <div className="flex items-center gap-1.5 truncate text-[11.5px] text-muted"><span className="size-2 shrink-0 rounded-full" style={{ background: r.color }} />{r.name}</div>
+            <div className="mt-0.5 truncate text-[15px] font-semibold tabular-nums">{compact(r.v!)}</div>
+          </div>
+        ))}
+      </div>
+      <div className="relative" data-noswipe>
         <svg ref={svg} viewBox={`0 0 ${W} ${H}`} className="w-full touch-none select-none" role="img"
-          aria-label={`Общий долг: план ${rubShort(plan.at(-1)?.[1] ?? 0)} к ${end}, сейчас ${rubShort(fact.at(-1)?.[1] ?? 0)}`}
-          onPointerDown={onMove} onPointerMove={e => e.buttons || e.pointerType === 'mouse' ? onMove(e) : undefined} onPointerLeave={() => setHover(null)}>
-          {[0.25, 0.5, 0.75, 1].map(f => (
-            <g key={f}>
-              <line x1={PAD.l} x2={W - PAD.r} y1={y(max * f)} y2={y(max * f)} stroke="var(--line)" strokeWidth={1} />
-              <text x={W - PAD.r} y={y(max * f) - 3} textAnchor="end" fontSize={9.5} fill="var(--faint)">{rubShort(max * f)}</text>
+          aria-label={`Общий долг: план ${rubShort(plan.at(-1)?.[1] ?? 0)} к ${monthName(last)}, сейчас ${rubShort(factNow ?? 0)}`}
+          onPointerDown={e => { (e.target as Element).setPointerCapture?.(e.pointerId); onMove(e); }} onPointerMove={e => (e.buttons || e.pointerType === 'mouse' ? onMove(e) : undefined)}>
+          {grid.map(v => (
+            <g key={v}>
+              <line x1={PAD.l} x2={W - PAD.r} y1={y(v)} y2={y(v)} stroke="var(--line)" strokeWidth={1} />
+              <text x={PAD.l - 7} y={y(v) + 4} textAnchor="end" fontSize={12} fill="var(--muted)" style={{ fontFamily: 'var(--font-sans)' }}>{axis(v)}</text>
             </g>
           ))}
-          <line x1={PAD.l} x2={W - PAD.r} y1={y(0)} y2={y(0)} stroke="var(--line)" strokeWidth={1.5} />
-          {ticks.map(m => <text key={m} x={x(m)} y={H - 6} fontSize={9.5} textAnchor={m === start ? 'start' : 'middle'} fill="var(--faint)">{monthShort(m)}</text>)}
-          <path d={path(baseLine)} fill="none" stroke="var(--chart-base)" strokeWidth={1.5} strokeDasharray="4 4" />
-          <path d={path(plan)} fill="none" stroke="var(--chart-plan)" strokeWidth={2} strokeLinejoin="round" />
-          <path d={path(forecast)} fill="none" stroke="var(--chart-fact)" strokeWidth={2} strokeDasharray="5 4" opacity={0.8} />
-          <path d={path(fact)} fill="none" stroke="var(--chart-fact)" strokeWidth={2.5} strokeLinejoin="round" />
-          {fact.map(p => <circle key={p[0]} cx={x(p[0])} cy={y(p[1])} r={3.5} fill="var(--chart-fact)" stroke="var(--surface)" strokeWidth={2} />)}
-          {hover && <line x1={x(hover)} x2={x(hover)} y1={PAD.t} y2={y(0)} stroke="var(--muted)" strokeWidth={1} />}
+          <text x={2} y={12} fontSize={11.5} fill="var(--faint)" style={{ fontFamily: 'var(--font-sans)' }}>{unit === 1e6 ? 'млн ₽' : 'тыс. ₽'}</text>
+          {ticks.map(m => <text key={m} x={x(m)} y={H - 8} fontSize={12} textAnchor={m === start ? 'start' : x(m) > W - PAD.r - 20 ? 'end' : 'middle'} fill="var(--muted)" style={{ fontFamily: 'var(--font-sans)' }}>{monthShort(m)}</text>)}
+          <motion.g key={range} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3, ease: ease.out }}>
+            <path d={path(S.base)} fill="none" stroke="var(--chart-base)" strokeWidth={2} strokeDasharray="5 5" strokeLinecap="round" />
+            <path d={path(S.plan)} fill="none" stroke="var(--chart-plan)" strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" />
+            <path d={path(S.forecast)} fill="none" stroke="var(--chart-fact)" strokeWidth={2.5} strokeDasharray="6 5" strokeLinecap="round" opacity={0.85} />
+            <motion.path d={path(S.fact)} fill="none" stroke="var(--chart-fact)" strokeWidth={3.5} strokeLinejoin="round" strokeLinecap="round"
+              initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.8, ease: ease.out, delay: 0.1 }} />
+            {S.fact.filter(p => fact.some(f => f[0] === p[0])).map(p => <circle key={p[0]} cx={x(p[0])} cy={y(p[1])} r={4.5} fill="var(--chart-fact)" stroke="var(--surface)" strokeWidth={2} />)}
+          </motion.g>
+          <line x1={x(shown)} x2={x(shown)} y1={PAD.t} y2={H - PAD.b} stroke="var(--ink)" strokeOpacity={0.35} strokeWidth={1} strokeDasharray="3 3" />
+          {rows.map(r => <circle key={r.name} cx={x(shown)} cy={y(r.v!)} r={4} fill={r.color} stroke="var(--surface)" strokeWidth={1.5} />)}
         </svg>
-        {hover && rows.length > 0 && (
-          <div className="pointer-events-none absolute top-0 rounded-xl bg-ink px-3 py-2 text-[12px] text-bg shadow-lg"
-            style={{ left: x(hover) / W > 0.55 ? undefined : `${(x(hover) / W) * 100 + 3}%`, right: x(hover) / W > 0.55 ? `${(1 - x(hover) / W) * 100 + 3}%` : undefined }}>
-            <div className="mb-1 font-bold capitalize">{monthName(hover)}</div>
-            {rows.map(r => <div key={r.name} className="flex justify-between gap-3"><span className="opacity-75">{r.name}</span><b>{rub(r.v!)}</b></div>)}
-          </div>
-        )}
       </div>
+      <p className="mt-1 text-[12px] text-faint">Ведите пальцем по графику — значения месяца сверху. Пунктир серый — если платить только минимальные платежи.</p>
+      <span className="sr-only">{rows.map(r => `${r.name}: ${rub(r.v!)}`).join(', ')}</span>
     </div>
-  );
-}
-
-function Legend({ color, dashed, children }: { color: string; dashed?: boolean; children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <svg width="18" height="6" aria-hidden><line x1="1" x2="17" y1="3" y2="3" stroke={color} strokeWidth={2.5} strokeDasharray={dashed ? '4 3' : undefined} strokeLinecap="round" /></svg>
-      {children}
-    </span>
   );
 }
