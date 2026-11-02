@@ -1,8 +1,9 @@
-import { animate, AnimatePresence, motion, useDragControls, useMotionValue, type PanInfo } from 'motion/react';
+import { animate, AnimatePresence, motion, useMotionValue } from 'motion/react';
 import { CarTaxiFront, Cigarette, Coffee, Pill, Repeat, Sandwich, Scissors, ShoppingBag, ShoppingBasket, TramFront, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { num } from '../domain/money';
 import type { CategoryId } from '../domain/types';
+import { usePan } from './motion';
 
 /* ---------- Деньги ---------- */
 
@@ -91,37 +92,42 @@ export function Chip({ children, tone = 'neutral', className = '' }: { children:
 export function Sheet({ open, onClose, title, subtitle, children, footer, compact, action, bare }: {
   open: boolean; onClose: () => void; title: string; subtitle?: ReactNode; children: ReactNode; footer?: ReactNode; compact?: boolean; action?: ReactNode; bare?: boolean;
 }) {
-  const controls = useDragControls();
   const fade = useMotionValue(1);
+  const pull = useMotionValue(0);
   useEffect(() => {
     if (!open) return;
     fade.set(1);
+    pull.set(0);
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
-  }, [open, onClose, fade]);
+  }, [open, onClose, fade, pull]);
 
-  // закрыть можно и коротким броском вниз — не нужно тянуть далеко (apple-design, animate: drag to dismiss)
-  const end = (_: unknown, info: PanInfo) => {
-    if (info.offset.y > 110 || (info.velocity.y > 320 && info.offset.y > 12)) onClose();
-    else animate(fade, 1, { duration: 0.2 });
-  };
+  // за шапку лист тянется вниз; закрыть можно и коротким броском — не нужно тянуть далеко (apple-design: drag to
+  // dismiss). Жест — usePan, а не drag из motion: тот перемерял бы лист при каждой перерисовке (каждой цифре траты)
+  const pan = usePan({
+    axis: 'y',
+    onMove: d => { pull.set(d > 0 ? d * 0.9 : d * 0.04); fade.set(1 - Math.min(0.85, Math.max(0, d) / 520)); },
+    onEnd: (d, v) => {
+      if (d > 110 || (v > 320 && d > 12)) onClose();
+      else { animate(pull, 0, { type: 'spring', bounce: 0, duration: 0.35 }); animate(fade, 1, { duration: 0.2 }); }
+    },
+  });
 
   return (
     <AnimatePresence>
       {open && (
         <motion.div className="fixed inset-0 z-50 flex items-end justify-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.2 } }} transition={{ duration: 0.25 }}>
           <motion.div className="absolute inset-0 bg-[rgba(4,14,22,.5)] backdrop-blur-[4px]" style={{ opacity: fade }} onClick={onClose} />
-          <motion.div role="dialog" aria-modal="true" aria-label={title}
-            drag="y" dragListener={false} dragControls={controls} dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0.04, bottom: 0.9 }}
-            onDrag={(_, i) => fade.set(1 - Math.min(0.85, Math.max(0, i.offset.y) / 520))} onDragEnd={end}
-            className={`relative flex w-full max-w-md flex-col rounded-t-[30px] border-t border-line bg-bg shadow-[0_-18px_48px_-24px_rgba(4,14,22,.55)] ${compact ? 'max-h-[78dvh]' : 'max-h-[94dvh]'}`}
+          <motion.div role="dialog" aria-modal="true" aria-label={title} className="relative w-full max-w-md"
             initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%', transition: { duration: 0.26, ease: [0.32, 0.72, 0, 1] } }}
             transition={{ duration: 0.45, ease: [0.32, 0.72, 0, 1] }}>
+          <motion.div style={{ y: pull }}
+            className={`flex flex-col rounded-t-[30px] border-t border-line bg-bg shadow-[0_-18px_48px_-24px_rgba(4,14,22,.55)] ${compact ? 'max-h-[78dvh]' : 'max-h-[94dvh]'}`}>
             {/* за шапку лист тянется вниз — как в iOS */}
-            <div onPointerDown={e => controls.start(e)} className="cursor-grab touch-none select-none active:cursor-grabbing">
+            <div {...pan} className="cursor-grab touch-none select-none active:cursor-grabbing">
               <div className="mx-auto mt-2.5 h-[5px] w-10 rounded-full bg-line" />
               <div className="flex items-start justify-between gap-3 px-5 pt-3 pb-3">
                 <div className="min-w-0">
@@ -138,6 +144,7 @@ export function Sheet({ open, onClose, title, subtitle, children, footer, compac
               ? <div className="flex min-h-0 flex-1 flex-col">{children}</div>
               : <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-6">{children}</div>}
             {footer ? <div className="pb-safe border-t border-line bg-bg px-5 pt-3"><div className="pb-3">{footer}</div></div> : !bare && <div className="pb-safe" />}
+          </motion.div>
           </motion.div>
         </motion.div>
       )}
@@ -209,11 +216,13 @@ export function AmountInput({ value, onChange, autoFocus, size = 'lg', label = '
 
 export function Segmented<T extends string>({ value, options, onChange }: { value: T; options: { id: T; label: ReactNode }[]; onChange: (v: T) => void }) {
   return (
-    <div className="flex rounded-[14px] bg-surface-2 p-[3px]">
+    <div className="relative flex rounded-[14px] bg-surface-2 p-[3px]">
+      {/* подложка выбранного — CSS-переход по transform: общая layout-анимация motion обходила бы все элементы приложения */}
+      <span aria-hidden="true" className="pointer-events-none absolute inset-y-[3px] left-[3px] rounded-[11px] border border-line bg-surface transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none"
+        style={{ width: `calc((100% - 6px) / ${options.length})`, transform: `translateX(${Math.max(0, options.findIndex(o => o.id === value)) * 100}%)` }} />
       {options.map(o => (
         <button key={o.id} type="button" onClick={() => onChange(o.id)}
           className={`relative flex-1 rounded-[11px] px-2 py-2 text-[13.5px] font-medium transition-colors ${o.id === value ? 'text-ink' : 'text-muted'}`}>
-          {o.id === value && <motion.span layoutId={`seg-${options.map(x => x.id).join('')}`} className="absolute inset-0 rounded-[11px] border border-line bg-surface" transition={{ type: 'spring', stiffness: 500, damping: 40 }} />}
           <span className="relative">{o.label}</span>
         </button>
       ))}

@@ -1,7 +1,6 @@
 // Месяц на «Платежах»: каждый день наполняется водой по деньгам на карте и в резерве,
 // под календарём — одна линия уровня с выводом словами. Одни данные, два взгляда.
-import { motion } from 'motion/react';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { LOW_WATER } from '../domain/cashflow';
 import { fromKey, weekday } from '../domain/dates';
 import { num } from '../domain/money';
@@ -28,11 +27,11 @@ export function short(n: number): string {
 
 const WAVE = 'M0 4 Q7.5 1 15 4 T30 4 T45 4 T60 4 T75 4 T90 4 T105 4 T120 4';
 
-export function MonthGrid({ month, days, top, now, selected, onSelect, onSwipe, onOpen, opened }: {
+export function MonthGrid({ month, days, top, now, selected, onSelect, onSwipe, onOpen }: {
   month: string; days: DayMoney[]; top: number; now: string; selected: string;
   onSelect: (d: string) => void; onSwipe: (dir: 1 | -1) => void;
-  /** нажатие на день — раскрыть его карточку прямо из ячейки */
-  onOpen?: (d: string) => void; opened?: string | null;
+  /** нажатие на день — раскрыть его карточку прямо из ячейки: from — где ячейка на экране */
+  onOpen?: (d: string, from: DOMRect) => void;
 }) {
   const lead = (fromKey(`${month}-01`).getDay() + 6) % 7;
   const touch = useRef<number | null>(null);
@@ -42,6 +41,10 @@ export function MonthGrid({ month, days, top, now, selected, onSelect, onSwipe, 
   const ends = useRef({ month, n: 0 });
   if (ends.current.month !== month) ends.current = { month, n: 0 };
   const fills = days.filter(d => d.total != null).length;
+  // обработчик нажатия — один и тот же между перерисовками, иначе запомненные ячейки перерисовывались бы все
+  const cb = useRef({ onSelect, onOpen });
+  cb.current = { onSelect, onOpen };
+  const tap = useCallback((date: string, from: DOMRect) => { cb.current.onSelect(date); cb.current.onOpen?.(date, from); }, []);
   return (
     <div onTouchStart={e => { touch.current = e.touches[0].clientX; }}
       onTouchEnd={e => {
@@ -56,46 +59,48 @@ export function MonthGrid({ month, days, top, now, selected, onSelect, onSwipe, 
       <div className={`mt-1.5 grid grid-cols-7 gap-1 ${filled === month ? 'sc-once' : ''}`}
         onAnimationEnd={e => { if (e.animationName === 'sc-fill' && ++ends.current.n >= fills) setFilled(month); }}>
         {Array.from({ length: lead }, (_, i) => <span key={`e${i}`} />)}
-        {days.map((d, i) => {
-          const n = Number(d.date.slice(8));
-          const on = d.date === selected, isToday = d.date === now;
-          const low = d.total != null && d.total < LOW_WATER;
-          const level = d.total == null ? 0 : Math.max(10, Math.min(80, (Math.max(0, d.total) / (top || 1)) * 80));
-          const aria = [`${n}`, !isWorkday(d.date) && 'выходной', d.out > 0 && `уходит ${num(d.out)} ₽${d.paid ? ', оплачено' : ''}`,
-            d.in > 0 && `приходит ${num(d.in)} ₽`, d.total != null && `на карте и в резерве ${num(d.total)} ₽`].filter(Boolean).join(', ');
-          return (
-            <button key={d.date} type="button" onClick={() => { onSelect(d.date); onOpen?.(d.date); }} aria-label={aria} aria-pressed={on}
-              className="relative flex h-[54px] flex-col items-start gap-px overflow-hidden rounded-t-[16px] rounded-b-[6px] border border-line bg-surface px-[5px] pt-1 text-left [text-shadow:0_0_3px_var(--surface),0_0_2px_var(--surface)]">
-              {/* опора для раскрытия: карточка дня вырастает из этой ячейки и возвращается в неё */}
-              {opened !== d.date && <motion.span layoutId={`day-${d.date}`} className="absolute inset-0 rounded-t-[15px] rounded-b-[5px] bg-surface" transition={{ type: 'spring', bounce: 0.15, duration: 0.45 }} />}
-              {level > 0 && (
-                <span className="sc-fill absolute inset-x-0 bottom-0" style={{
-                  height: `${level}%`, animationDelay: `${0.1 + i * 0.03}s`, opacity: d.past ? 0.5 : 1,
-                  background: `linear-gradient(180deg, var(${low ? '--water-low-a' : '--water-a'}), var(${low ? '--water-low-b' : '--water-b'}))`,
-                }}>
-                  <svg className="sc-wave absolute -top-1 left-0 h-1.5 w-[200%]" viewBox="0 0 120 8" preserveAspectRatio="none" aria-hidden="true">
-                    <path d={WAVE} fill="none" strokeWidth="1.3" style={{ stroke: low ? 'var(--mark-out)' : 'var(--sea)' }} />
-                  </svg>
-                  <span className="absolute -top-px left-[34%] h-0.5 w-[34%] rounded-full bg-[linear-gradient(90deg,transparent,rgba(255,150,100,.95),transparent)]" />
-                </span>
-              )}
-              <span className={`relative text-[13px] leading-tight ${on || isToday ? 'font-semibold' : 'font-medium'} ${isToday ? 'text-sea' : isWorkday(d.date) ? '' : 'text-faint'}`}>{n}</span>
-              {d.out > 0 && <span className={`relative text-[10.5px] leading-tight font-semibold tracking-[-0.01em] ${d.paid ? 'text-muted line-through' : 'text-neg'}`}>{short(-d.out)}</span>}
-              {d.in > 0 && <span className="relative text-[10.5px] leading-tight font-semibold tracking-[-0.01em] text-pos">{short(d.in)}</span>}
-              {isToday && !on && <span className="absolute inset-0 rounded-t-[14px] rounded-b-[4px] ring-[1.5px] ring-sea ring-inset" />}
-              {on && (
-                <>
-                  <span className="absolute inset-0 rounded-t-[14px] rounded-b-[4px] ring-2 ring-ink ring-inset" />
-                  {level > 0 && <span key={selected} className="sc-ring absolute left-1/2 -ml-3 h-2 w-6 rounded-[50%] border-[1.5px] border-white" style={{ bottom: `calc(${level}% - 4px)` }} />}
-                </>
-              )}
-            </button>
-          );
-        })}
+        {days.map((d, i) => <DayCell key={d.date} d={d} i={i} top={top} on={d.date === selected} isToday={d.date === now} onTap={tap} />)}
       </div>
     </div>
   );
 }
+
+/** Ячейка дня. Запомнена (memo): при нажатии на день перерисовываются две ячейки — старый и новый выбор, а не все 30 */
+const DayCell = memo(function DayCell({ d, i, top, on, isToday, onTap }: {
+  d: DayMoney; i: number; top: number; on: boolean; isToday: boolean; onTap: (date: string, from: DOMRect) => void;
+}) {
+  const n = Number(d.date.slice(8));
+  const low = d.total != null && d.total < LOW_WATER;
+  const level = d.total == null ? 0 : Math.max(10, Math.min(80, (Math.max(0, d.total) / (top || 1)) * 80));
+  const aria = [`${n}`, !isWorkday(d.date) && 'выходной', d.out > 0 && `уходит ${num(d.out)} ₽${d.paid ? ', оплачено' : ''}`,
+    d.in > 0 && `приходит ${num(d.in)} ₽`, d.total != null && `на карте и в резерве ${num(d.total)} ₽`].filter(Boolean).join(', ');
+  return (
+    <button type="button" onClick={e => onTap(d.date, e.currentTarget.getBoundingClientRect())} aria-label={aria} aria-pressed={on}
+      className="relative flex h-[54px] flex-col items-start gap-px overflow-hidden rounded-t-[16px] rounded-b-[6px] border border-line bg-surface px-[5px] pt-1 text-left [text-shadow:0_0_3px_var(--surface),0_0_2px_var(--surface)]">
+      {level > 0 && (
+        <span className="sc-fill absolute inset-x-0 bottom-0" style={{
+          height: `${level}%`, animationDelay: `${0.1 + i * 0.03}s`, opacity: d.past ? 0.5 : 1,
+          background: `linear-gradient(180deg, var(${low ? '--water-low-a' : '--water-a'}), var(${low ? '--water-low-b' : '--water-b'}))`,
+        }}>
+          <svg className="sc-wave absolute -top-1 left-0 h-1.5 w-[200%]" viewBox="0 0 120 8" preserveAspectRatio="none" aria-hidden="true">
+            <path d={WAVE} fill="none" strokeWidth="1.3" style={{ stroke: low ? 'var(--mark-out)' : 'var(--sea)' }} />
+          </svg>
+          <span className="absolute -top-px left-[34%] h-0.5 w-[34%] rounded-full bg-[linear-gradient(90deg,transparent,rgba(255,150,100,.95),transparent)]" />
+        </span>
+      )}
+      <span className={`relative text-[13px] leading-tight ${on || isToday ? 'font-semibold' : 'font-medium'} ${isToday ? 'text-sea' : isWorkday(d.date) ? '' : 'text-faint'}`}>{n}</span>
+      {d.out > 0 && <span className={`relative text-[10.5px] leading-tight font-semibold tracking-[-0.01em] ${d.paid ? 'text-muted line-through' : 'text-neg'}`}>{short(-d.out)}</span>}
+      {d.in > 0 && <span className="relative text-[10.5px] leading-tight font-semibold tracking-[-0.01em] text-pos">{short(d.in)}</span>}
+      {isToday && !on && <span className="absolute inset-0 rounded-t-[14px] rounded-b-[4px] ring-[1.5px] ring-sea ring-inset" />}
+      {on && (
+        <>
+          <span className="absolute inset-0 rounded-t-[14px] rounded-b-[4px] ring-2 ring-ink ring-inset" />
+          {level > 0 && <span className="sc-ring absolute left-1/2 -ml-3 h-2 w-6 rounded-[50%] border-[1.5px] border-white" style={{ bottom: `calc(${level}% - 4px)` }} />}
+        </>
+      )}
+    </button>
+  );
+});
 
 /** Линия денег по дням: крупно, около шести дней на экране, остальное листается вбок. Между днями — плавные
  *  S-образные переходы с горизонтальными касательными в центре дня (без ступенек и без ложных выбросов). Ниже нуля —
@@ -126,7 +131,11 @@ export function LevelChart({ days, selected, onSelect }: {
     el.dataset.ready = '1';
     return true;
   };
-  useLayoutEffect(() => { center(!!scroller.current?.dataset.ready); }, [sel]);
+  // в кадре анимации, а не посреди обновления: иначе браузер пересчитывает раскладку страницы дважды
+  useLayoutEffect(() => {
+    const id = requestAnimationFrame(() => center(!!scroller.current?.dataset.ready));
+    return () => cancelAnimationFrame(id);
+  }, [sel]);
   // вкладка собрана скрытой (display:none) — ширины ещё нет; как только её показали, сразу встаём на выбранный день.
   // ResizeObserver срабатывает после раскладки, до отрисовки — рывка не видно
   useEffect(() => {

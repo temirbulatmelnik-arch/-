@@ -142,8 +142,7 @@ export function Budget() {
             const on = cat === r.id;
             return (
               <motion.button key={r.id} variants={item} type="button" onClick={() => setCat(on ? null : r.id)} whileTap={{ scale: 0.985 }}
-                className={`relative flex w-full items-center gap-3 px-4 py-3 text-left transition-opacity ${cat && !on ? 'opacity-45' : ''}`}>
-                {on && <motion.span layoutId="cat-on" className="absolute inset-0 bg-sea/8" transition={spring} />}
+                className={`relative flex w-full items-center gap-3 px-4 py-3 text-left transition-[opacity,background-color] duration-200 ${on ? 'bg-sea/8' : ''} ${cat && !on ? 'opacity-45' : ''}`}>
                 <CatIcon id={r.id} className="relative size-9" />
                 <span className="relative min-w-0 flex-1">
                   <span className="flex items-baseline justify-between gap-2">
@@ -179,8 +178,7 @@ export function Budget() {
         <div className="no-scrollbar mt-2.5 flex gap-2 overflow-x-auto px-4">
           {SOURCES.map(s => (
             <motion.button key={s.id} type="button" whileTap={{ scale: 0.95 }} onClick={() => setSource(s.id)}
-              className={`relative shrink-0 rounded-full border px-3.5 py-2 text-[13px] font-medium ${source === s.id ? 'border-transparent text-bg' : 'border-line text-muted'}`}>
-              {source === s.id && <motion.span layoutId="spend-source" className="absolute inset-0 rounded-full bg-ink" transition={spring} />}
+              className={`relative shrink-0 rounded-full border px-3.5 py-2 text-[13px] font-medium transition-colors duration-200 ${source === s.id ? 'border-transparent bg-ink text-bg' : 'border-line text-muted'}`}>
               <span className="relative">{s.label}</span>
             </motion.button>
           ))}

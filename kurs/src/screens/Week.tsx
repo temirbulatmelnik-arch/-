@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { CardStack, type StackCard } from '../components/CardStack';
 import { DayRing } from '../components/DayRing';
-import { bridgeControl, lampAt, SkyButton, WeekScene } from '../components/Petersburg';
+import { bridgeControl, lampAt, setSceneHidden, SkyButton, WeekScene } from '../components/Petersburg';
 import { haptic } from '../components/haptics';
 import { Roll, spring } from '../components/motion';
 import { runQuick } from '../components/TabBar';
@@ -85,7 +85,7 @@ export function Week() {
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
-    const pause = new IntersectionObserver(([e]) => scene.classList.toggle('sc-paused', !e.isIntersecting));
+    const pause = new IntersectionObserver(([e]) => { scene.classList.toggle('sc-paused', !e.isIntersecting); setSceneHidden(!e.isIntersecting); });
     pause.observe(scene);
     return () => pause.disconnect();
   }, []);

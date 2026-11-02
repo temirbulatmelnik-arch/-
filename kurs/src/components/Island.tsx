@@ -47,7 +47,7 @@ export function Island({ show }: { show: boolean }) {
       {show && (
         <>
           {open && <motion.div key="dim" className="fixed inset-0 z-[44] bg-black/25 backdrop-blur-[2px]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setOpen(false)} />}
-          <motion.div key="island" layout role="button" tabIndex={0} aria-expanded={open} aria-label={open ? 'Свернуть' : `Сегодня ${over ? 'перерасход' : 'можно'} ${Math.round(Math.abs(b.left))} ₽. Раскрыть`}
+          <motion.div key="island" layout layoutDependency={open} role="button" tabIndex={0} aria-expanded={open} aria-label={open ? 'Свернуть' : `Сегодня ${over ? 'перерасход' : 'можно'} ${Math.round(Math.abs(b.left))} ₽. Раскрыть`}
             onClick={() => { if (!open) { setOpen(true); haptic(); } }} onKeyDown={e => e.key === 'Enter' && setOpen(!open)}
             drag={open ? 'y' : false} dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0.3, bottom: 0.05 }} onDragEnd={(_, i) => { if (i.offset.y < -24 || i.velocity.y < -300) setOpen(false); }}
             initial={{ opacity: 0, y: -16, scale: 0.92 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -12, scale: 0.94, transition: { duration: 0.16 } }}
@@ -55,14 +55,14 @@ export function Island({ show }: { show: boolean }) {
             className={`fixed left-0 right-0 top-[calc(env(safe-area-inset-top)+22px)] z-[45] mx-auto overflow-hidden bg-[#06141d] text-white shadow-[0_18px_40px_-18px_rgba(0,0,0,.7)] select-none ${open ? 'w-[min(92vw,392px)] cursor-grab' : 'w-fit cursor-pointer'}`}>
             <AnimatePresence mode="popLayout" initial={false}>
               {!open ? (
-                <motion.div key="pill" layout="position" initial={{ opacity: 0, filter: 'blur(4px)' }} animate={{ opacity: 1, filter: 'blur(0px)' }} exit={{ opacity: 0, filter: 'blur(4px)' }} transition={{ duration: 0.2 }}
+                <motion.div key="pill" layout="position" layoutDependency={open} initial={{ opacity: 0, filter: 'blur(4px)' }} animate={{ opacity: 1, filter: 'blur(0px)' }} exit={{ opacity: 0, filter: 'blur(4px)' }} transition={{ duration: 0.2 }}
                   className="flex h-11 items-center gap-2.5 pr-4 pl-2">
                   <MiniRing frac={frac} over={over} size={30} />
                   <span className={`font-display text-[16px] font-medium ${over ? 'text-[#ff9a70]' : ''}`}>{over && '−'}<Roll value={Math.abs(b.left)} /></span>
                   <span className="text-[12.5px] text-white/60">{over ? 'сверх дня' : 'сегодня'}</span>
                 </motion.div>
               ) : (
-                <motion.div key="panel" layout="position" initial={{ opacity: 0, filter: 'blur(6px)' }} animate={{ opacity: 1, filter: 'blur(0px)', transition: { delay: 0.08, duration: 0.25 } }} exit={{ opacity: 0, filter: 'blur(6px)', transition: { duration: 0.12 } }}
+                <motion.div key="panel" layout="position" layoutDependency={open} initial={{ opacity: 0, filter: 'blur(6px)' }} animate={{ opacity: 1, filter: 'blur(0px)', transition: { delay: 0.08, duration: 0.25 } }} exit={{ opacity: 0, filter: 'blur(6px)', transition: { duration: 0.12 } }}
                   className="px-5 pt-4 pb-4">
                   <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-white/25" />
                   <div className="flex items-center gap-4">

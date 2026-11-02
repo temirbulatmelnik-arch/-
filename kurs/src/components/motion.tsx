@@ -1,7 +1,7 @@
 // Набор движений «Курса»: пружины, отклик под пальцем, цифры-табло, свайп строк, листание страниц пальцем.
 // Всё на motion/react; «Уменьшение движения» на iPhone выключает сдвиги через MotionConfig в App.
-import { animate, AnimatePresence, motion, useDragControls, useMotionValue, useReducedMotion, useTransform, type HTMLMotionProps, type PanInfo } from 'motion/react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { animate, AnimatePresence, motion, useMotionValue, useReducedMotion, useTransform, type HTMLMotionProps } from 'motion/react';
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { num } from '../domain/money';
 import { haptic } from './haptics';
 
@@ -45,7 +45,9 @@ function Digit({ d }: { d: number }) {
   );
 }
 
-/** Сумма, разряды которой прокручиваются при изменении. Ключ разряда — место справа: новые тысячи выезжают слева */
+/** Сумма, разряды которой прокручиваются при изменении. Ключ разряда — место справа: новые тысячи выезжают слева.
+ *  Сдвиг разрядов (layout) перемеряется, только когда меняется их число (layoutDependency): иначе каждая перерисовка
+ *  заставляла бы motion обходить все анимированные элементы приложения */
 export function Roll({ value, className = '', sign, rub = true }: { value: number; className?: string; sign?: boolean; rub?: boolean }) {
   const v = Math.round(value);
   const text = num(Math.abs(v));
@@ -59,8 +61,8 @@ export function Roll({ value, className = '', sign, rub = true }: { value: numbe
           {chars.map((c, i) => {
             const key = chars.length - i;
             return /\d/.test(c)
-              ? <motion.span key={key} layout="position" initial={{ opacity: 0, y: '-20%' }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: '20%', transition: snappy }} transition={soft}><Digit d={Number(c)} /></motion.span>
-              : <motion.span key={`s${key}`} layout="position" className="inline-block w-[0.22em]" />;
+              ? <motion.span key={key} layout="position" layoutDependency={chars.length} initial={{ opacity: 0, y: '-20%' }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: '20%', transition: snappy }} transition={soft}><Digit d={Number(c)} /></motion.span>
+              : <motion.span key={`s${key}`} layout="position" layoutDependency={chars.length} className="inline-block w-[0.22em]" />;
           })}
         </AnimatePresence>
       </span>
@@ -97,6 +99,61 @@ export function CountTo({ to, from, className = '', ms = 1000 }: { to: number; f
   );
 }
 
+/* ---------- Жест пальцем по одной оси ---------- */
+
+/**
+ * Перетаскивание по одной оси на обычных событиях указателя — вместо drag из motion. У motion каждый элемент с drag
+ * при любой перерисовке заново измеряет себя и обходит все анимированные элементы приложения (а вкладки живут
+ * сразу все) — отсюда подвисания списков и календаря. Здесь: направление решается по первым 8 px; чужое направление
+ * отдаём прокрутке страницы; после жеста нажатие (click) гасится, чтобы строка не открывалась.
+ */
+export function usePan({ axis, onMove, onEnd, accept }: {
+  axis: 'x' | 'y';
+  /** d — сдвиг пальца от начала жеста по своей оси */
+  onMove: (d: number) => void;
+  /** d — итоговый сдвиг, v — скорость, px/с */
+  onEnd: (d: number, v: number) => void;
+  /** начинать ли жест с этого места (например, не с календаря внутри страницы) */
+  accept?: (target: Element) => boolean;
+}) {
+  const st = useRef<{ x0: number; y0: number; id: number; lock: 'x' | 'y' | null; last: number; lastT: number; v: number } | null>(null);
+  const moved = useRef(false);
+  const onPointerDown = (e: ReactPointerEvent) => {
+    if ((e.pointerType === 'mouse' && e.button !== 0) || (accept && !accept(e.target as Element))) return;
+    st.current = { x0: e.clientX, y0: e.clientY, id: e.pointerId, lock: null, last: 0, lastT: e.timeStamp, v: 0 };
+    moved.current = false;
+  };
+  const onPointerMove = (e: ReactPointerEvent) => {
+    const s = st.current;
+    if (!s || e.pointerId !== s.id) return;
+    const dx = e.clientX - s.x0, dy = e.clientY - s.y0;
+    if (!s.lock) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      s.lock = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+      if (s.lock !== axis) { st.current = null; return; }
+      moved.current = true;
+      (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+    }
+    const d = axis === 'x' ? dx : dy;
+    const dt = e.timeStamp - s.lastT;
+    if (dt > 0) s.v = ((d - s.last) / dt) * 1000;
+    s.last = d; s.lastT = e.timeStamp;
+    onMove(d);
+  };
+  const finish = (e: ReactPointerEvent) => {
+    const s = st.current;
+    st.current = null;
+    if (!s || s.lock !== axis) return;
+    onEnd(s.last, e.timeStamp - s.lastT > 90 ? 0 : s.v);
+  };
+  // нажатие после жеста не считается нажатием
+  const onClickCapture = (e: ReactMouseEvent) => { if (moved.current) { moved.current = false; e.stopPropagation(); e.preventDefault(); } };
+  return { onPointerDown, onPointerMove, onPointerUp: finish, onPointerCancel: finish, onClickCapture };
+}
+
+/** сопротивление за краем, как резинка: за пределом сдвиг идёт с коэффициентом k */
+const rubber = (v: number, min: number, max: number, k: number) => (v < min ? min + (v - min) * k : v > max ? max + (v - max) * k : v);
+
 /* ---------- Свайп строки ---------- */
 
 export interface SwipeAction {
@@ -116,21 +173,29 @@ export function SwipeRow({ children, left, right = [], className = '', rowClass 
   const leftOpacity = useTransform(x, [0, 40, W], [0, 0.6, 1]);
   const rightOpacity = useTransform(x, [-W, -40, 0], [1, 0.6, 0]);
   // после свайпа — пружина с инерцией пальца (apple-design: передать скорость, лёгкий отскок)
-  const settle = (to: number) => animate(x, to, fling);
+  const settle = (to: number, velocity = 0) => animate(x, to, { ...fling, velocity });
   // щелчок, когда свайп дошёл до порога действия — отпустите, и оно сработает
   const armed = useRef(false);
-  const drag = (_: unknown, info: PanInfo) => {
-    const on = (!!left && info.offset.x > W * 1.6) || (right.length > 0 && info.offset.x < -max - 90);
-    if (on !== armed.current) { armed.current = on; if (on) haptic(); }
-  };
-  const end = (_: unknown, info: PanInfo) => {
-    armed.current = false;
-    const dx = info.offset.x, vx = info.velocity.x;
-    if (left && (dx > W * 1.6 || (dx > W * 0.6 && vx > 500))) { settle(0); left.onAction(); return; }
-    if (right.length && (dx < -max - 90)) { settle(0); right[right.length - 1].onAction(); return; }
-    if (right.length && (dx < -max / 2 || vx < -500)) { settle(-max); return; }
-    settle(0);
-  };
+  const from = useRef(0);
+  const lo = right.length ? -max - 120 : 0, hi = left ? W * 2 : 0;
+  const pan = usePan({
+    axis: 'x',
+    onMove: d => {
+      if (d === 0) return;
+      const at = from.current + d;
+      x.set(rubber(at, lo, hi, 0.12));
+      const on = (!!left && at > W * 1.6) || (right.length > 0 && at < -max - 90);
+      if (on !== armed.current) { armed.current = on; if (on) haptic(); }
+    },
+    onEnd: (d, vx) => {
+      armed.current = false;
+      const at = from.current + d;
+      if (left && (at > W * 1.6 || (at > W * 0.6 && vx > 500))) { settle(0); left.onAction(); return; }
+      if (right.length && (at < -max - 90)) { settle(0); right[right.length - 1].onAction(); return; }
+      if (right.length && (at < -max / 2 || vx < -500)) { settle(-max, vx); return; }
+      settle(0, vx);
+    },
+  });
   return (
     <div data-noswipe className={`relative overflow-hidden select-none ${className}`}>
       {left && (
@@ -147,8 +212,8 @@ export function SwipeRow({ children, left, right = [], className = '', rowClass 
           ))}
         </motion.div>
       )}
-      <motion.div drag="x" dragDirectionLock dragConstraints={{ left: right.length ? -max - 120 : 0, right: left ? W * 2 : 0 }} dragElastic={0.12}
-        dragMomentum={false} onDrag={drag} onDragEnd={end} style={{ x, touchAction: 'pan-y' }} className={`relative ${rowClass}`}>
+      <motion.div {...pan} onPointerDown={e => { from.current = x.get(); x.stop(); pan.onPointerDown(e); }}
+        style={{ x, touchAction: 'pan-y' }} className={`relative ${rowClass}`}>
         {children}
       </motion.div>
     </div>
@@ -162,39 +227,59 @@ export interface PageDef<T extends string> { id: T; label: ReactNode; render: ()
 /** Сегменты сверху и страницы под ними. Свайп по странице листает соседнюю; элементы с data-noswipe (календарь,
  *  график) свайп не забирают — у них свой жест */
 export function Pager<T extends string>({ value, onChange, pages, className = '' }: { value: T; onChange: (v: T) => void; pages: PageDef<T>[]; className?: string }) {
-  const index = pages.findIndex(p => p.id === value);
+  const index = Math.max(0, pages.findIndex(p => p.id === value));
   const prev = useRef(index);
   const dir = index >= prev.current ? 1 : -1;
   useEffect(() => { prev.current = index; }, [index]);
-  const controls = useDragControls();
+  // страница собирается при первом показе и дальше живёт скрытой: переключение — только показать готовое
+  const [seen, setSeen] = useState<ReadonlySet<T>>(() => new Set([value]));
+  useEffect(() => { setSeen(s => (s.has(value) ? s : new Set(s).add(value))); }, [value]);
   const go = (i: number) => { if (i >= 0 && i < pages.length && i !== index) { haptic(); onChange(pages[i].id); } };
-  const end = (_: unknown, info: PanInfo) => {
-    if (info.offset.x < -70 || info.velocity.x < -450) go(index + 1);
-    else if (info.offset.x > 70 || info.velocity.x > 450) go(index - 1);
+  // новая страница чуть въезжает со стороны листания — WAAPI, мимо основного потока
+  const boxes = useRef(new Map<T, HTMLDivElement>());
+  const reduce = useReducedMotion();
+  const first = useRef(true);
+  useLayoutEffect(() => {
+    if (first.current) { first.current = false; return; }
+    boxes.current.get(value)?.animate(reduce ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: `translateX(${dir * 20}px)` }, { opacity: 1, transform: 'none' }],
+      { duration: 220, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' });
+  }, [value]);
+  // скрытая страница получает тот же элемент, что в прошлый раз, — React её не перерисовывает; видимая — свежая
+  const rendered = useRef(new Map<T, ReactNode>());
+  const content = (p: PageDef<T>) => {
+    let el = rendered.current.get(p.id);
+    if (p.id === value || el === undefined) { el = p.render(); rendered.current.set(p.id, el); }
+    return el;
   };
+  // свайп по странице: содержимое идёт за пальцем с сопротивлением, дальше порога — соседняя страница
+  const x = useMotionValue(0);
+  const pan = usePan({
+    axis: 'x',
+    accept: t => !t.closest('[data-noswipe],input,textarea,select'),
+    onMove: d => x.set(d * 0.18),
+    onEnd: (d, v) => {
+      animate(x, 0, spring);
+      if (d < -70 || v < -450) go(index + 1);
+      else if (d > 70 || v > 450) go(index - 1);
+    },
+  });
   return (
     <div className={className}>
-      <div className="relative mx-4 flex rounded-[15px] bg-surface-2 p-[3px]" role="tablist">
+      <div className="relative mx-4 grid rounded-[15px] bg-surface-2 p-[3px]" style={{ gridTemplateColumns: `repeat(${pages.length}, minmax(0, 1fr))` }} role="tablist">
+        {/* подложка выбранной страницы — CSS-переход по transform, без общей layout-анимации */}
+        <span aria-hidden="true" className="pointer-events-none absolute inset-y-[3px] left-[3px] rounded-[12px] bg-surface shadow-[0_1px_3px_rgba(10,36,51,.12)] transition-transform duration-[350ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none"
+          style={{ width: `calc((100% - 6px) / ${pages.length})`, transform: `translateX(${index * 100}%)` }} />
         {pages.map(p => (
-          <button key={p.id} type="button" role="tab" aria-selected={p.id === value} onClick={() => onChange(p.id)}
-            className={`relative flex-1 rounded-[12px] px-2 py-2 text-[13.5px] font-medium transition-colors ${p.id === value ? 'text-ink' : 'text-muted'}`}>
-            {p.id === value && <motion.span layoutId={`pager-${pages.map(x => x.id).join('')}`} className="absolute inset-0 rounded-[12px] bg-surface shadow-[0_1px_3px_rgba(10,36,51,.12)]" transition={spring} />}
-            <span className="relative">{p.label}</span>
+          <button key={p.id} type="button" role="tab" aria-selected={p.id === value} onClick={() => go(pages.indexOf(p))}
+            className={`relative rounded-[12px] px-2 py-2 text-[13.5px] font-medium transition-colors ${p.id === value ? 'text-ink' : 'text-muted'}`}>
+            {p.label}
           </button>
         ))}
       </div>
-      <motion.div drag="x" dragListener={false} dragControls={controls} dragConstraints={{ left: 0, right: 0 }} dragElastic={0.18} dragDirectionLock onDragEnd={end}
-        onPointerDown={e => { if (!(e.target as HTMLElement).closest('[data-noswipe],input,textarea,select')) controls.start(e); }}
-        style={{ touchAction: 'pan-y' }} className="overflow-x-clip">
-        <AnimatePresence mode="popLayout" initial={false} custom={dir}>
-          <motion.div key={value} custom={dir} variants={{
-            enter: (d: number) => ({ x: d * 20, opacity: 0 }),
-            center: { x: 0, opacity: 1 },
-            exit: (d: number) => ({ x: -d * 20, opacity: 0, transition: { duration: 0.12, ease: ease.out } }),
-          }} initial="enter" animate="center" exit="exit" transition={{ duration: 0.22, ease: ease.out }}>
-            {pages[index]?.render()}
-          </motion.div>
-        </AnimatePresence>
+      <motion.div {...pan} style={{ x, touchAction: 'pan-y' }} className="overflow-x-clip">
+        {pages.filter(p => seen.has(p.id) || p.id === value).map(p => (
+          <div key={p.id} hidden={p.id !== value} ref={el => { if (el) boxes.current.set(p.id, el); else boxes.current.delete(p.id); }}>{content(p)}</div>
+        ))}
       </motion.div>
     </div>
   );

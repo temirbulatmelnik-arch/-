@@ -6,7 +6,7 @@ import { useMemo, useRef, useState } from 'react';
 import { addMonths, monthKey, monthName, monthShort, monthsBetween } from '../domain/dates';
 import { rub, rubShort } from '../domain/money';
 import { haptic } from './haptics';
-import { ease, spring } from './motion';
+import { ease } from './motion';
 import { Money } from './ui';
 
 type Series = [string, number][];
@@ -95,8 +95,7 @@ export function DebtChart({ plan, fact, forecast, baseline }: { plan: Series; fa
         <div className="flex rounded-[12px] bg-surface-2 p-[3px] text-[13px] font-medium" role="tablist">
           {(['year', 'all'] as const).map(r => (
             <button key={r} type="button" role="tab" aria-selected={range === r} onClick={() => { setRange(r); setHover(null); }}
-              className={`relative rounded-[9px] px-3.5 py-1.5 ${range === r ? 'text-ink' : 'text-muted'}`}>
-              {range === r && <motion.span layoutId="debt-range" className="absolute inset-0 rounded-[9px] bg-surface shadow-[0_1px_3px_rgba(10,36,51,.12)]" transition={spring} />}
+              className={`relative rounded-[9px] px-3.5 py-1.5 transition-colors duration-200 ${range === r ? 'bg-surface text-ink shadow-[0_1px_3px_rgba(10,36,51,.12)]' : 'text-muted'}`}>
               <span className="relative">{r === 'year' ? 'Год' : 'Весь план'}</span>
             </button>
           ))}

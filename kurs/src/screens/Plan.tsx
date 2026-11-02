@@ -300,11 +300,11 @@ function ChecklistView() {
       <SectionTitle action={<LinkButton onClick={() => set({ sync: true })}>Обновить из чата</LinkButton>}>Из аудита</SectionTitle>
       {sorted.length === 0 ? <div className="px-4"><Empty>Чек-листа пока нет. Его можно получить из чата «Финансы»: «Связь с чатом» → вставить обновление.</Empty></div> : (
         <div className="card divide-hair mx-4 overflow-hidden">
-          {sorted.map(c => {
+          {sorted.map((c, i) => {
             const done = isDone(c);
             const due = done ? null : checklistDue(c, now);
             return (
-              <motion.button layout transition={spring} key={c.id} ref={c.id === focus ? focused : undefined} type="button" onClick={() => toggleCheck(c.id)} aria-pressed={done}
+              <motion.button layout layoutDependency={i} transition={spring} key={c.id} ref={c.id === focus ? focused : undefined} type="button" onClick={() => toggleCheck(c.id)} aria-pressed={done}
                 className={`flex w-full items-start gap-3 px-4 py-3.5 text-left transition-colors duration-700 ${done ? 'opacity-50' : ''} ${c.id === focus ? 'bg-sea/12' : ''}`}>
                 <motion.span animate={{ scale: done ? [1, 1.3, 1] : 1 }} transition={{ duration: 0.35 }} className={`mt-0.5 grid size-6 shrink-0 place-items-center rounded-full border ${done ? 'border-transparent bg-pos text-white' : due === 'overdue' ? 'border-warn' : 'border-line'}`}>{done && <Check size={13} strokeWidth={2.5} />}</motion.span>
                 <span className="min-w-0 flex-1">

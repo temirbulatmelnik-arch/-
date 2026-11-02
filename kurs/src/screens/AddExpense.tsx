@@ -3,7 +3,7 @@
 import { AlertTriangle, CalendarDays, CreditCard, Delete, Hourglass, PiggyBank, ScanText, Trash2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
-import { snappy, spring } from '../components/motion';
+import { snappy } from '../components/motion';
 import { haptic } from '../components/haptics';
 import { CAT_COLOR, CATEGORY_ICON, PrimaryButton, SecondaryButton, Sheet } from '../components/ui';
 import { bridgeWeek, weekMoney } from '../domain/bridge';
@@ -148,8 +148,8 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
           const on = category === c.id;
           return (
             <motion.button key={c.id} type="button" onClick={() => setCategory(c.id)} whileTap={{ scale: 0.95 }} transition={snappy}
-              className={`relative flex aspect-[1/0.92] flex-col items-center justify-center gap-1 overflow-hidden rounded-[18px] border text-center ${on ? 'border-transparent text-white' : 'border-line bg-surface'}`}>
-              {on && <motion.span layoutId="cat-pick" className="absolute inset-0" style={{ background: CAT_COLOR[c.id] }} transition={spring} />}
+              style={on ? { background: CAT_COLOR[c.id] } : undefined}
+              className={`relative flex aspect-[1/0.92] flex-col items-center justify-center gap-1 overflow-hidden rounded-[18px] border text-center transition-colors duration-200 ${on ? 'border-transparent text-white' : 'border-line bg-surface'}`}>
               <motion.span className="relative" animate={on ? { rotate: [0, -12, 10, 0], scale: [1, 1.25, 1] } : { rotate: 0, scale: 1 }} transition={{ duration: 0.45 }}>
                 <Icon size={20} strokeWidth={1.6} className={on ? '' : 'text-ink/75'} />
               </motion.span>

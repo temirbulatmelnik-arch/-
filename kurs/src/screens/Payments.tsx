@@ -4,12 +4,12 @@
 import { BellRing, CalendarArrowUp, Check, ChevronLeft, ChevronRight, PencilLine, Repeat, Scale, Undo2 } from 'lucide-react';
 import { Hold } from '../components/Hold';
 import { toast } from '../store/ui';
-import { AnimatePresence, motion } from 'motion/react';
+import { animate, AnimatePresence, motion, useMotionValue } from 'motion/react';
 import { haptic } from '../components/haptics';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { CoverageCard } from '../components/Coverage';
-import { item, list as listAnim, Pager, Roll, SwipeRow, useEnter } from '../components/motion';
+import { ease, item, list as listAnim, Pager, Roll, spring, SwipeRow, useEnter, usePan } from '../components/motion';
 import { LevelChart, MonthGrid, verdict, type DayMoney } from '../components/MoneyLevel';
 import { SkyButton, SkyHeader } from '../components/Petersburg';
 import { EventRow } from '../components/rows';
@@ -124,7 +124,8 @@ function MonthView({ month, days, events, selected, onSelect, onShift, said }: {
   const marks = useStore(s => s.marks);
   const top = Math.max(LOW_WATER * 1.25, ...days.map(d => d.total ?? 0));
   const sel = days.find(d => d.date === selected);
-  const [opened, setOpened] = useState<string | null>(null);
+  // открытый день и откуда он раскрывается (центр ячейки на экране)
+  const [opened, setOpened] = useState<{ date: string; x: number; y: number } | null>(null);
   return (
     <>
       {/* вывод по воде в календаре: деньги на карте и в резерве день за днём */}
@@ -134,7 +135,8 @@ function MonthView({ month, days, events, selected, onSelect, onShift, said }: {
       )}
       <section className="mt-3 px-3" data-noswipe>
         <motion.div key={month} initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ type: 'spring', stiffness: 300, damping: 30 }}>
-          <MonthGrid month={month} days={days} top={top} now={now} selected={selected} onSelect={onSelect} onSwipe={onShift} opened={opened} onOpen={d => { setOpened(d); haptic(); }} />
+          <MonthGrid month={month} days={days} top={top} now={now} selected={selected} onSelect={onSelect} onSwipe={onShift}
+            onOpen={(d, r) => { setOpened({ date: d, x: r.left + r.width / 2, y: r.top + r.height / 2 }); haptic(); }} />
         </motion.div>
       </section>
       <section className="mx-4 mt-5" data-noswipe>
@@ -146,14 +148,16 @@ function MonthView({ month, days, events, selected, onSelect, onShift, said }: {
       </section>
       <p className="px-5 pt-3 text-[12.5px] text-faint">Нажмите на день — он раскроется: что уходит, что приходит, сколько останется.</p>
       <AnimatePresence>
-        {opened && <DayCard key={opened} date={opened} day={days.find(d => d.date === opened)} events={events.filter(e => e.date === opened)} marks={marks} now={now} onClose={() => setOpened(null)} />}
+        {opened && <DayCard key={opened.date} date={opened.date} from={opened} day={days.find(d => d.date === opened.date)} events={events.filter(e => e.date === opened.date)} marks={marks} now={now} onClose={() => setOpened(null)} />}
       </AnimatePresence>
     </>
   );
 }
 
-/** Карточка дня: вырастает из ячейки календаря и уходит обратно в неё (навык apple-design: из источника в источник) */
-function DayCard({ date, day, events, marks, now, onClose }: { date: string; day?: DayMoney; events: CalEvent[]; marks: Record<string, EventMark>; now: string; onClose: () => void }) {
+/** Карточка дня: вырастает из нажатой ячейки и уходит обратно в неё (навык apple-design: из источника в источник).
+ *  Масштаб от точки ячейки — только transform и opacity; общая layout-анимация motion обходила бы все элементы
+ *  приложения на каждом кадре. Лежит ниже листов (z-48): платёж, открытый из дня, встаёт поверх него */
+function DayCard({ date, from, day, events, marks, now, onClose }: { date: string; from: { x: number; y: number }; day?: DayMoney; events: CalEvent[]; marks: Record<string, EventMark>; now: string; onClose: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
@@ -161,15 +165,23 @@ function DayCard({ date, day, events, marks, now, onClose }: { date: string; day
   }, [onClose]);
   const low = day?.total != null && day.total < LOW_WATER;
   const level = day?.total == null ? 0 : Math.max(0.06, Math.min(1, Math.max(0, day.total) / Math.max(LOW_WATER * 4, day.total)));
+  // смахнуть вниз — закрыть: карточка идёт за пальцем с сопротивлением
+  const y = useMotionValue(0);
+  const pan = usePan({
+    axis: 'y',
+    onMove: d => y.set(d > 0 ? d * 0.6 : d * 0.05),
+    onEnd: (d, v) => { if (d * 0.6 > 80 || v > 400) onClose(); else animate(y, 0, spring); },
+  });
   return (
-    <motion.div className="fixed inset-0 z-[56]" initial={{ opacity: 1 }} exit={{ opacity: 1 }}>
+    <motion.div className="fixed inset-0 z-[48]" initial={{ opacity: 1 }} exit={{ opacity: 1 }}>
       <motion.div className="absolute inset-0 bg-[rgba(4,14,22,.4)] backdrop-blur-[6px]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
-      <motion.div layoutId={`day-${date}`} className="absolute inset-x-4 top-[18%] overflow-hidden rounded-[30px] bg-surface shadow-[0_30px_60px_-24px_rgba(4,14,22,.7)]"
+      <motion.div className="absolute inset-x-4 top-[18%] overflow-hidden rounded-[30px] bg-surface shadow-[0_30px_60px_-24px_rgba(4,14,22,.7)]"
+        initial={{ opacity: 0, scale: 0.35 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.35, transition: { duration: 0.2, ease: ease.out } }}
         transition={{ type: 'spring', bounce: 0.15, duration: 0.45 }}
-        drag="y" dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0.05, bottom: 0.6 }} onDragEnd={(_, i) => { if (i.offset.y > 80 || i.velocity.y > 400) onClose(); }}>
-        {/* вода дня: сколько на карте и в резерве к вечеру */}
-        <motion.div className="pointer-events-none absolute inset-x-0 bottom-0" initial={{ height: 0 }} animate={{ height: `${level * 100}%` }} transition={{ type: 'spring', bounce: 0.2, duration: 0.9, delay: 0.15 }}
-          style={{ background: `linear-gradient(180deg, var(${low ? '--water-low-a' : '--water-a'}), var(${low ? '--water-low-b' : '--water-b'}))` }} />
+        {...pan} style={{ y, transformOrigin: `${from.x - 16}px ${from.y - window.innerHeight * 0.18}px`, touchAction: 'pan-x' }}>
+        {/* вода дня: сколько на карте и в резерве к вечеру — поднимается снизу (scaleY, на видеокарте) */}
+        <motion.div className="pointer-events-none absolute inset-x-0 bottom-0 origin-bottom" initial={{ scaleY: 0 }} animate={{ scaleY: 1 }} transition={{ type: 'spring', bounce: 0.2, duration: 0.9, delay: 0.15 }}
+          style={{ height: `${level * 100}%`, background: `linear-gradient(180deg, var(${low ? '--water-low-a' : '--water-a'}), var(${low ? '--water-low-b' : '--water-b'}))` }} />
         <motion.div className="relative" initial={{ opacity: 0 }} animate={{ opacity: 1, transition: { delay: 0.12, duration: 0.2 } }} exit={{ opacity: 0, transition: { duration: 0.08 } }}>
           <div className="flex items-start justify-between gap-3 px-5 pt-5">
             <div>
@@ -295,8 +307,7 @@ function ListView({ month, events, total, incomes }: { month: string; events: Ca
         <div className="no-scrollbar flex min-w-0 flex-1 gap-2 overflow-x-auto">
           {FILTERS.map(f => (
             <motion.button key={f.id} type="button" whileTap={{ scale: 0.95 }} onClick={() => setFilter(f.id)}
-              className={`relative shrink-0 rounded-full border px-3.5 py-2 text-[13px] font-medium transition-colors ${filter === f.id ? 'border-transparent text-bg' : 'border-line text-muted'}`}>
-              {filter === f.id && <motion.span layoutId="pay-filter" className="absolute inset-0 rounded-full bg-ink" transition={{ type: 'spring', stiffness: 500, damping: 38 }} />}
+              className={`relative shrink-0 rounded-full border px-3.5 py-2 text-[13px] font-medium transition-colors duration-200 ${filter === f.id ? 'border-transparent bg-ink text-bg' : 'border-line text-muted'}`}>
               <span className="relative">{f.label}</span>
             </motion.button>
           ))}

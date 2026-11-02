@@ -163,6 +163,11 @@ function Pier({ x, lampX }: { x: number; lampX: number }) {
   );
 }
 
+/** Сцену не видно (другая вкладка или прокрутили вниз) — переходы моста и солнца сразу встают в конец: иначе они
+ *  до 16 секунд крутились бы скриптом в фоне и отнимали время у календаря и списков. Ставит «Сегодня» */
+let sceneHidden = false;
+export const setSceneHidden = (v: boolean) => { sceneHidden = v; };
+
 /** Плавный переход значения по кадрам: Safari на iPhone не всегда анимирует CSS-переходы на элементах SVG,
  *  поэтому мост и солнце двигаются через атрибут transform, который понимают все браузеры */
 function tween(from: number, to: number, ms: number, ease: (k: number) => number, frame: (v: number) => void): () => void {
@@ -171,7 +176,7 @@ function tween(from: number, to: number, ms: number, ease: (k: number) => number
     // если телефон на миг притормозил, анимация не перескакивает вперёд: за кадр — не больше 50 мс пути
     done += last ? Math.min(t - last, 50) : 0;
     last = t;
-    const k = Math.min(1, done / ms);
+    const k = sceneHidden ? 1 : Math.min(1, done / ms);
     frame(from + (to - from) * ease(k));
     if (k < 1) raf = requestAnimationFrame(step);
   };
