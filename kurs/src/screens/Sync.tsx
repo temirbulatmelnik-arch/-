@@ -173,51 +173,50 @@ function Body() {
 
 /* ---------- Новая редакция плана с сайта ---------- */
 
-/** При запуске: на сайте план новее, чем на телефоне? Есть код — обновить молча, нет — попросить код. */
-export function usePlanUpdates() {
-  const ready = useStore(s => s.ready);
-  useEffect(() => {
-    // в демо-макете нет ни плана с сайта, ни файла обмена
-    if (!ready || !navigator.onLine || import.meta.env.VITE_DEMO) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const sealed = (await (await fetch('./seed.enc.json', { cache: 'no-cache' })).json()) as Sealed;
-        const s = useStore.getState();
-        // план, загруженный до появления редакций, считается первой редакцией; «с нуля» — без плана, не обновляем
-        const localRev = s.planRev || (s.plan ? 1 : 0);
-        if (cancelled || !localRev || (sealed.rev ?? 1) <= localRev) return;
-        if (s.planCode) {
-          const plain = await openSealed(sealed, s.planCode);
-          if (plain) { s.updateFromSeed(JSON.parse(plain) as PlanSeed, s.planCode); toast('План обновлён до новой редакции'); return; }
-        }
-        useUi.getState().set({ unlock: true });
-      } catch { /* нет сети или файла — попробуем в следующий раз */ }
-    })();
-    return () => { cancelled = true; };
-  }, [ready]);
+/** На сайте план новее, чем на телефоне? Есть код — обновить молча, нет — попросить код */
+export async function checkPlan(): Promise<'updated' | 'unlock' | 'none'> {
+  if (import.meta.env.VITE_DEMO || !navigator.onLine) return 'none';
+  try {
+    const sealed = (await (await fetch('./seed.enc.json', { cache: 'no-cache' })).json()) as Sealed;
+    const s = useStore.getState();
+    // план, загруженный до появления редакций, считается первой редакцией; «с нуля» — без плана, не обновляем
+    const localRev = s.planRev || (s.plan ? 1 : 0);
+    if (!localRev || (sealed.rev ?? 1) <= localRev) return 'none';
+    if (s.planCode) {
+      const plain = await openSealed(sealed, s.planCode);
+      if (plain) { s.updateFromSeed(JSON.parse(plain) as PlanSeed, s.planCode); toast('План обновлён до новой редакции'); return 'updated'; }
+    }
+    useUi.getState().set({ unlock: true });
+    return 'unlock';
+  } catch { return 'none'; /* нет сети или файла — попробуем в следующий раз */ }
 }
 
-/** Файл обмена с сайта: зашифрован кодом плана; новый — открывается в окне обмена, применить или нет — решает человек */
+/** Новый файл обмена с сайта (зашифрован кодом плана) — открыть в окне обмена; применить или нет — решает человек */
+export async function checkInbox(): Promise<boolean> {
+  if (import.meta.env.VITE_DEMO || !navigator.onLine) return false;
+  try {
+    const res = await fetch('./inbox.enc.json', { cache: 'no-cache' });
+    if (!res.ok) return false;
+    const sealed = (await res.json()) as Sealed & { id?: string };
+    const s = useStore.getState();
+    if (!sealed.id || !s.planCode || s.settings.inboxSeen === sealed.id) return false;
+    const plain = await openSealed(sealed, s.planCode);
+    if (!plain) return false;
+    useUi.getState().set({ sync: true, inbox: { id: sealed.id, text: plain } });
+    return true;
+  } catch { return false; /* нет сети или файла */ }
+}
+
+/** При запуске — проверить новую редакцию плана */
+export function usePlanUpdates() {
+  const ready = useStore(s => s.ready);
+  useEffect(() => { if (ready) void checkPlan(); }, [ready]);
+}
+
+/** При запуске — проверить файл обмена с сайта */
 export function useInbox() {
   const ready = useStore(s => s.ready);
-  useEffect(() => {
-    // в демо-макете нет ни плана с сайта, ни файла обмена
-    if (!ready || !navigator.onLine || import.meta.env.VITE_DEMO) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch('./inbox.enc.json', { cache: 'no-cache' });
-        if (!res.ok) return;
-        const sealed = (await res.json()) as Sealed & { id?: string };
-        const s = useStore.getState();
-        if (cancelled || !sealed.id || !s.planCode || s.settings.inboxSeen === sealed.id) return;
-        const plain = await openSealed(sealed, s.planCode);
-        if (plain && !cancelled) useUi.getState().set({ sync: true, inbox: { id: sealed.id, text: plain } });
-      } catch { /* нет сети или файла */ }
-    })();
-    return () => { cancelled = true; };
-  }, [ready]);
+  useEffect(() => { if (ready) void checkInbox(); }, [ready]);
 }
 
 export function UnlockSheet() {

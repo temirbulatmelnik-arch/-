@@ -77,12 +77,8 @@ export function Payments() {
             <SkyButton onClick={() => shift(1)} label="Следующий месяц"><ChevronRight size={18} strokeWidth={1.7} /></SkyButton>
           </div>
         } />
-      {said && (
-        <motion.p key={said} initial={{ opacity: 0, y: -6, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-          className={`mx-4 mt-3 mb-3 rounded-2xl px-4 py-2.5 text-[13.5px] leading-snug ${said.startsWith('Не хватит') ? 'bg-neg/10 text-neg' : /мало|тонк|ниже/.test(said) ? 'bg-warn/12 text-warn' : 'bg-pos/10 text-pos'}`}>{said}</motion.p>
-      )}
-      <Pager<PayView> className={said ? '' : 'mt-3'} value={view} onChange={v => set({ payView: v })} pages={[
-        { id: 'month', label: 'Месяц', render: () => <MonthView month={month} days={days} events={events} selected={selected} onSelect={setSelected} onShift={shift} /> },
+      <Pager<PayView> className="mt-3" value={view} onChange={v => set({ payView: v })} pages={[
+        { id: 'month', label: 'Месяц', render: () => <MonthView month={month} days={days} events={events} selected={selected} onSelect={setSelected} onShift={shift} said={said} /> },
         { id: 'cover', label: 'Хватит ли', render: () => <CoverView /> },
         { id: 'list', label: 'Список', render: () => <ListView month={month} events={events} total={total} incomes={incomes} /> },
       ]} />
@@ -110,8 +106,8 @@ function SwipeEvent({ e, mark, now, showDate = false }: { e: CalEvent; mark?: Ev
   );
 }
 
-function MonthView({ month, days, events, selected, onSelect, onShift }: {
-  month: string; days: DayMoney[]; events: CalEvent[]; selected: string; onSelect: (d: string) => void; onShift: (n: 1 | -1) => void;
+function MonthView({ month, days, events, selected, onSelect, onShift, said }: {
+  month: string; days: DayMoney[]; events: CalEvent[]; selected: string; onSelect: (d: string) => void; onShift: (n: 1 | -1) => void; said: string | null;
 }) {
   const now = useToday();
   const marks = useStore(s => s.marks);
@@ -120,6 +116,11 @@ function MonthView({ month, days, events, selected, onSelect, onShift }: {
   const dayEvents = events.filter(e => e.date === selected);
   return (
     <>
+      {/* вывод по воде в календаре: деньги на карте и в резерве день за днём */}
+      {said && (
+        <motion.p key={said} initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, ease: [0.23, 1, 0.32, 1] }}
+          className={`mx-4 mt-3 rounded-2xl px-4 py-2.5 text-[13.5px] leading-snug ${said.startsWith('Не хватит') ? 'bg-neg/10 text-neg' : /мало|тонк|ниже/.test(said) ? 'bg-warn/12 text-warn' : 'bg-pos/10 text-pos'}`}>{said}</motion.p>
+      )}
       <section className="mt-3 px-3" data-noswipe>
         <motion.div key={month} initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ type: 'spring', stiffness: 300, damping: 30 }}>
           <MonthGrid month={month} days={days} top={top} now={now} selected={selected} onSelect={onSelect} onSwipe={onShift} />
@@ -169,7 +170,9 @@ function CoverView() {
   const overdue = useMemo(() => eventsBetween(cal, addDays(now, -60), addDays(now, -1)).filter(e => e.kind === 'payment' && !marks[e.key]?.done), [cal, now, marks]);
   return (
     <>
-      <motion.section className="mx-4 mt-4" variants={listAnim} initial="hidden" animate="show">
+      <CoverageCard />
+
+      <motion.section className="mx-4 mt-6" variants={listAnim} initial="hidden" animate="show">
         <div className="mb-2 flex items-baseline justify-between px-1">
           <span className="text-[14px] font-medium">Счета по учёту</span>
           <span className="text-[12px] text-muted">{last ? `сверено ${ddmm(last.date)}` : 'сверки не было'}</span>
@@ -185,7 +188,6 @@ function CoverView() {
         </motion.button>
       </motion.section>
 
-      <CoverageCard />
 
       {overdue.length > 0 && (
         <section className="mt-6">

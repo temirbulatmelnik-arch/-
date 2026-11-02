@@ -130,7 +130,7 @@ export function Budget() {
           {cat && <button type="button" onClick={() => setCat(null)} className="text-[13px] font-medium text-sea">Все категории</button>}
         </div>
         <motion.div className="card divide-hair mx-4 overflow-hidden" variants={listAnim} initial="hidden" animate="show">
-          {rows.map(r => {
+          {rows.filter(r => r.spent > 0).sort((a, b) => b.spent - a.spent).map(r => {
             const over = r.spent > r.limit;
             const on = cat === r.id;
             return (
@@ -152,6 +152,13 @@ export function Budget() {
               </motion.button>
             );
           })}
+          {/* категории без трат — одной строкой, а не десятью пустыми полосами */}
+          {rows.some(r => r.spent === 0) && (
+            <motion.div variants={item} className="px-4 py-3 text-[12.5px] leading-snug text-muted">
+              Без трат: {rows.filter(r => r.spent === 0).map(r => CATEGORY[r.id].short.toLowerCase()).join(', ')}
+            </motion.div>
+          )}
+          {rows.every(r => r.spent === 0) && <div className="px-4 pb-3 text-[13px] text-muted">В этом месяце ещё ничего. Нажмите «+», чтобы записать трату.</div>}
         </motion.div>
         {saved > 0 && <p className="mx-6 mt-2 text-[12.5px] text-pos">Пауза 48 часов уже сберегла <Money value={saved} />.</p>}
       </section>

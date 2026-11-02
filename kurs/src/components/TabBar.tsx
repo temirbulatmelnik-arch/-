@@ -9,6 +9,7 @@ import { useStore } from '../store/store';
 import { useUi, type Tab } from '../store/ui';
 import { ease, fling, snappy, spring } from './motion';
 import { BridgeIcon } from './Petersburg';
+import { haptic } from './haptics';
 
 type Icon = ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
 export const TABS: { id: Tab; label: string; icon: Icon }[] = [
@@ -56,7 +57,7 @@ export function TabBar() {
     held.current = false;
     window.clearTimeout(timer.current);
     if (!fan) setHolding(true);
-    timer.current = window.setTimeout(() => { held.current = true; setHolding(false); setFan(true); }, HOLD_MS);
+    timer.current = window.setTimeout(() => { held.current = true; setHolding(false); setFan(true); haptic(); }, HOLD_MS);
   };
   const cancel = () => { window.clearTimeout(timer.current); setHolding(false); };
   const up = () => {

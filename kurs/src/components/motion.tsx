@@ -3,6 +3,7 @@
 import { animate, AnimatePresence, motion, useDragControls, useMotionValue, useReducedMotion, useTransform, type HTMLMotionProps, type PanInfo } from 'motion/react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { num } from '../domain/money';
+import { haptic } from './haptics';
 
 /* Токены движения — навыки emil-design-eng, apple-design и motion-design (.claude/skills):
    сильные кривые вместо встроенных, отклик 120 мс, пружины без отскока для интерфейса (Apple: damping 1),
@@ -101,7 +102,14 @@ export function SwipeRow({ children, left, right = [], className = '', rowClass 
   const rightOpacity = useTransform(x, [-W, -40, 0], [1, 0.6, 0]);
   // после свайпа — пружина с инерцией пальца (apple-design: передать скорость, лёгкий отскок)
   const settle = (to: number) => animate(x, to, fling);
+  // щелчок, когда свайп дошёл до порога действия — отпустите, и оно сработает
+  const armed = useRef(false);
+  const drag = (_: unknown, info: PanInfo) => {
+    const on = (!!left && info.offset.x > W * 1.6) || (right.length > 0 && info.offset.x < -max - 90);
+    if (on !== armed.current) { armed.current = on; if (on) haptic(); }
+  };
   const end = (_: unknown, info: PanInfo) => {
+    armed.current = false;
     const dx = info.offset.x, vx = info.velocity.x;
     if (left && (dx > W * 1.6 || (dx > W * 0.6 && vx > 500))) { settle(0); left.onAction(); return; }
     if (right.length && (dx < -max - 90)) { settle(0); right[right.length - 1].onAction(); return; }
@@ -125,7 +133,7 @@ export function SwipeRow({ children, left, right = [], className = '', rowClass 
         </motion.div>
       )}
       <motion.div drag="x" dragDirectionLock dragConstraints={{ left: right.length ? -max - 120 : 0, right: left ? W * 2 : 0 }} dragElastic={0.12}
-        dragMomentum={false} onDragEnd={end} style={{ x, touchAction: 'pan-y' }} className={`relative ${rowClass}`}>
+        dragMomentum={false} onDrag={drag} onDragEnd={end} style={{ x, touchAction: 'pan-y' }} className={`relative ${rowClass}`}>
         {children}
       </motion.div>
     </div>
@@ -144,7 +152,7 @@ export function Pager<T extends string>({ value, onChange, pages, className = ''
   const dir = index >= prev.current ? 1 : -1;
   useEffect(() => { prev.current = index; }, [index]);
   const controls = useDragControls();
-  const go = (i: number) => { if (i >= 0 && i < pages.length && i !== index) onChange(pages[i].id); };
+  const go = (i: number) => { if (i >= 0 && i < pages.length && i !== index) { haptic(); onChange(pages[i].id); } };
   const end = (_: unknown, info: PanInfo) => {
     if (info.offset.x < -70 || info.velocity.x < -450) go(index + 1);
     else if (info.offset.x > 70 || info.velocity.x > 450) go(index - 1);

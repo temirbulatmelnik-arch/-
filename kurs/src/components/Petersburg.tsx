@@ -196,6 +196,8 @@ function useSunset(rise: number, ms: number, moonRise: number) {
 
 /** Мост при входе разводится полностью: медленно, с плавным началом и концом, и остаётся разведённым */
 const OPEN = 72;
+/** управление мостом снаружи: жест «потянуть вниз» на «Сегодня» */
+export const bridgeControl = { pull: (_k: number) => {}, release: () => {} };
 /** вход в приложение: первый запуск или возвращение из фона — тогда мост разводится заново */
 let fresh = true;
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') fresh = true; });
@@ -240,6 +242,12 @@ function useLift() {
     const down = moveTo(0, 24);
     timer.current = window.setTimeout(() => moveTo(OPEN, 6), down * 1000 + 500);
   };
+  // потянуть сцену вниз: пролёты сводятся вслед за пальцем, отпустили — снова разводятся (обновление на «Сегодня»)
+  useEffect(() => {
+    bridgeControl.pull = (k: number) => { stop.current(); clearTimeout(timer.current); draw(OPEN * (1 - Math.min(1, Math.max(0, k)))); };
+    bridgeControl.release = () => { moveTo(OPEN, 16); };
+    return () => { bridgeControl.pull = () => {}; bridgeControl.release = () => {}; };
+  }, []);
   return { left, right, replay };
 }
 

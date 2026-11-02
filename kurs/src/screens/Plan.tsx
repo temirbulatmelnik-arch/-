@@ -215,7 +215,7 @@ function DebtsView() {
       <SectionTitle>По порядку закрытия</SectionTitle>
       <motion.div className="space-y-2.5 px-4" variants={listAnim} initial="hidden" animate="show">
         {openDebts.length === 0 && <Empty>{debts.length ? 'Все долги закрыты. Свобода.' : 'Долгов пока нет.'}</Empty>}
-        {openDebts.map(d => <DebtCard key={d.id} d={d} next={next[d.id]} closeMonth={fc.closeMonth[d.id]} target={target?.id === d.id} onClick={() => set({ debt: d.id })} />)}
+        {openDebts.map((d, i) => <DebtCard key={d.id} n={i + 1} d={d} next={next[d.id]} closeMonth={fc.closeMonth[d.id]} target={target?.id === d.id} onClick={() => set({ debt: d.id })} />)}
         <motion.button variants={item} type="button" onClick={() => setAdding(true)} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-line text-[13.5px] text-muted"><Plus size={16} /> Добавить долг</motion.button>
       </motion.div>
 
@@ -237,7 +237,8 @@ function DebtsView() {
   );
 }
 
-function DebtCard({ d, next, closeMonth, target, onClick }: { d: Debt; next?: { date: string; amount: number; approx?: boolean; dateMode: string }; closeMonth: string | null; target: boolean; onClick: () => void }) {
+/** n — место в очереди закрытия: порядок здесь и есть план (лавина), поэтому номер — не украшение */
+function DebtCard({ n, d, next, closeMonth, target, onClick }: { n: number; d: Debt; next?: { date: string; amount: number; approx?: boolean; dateMode: string }; closeMonth: string | null; target: boolean; onClick: () => void }) {
   const progress = d.startBalance ? 1 - d.balance / d.startBalance : 0;
   const late = closeMonth && d.targetClose && closeMonth > d.targetClose;
   return (
@@ -245,6 +246,7 @@ function DebtCard({ d, next, closeMonth, target, onClick }: { d: Debt; next?: { 
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-1.5">
+            <span className={`grid size-6 place-items-center rounded-full text-[12px] font-semibold ${target ? 'bg-sea text-on-sea' : 'bg-surface-2 text-muted'}`} aria-label={`${n}-й по очереди`}>{n}</span>
             <span className="text-[15.5px] font-medium">{d.short}</span>
             <Chip>{pct(d.rate)}</Chip>
             {d.frozen && <Chip tone="neg"><Lock size={10} /> не тратить</Chip>}

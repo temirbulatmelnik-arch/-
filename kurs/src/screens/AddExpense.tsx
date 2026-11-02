@@ -4,6 +4,7 @@ import { AlertTriangle, CalendarDays, CreditCard, Delete, Hourglass, PiggyBank, 
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import { snappy, spring } from '../components/motion';
+import { haptic } from '../components/haptics';
 import { CAT_COLOR, CATEGORY_ICON, PrimaryButton, SecondaryButton, Sheet } from '../components/ui';
 import { bridgeWeek, weekMoney } from '../domain/bridge';
 import { dayMonth, today, weekday, weekStart } from '../domain/dates';
@@ -74,6 +75,7 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
     const item = { date, amount: value, category: category!, note: note.trim() || undefined, source, origin: 'manual' as const, ...(source === 'credit' && p.creditCard ? { creditCard: p.creditCard } : {}) };
     if (edit) store.updateExpense(edit.id, item);
     else store.addExpenses([item]);
+    haptic('success');
     if (p.wishId) store.resolveWish(p.wishId, 'bought');
     const s = useStore.getState();
     const week = weekSummary(s.expenses, s.debts, s.weeklyOverrides, today());

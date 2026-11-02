@@ -6,7 +6,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { CardStack, type StackCard } from '../components/CardStack';
 import { DayRing } from '../components/DayRing';
-import { lampAt, SkyButton, WeekScene } from '../components/Petersburg';
+import { bridgeControl, lampAt, SkyButton, WeekScene } from '../components/Petersburg';
+import { haptic } from '../components/haptics';
 import { Roll, spring } from '../components/motion';
 import { runQuick } from '../components/TabBar';
 import { AlertRow, EventRow } from '../components/rows';
@@ -19,7 +20,8 @@ import { alerts as buildAlerts, type Alert, countsWeekly, dayBudget, weekSummary
 import type { CalEvent } from '../domain/types';
 import { weekReport, weekToClose } from '../domain/weekly';
 import { useStore } from '../store/store';
-import { useCal, useToday, useUi } from '../store/ui';
+import { toast, useCal, useToday, useUi } from '../store/ui';
+import { checkInbox, checkPlan } from './Sync';
 import { TodayDetails } from './TodaySheet';
 
 /* вход в приложение: запуск или возвращение из фона — тогда плашка о перерасходе показывается снова */
@@ -89,6 +91,51 @@ export function Week() {
     bar.observe(mark);
     pause.observe(scene);
     return () => { bar.disconnect(); pause.disconnect(); };
+  }, []);
+
+  // потянуть сцену вниз: мост сводится вслед за пальцем; отпустили за порогом — проверка новой редакции плана
+  // и файла из чата, мост снова разводится. Сцена тянется с сопротивлением, как резинка (apple-design: rubber-band)
+  const pullRef = useRef<HTMLDivElement>(null);
+  const [pull, setPull] = useState<{ k: number; armed: boolean; busy: boolean }>({ k: 0, armed: false, busy: false });
+  useEffect(() => {
+    const el = sceneRef.current;
+    if (!el) return;
+    let y0: number | null = null, armed = false;
+    const start = (e: TouchEvent) => {
+      if (window.scrollY > 0 || e.touches.length !== 1 || (e.target as Element).closest('[data-nopull]')) return;
+      y0 = e.touches[0].clientY;
+    };
+    const move = (e: TouchEvent) => {
+      if (y0 == null) return;
+      const dy = e.touches[0].clientY - y0;
+      if (dy <= 0) return;
+      e.preventDefault();
+      const k = Math.min(1, dy / 180);
+      if (pullRef.current) pullRef.current.style.transform = `translateY(${(76 * (1 - Math.exp(-dy / 150))).toFixed(1)}px)`;
+      bridgeControl.pull(k);
+      const now = k >= 0.72;
+      if (now !== armed) { armed = now; if (armed) haptic(); }
+      setPull({ k, armed, busy: false });
+    };
+    const end = async () => {
+      if (y0 == null) return;
+      y0 = null;
+      const el2 = pullRef.current;
+      if (el2) { el2.style.transition = 'transform 420ms var(--ease-drawer)'; el2.style.transform = ''; window.setTimeout(() => { el2.style.transition = ''; }, 440); }
+      if (armed) {
+        armed = false;
+        setPull({ k: 0, armed: false, busy: true });
+        const [plan, inbox] = await Promise.all([checkPlan(), checkInbox()]);
+        if (plan === 'none' && !inbox) toast('Всё свежее: новых данных нет');
+      }
+      bridgeControl.release();
+      setPull({ k: 0, armed: false, busy: false });
+    };
+    el.addEventListener('touchstart', start, { passive: true });
+    el.addEventListener('touchmove', move, { passive: false });
+    el.addEventListener('touchend', end);
+    el.addEventListener('touchcancel', end);
+    return () => { el.removeEventListener('touchstart', start); el.removeEventListener('touchmove', move); el.removeEventListener('touchend', end); el.removeEventListener('touchcancel', end); };
   }, []);
   const week = useMemo(() => weekSummary(expenses, debts, overrides, now), [expenses, debts, overrides, now]);
   const today = useMemo(() => dayBudget(expenses, debts, overrides, now), [expenses, debts, overrides, now]);
@@ -237,7 +284,17 @@ export function Week() {
     <div className="relative">
       <CompactBar weekLeft={week.left} dayLeft={today.left} show={compact} />
       <div ref={markRef} aria-hidden="true" className="pointer-events-none absolute top-[330px] h-px w-px" />
-      <div ref={sceneRef} className="sc-parallax">
+      <div ref={sceneRef} className="sc-parallax" style={{ background: 'var(--sky-1)' }}>
+      <div ref={pullRef} className="relative">
+      <AnimatePresence>
+        {(pull.k > 0.06 || pull.busy) && (
+          <motion.div key="pull" initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}
+            className="glass pointer-events-none absolute inset-x-0 -top-9 z-10 mx-auto w-fit rounded-full border px-3.5 py-1.5 text-[12.5px] font-medium backdrop-blur-md"
+            style={{ background: 'var(--pill)', borderColor: 'var(--pill-border)', color: 'var(--scene-ink)' }}>
+            {pull.busy ? 'Проверяю план и файл из чата…' : pull.armed ? 'Отпустите — проверю обновления' : 'Потяните, чтобы обновить'}
+          </motion.div>
+        )}
+      </AnimatePresence>
       <WeekScene today={todayIdx} overlay={<Lamps monday={week.monday} todayIdx={todayIdx} limit={week.limit} dayNorm={today.day} />}>
         <div className="flex items-start justify-between gap-3 px-5 pt-2.5">
           <div style={{ color: 'var(--scene-ink)' }}>
@@ -290,6 +347,7 @@ export function Week() {
         )}
       </WeekScene>
       </div>
+      </div>
 
       {/* действия с данными: всё, что приходит из банка и из чата */}
       <div className="relative z-[1] -mt-1 grid grid-cols-3 gap-2 bg-bg px-4 pt-2">
@@ -298,10 +356,10 @@ export function Week() {
           ['checkup', 'Сверка', Scale],
           ['sync', 'Чат', MessagesSquare],
         ] as const).map(([id, label, Icon], i) => (
-          <motion.button key={id} type="button" whileTap={{ scale: 0.97 }} onClick={() => runQuick(id)}
-            initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: 0.25 + i * 0.06 }}
-            className="flex h-[50px] items-center justify-center gap-2 rounded-[17px] border border-line bg-surface text-[14px] font-medium shadow-[0_6px_18px_-14px_rgba(10,36,51,.5)]">
-            <Icon size={18} strokeWidth={1.6} className="text-sea" /> {label}
+          <motion.button key={id} type="button" whileTap={{ scale: 0.95 }} onClick={() => runQuick(id)}
+            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: 0.2 + i * 0.05 }}
+            className="flex h-[62px] flex-col items-center justify-center gap-1 rounded-[18px] bg-surface text-[12.5px] font-medium text-sea shadow-[0_1px_2px_rgba(10,36,51,.06),0_10px_24px_-18px_rgba(10,36,51,.45)]">
+            <Icon size={21} strokeWidth={1.7} /> {label}
           </motion.button>
         ))}
       </div>
@@ -382,31 +440,43 @@ function CompactBar({ weekLeft, dayLeft, show }: { weekLeft: number; dayLeft: nu
   );
 }
 
-/** Фонари набережной — дни недели. Нажатие на фонарь — сколько потрачено в тот день */
+/** Фонари набережной — дни недели. Нажмите на фонарь или ведите пальцем вдоль набережной — подпись следует за пальцем */
 function Lamps({ monday, todayIdx, limit, dayNorm }: { monday: string; todayIdx: number; limit: number; dayNorm: number }) {
   const expenses = useStore(s => s.expenses);
   const [open, setOpen] = useState<number | null>(null);
+  const [scrub, setScrub] = useState(false);
+  const strip = useRef<HTMLDivElement>(null);
   const spent = useMemo(() => [0, 1, 2, 3, 4, 5, 6].map(i => {
     const d = addDays(monday, i);
     return expenses.filter(e => e.date === d && countsWeekly(e)).reduce((s, e) => s + e.amount, 0);
   }), [expenses, monday]);
   useEffect(() => {
-    if (open == null) return;
+    if (open == null || scrub) return;
     const t = window.setTimeout(() => setOpen(null), 4200);
     return () => clearTimeout(t);
-  }, [open]);
+  }, [open, scrub]);
+  // какой фонарь под пальцем: ближайший по горизонтали
+  const at = (clientX: number) => {
+    const r = strip.current!.getBoundingClientRect();
+    const k = (clientX - r.left) / r.width;
+    let best = 0, dist = Infinity;
+    for (let i = 0; i < 7; i++) { const dd = Math.abs(lampAt(i).x - k); if (dd < dist) { dist = dd; best = i; } }
+    return best;
+  };
+  const move = (clientX: number) => { const i = at(clientX); if (i !== open) { setOpen(i); haptic(); } };
   const avg = limit / 7;
   return (
     <>
-      {[0, 1, 2, 3, 4, 5, 6].map(i => {
-        const p = lampAt(i);
-        const date = addDays(monday, i);
-        const future = i > todayIdx;
-        return (
-          <button key={i} type="button" onClick={() => setOpen(open === i ? null : i)} aria-label={`${weekdayFull(date)}: ${future ? 'впереди' : `потрачено ${Math.round(spent[i])} ₽`}`}
-            className="pointer-events-auto absolute size-11 -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }} />
-        );
-      })}
+      {/* полоса вдоль набережной: ведите пальцем — дни сменяются с лёгким щелчком */}
+      <div ref={strip} data-nopull className="pointer-events-auto absolute inset-x-[4%] touch-none" style={{ top: `${lampAt(0).y * 100 - 6}%`, height: '14%' }}
+        onPointerDown={e => { strip.current?.setPointerCapture(e.pointerId); setScrub(true); move(e.clientX); }}
+        onPointerMove={e => scrub && move(e.clientX)}
+        onPointerUp={() => setScrub(false)} onPointerCancel={() => setScrub(false)}>
+        {[0, 1, 2, 3, 4, 5, 6].map(i => {
+          const date = addDays(monday, i);
+          return <button key={i} type="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setOpen(i)} aria-label={`${weekdayFull(date)}: ${i > todayIdx ? 'впереди' : `потрачено ${Math.round(spent[i])} ₽`}`} className="sr-only" />;
+        })}
+      </div>
       <AnimatePresence>
         {open != null && (() => {
           const p = lampAt(open);

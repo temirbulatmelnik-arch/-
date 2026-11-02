@@ -55,7 +55,7 @@ export function MonthGrid({ month, days, top, now, selected, onSelect, onSwipe }
             d.in > 0 && `приходит ${num(d.in)} ₽`, d.total != null && `на карте и в резерве ${num(d.total)} ₽`].filter(Boolean).join(', ');
           return (
             <button key={d.date} type="button" onClick={() => onSelect(d.date)} aria-label={aria} aria-pressed={on}
-              className="relative flex h-[46px] flex-col items-start gap-px overflow-hidden rounded-t-[15px] rounded-b-[5px] border border-line bg-surface px-[5px] pt-1 text-left [text-shadow:0_0_3px_var(--surface),0_0_2px_var(--surface)]">
+              className="relative flex h-[54px] flex-col items-start gap-px overflow-hidden rounded-t-[16px] rounded-b-[6px] border border-line bg-surface px-[5px] pt-1 text-left [text-shadow:0_0_3px_var(--surface),0_0_2px_var(--surface)]">
               {level > 0 && (
                 <span className="sc-fill absolute inset-x-0 bottom-0" style={{
                   height: `${level}%`, animationDelay: `${0.1 + i * 0.03}s`, opacity: d.past ? 0.5 : 1,
@@ -67,9 +67,9 @@ export function MonthGrid({ month, days, top, now, selected, onSelect, onSwipe }
                   <span className="absolute -top-px left-[34%] h-0.5 w-[34%] rounded-full bg-[linear-gradient(90deg,transparent,rgba(255,150,100,.95),transparent)]" />
                 </span>
               )}
-              <span className={`relative text-[11.5px] leading-tight ${on || isToday ? 'font-semibold' : ''} ${isToday ? 'text-sea' : isWorkday(d.date) ? '' : 'text-faint'}`}>{n}</span>
-              {d.out > 0 && <span className={`relative text-[10px] leading-tight font-medium ${d.paid ? 'text-muted line-through' : 'text-neg'}`}>{short(-d.out)}</span>}
-              {d.in > 0 && <span className="relative text-[10px] leading-tight font-medium text-pos">{short(d.in)}</span>}
+              <span className={`relative text-[13px] leading-tight ${on || isToday ? 'font-semibold' : 'font-medium'} ${isToday ? 'text-sea' : isWorkday(d.date) ? '' : 'text-faint'}`}>{n}</span>
+              {d.out > 0 && <span className={`relative text-[10.5px] leading-tight font-semibold tracking-[-0.01em] ${d.paid ? 'text-muted line-through' : 'text-neg'}`}>{short(-d.out)}</span>}
+              {d.in > 0 && <span className="relative text-[10.5px] leading-tight font-semibold tracking-[-0.01em] text-pos">{short(d.in)}</span>}
               {isToday && !on && <span className="absolute inset-0 rounded-t-[14px] rounded-b-[4px] ring-[1.5px] ring-sea ring-inset" />}
               {on && (
                 <>
