@@ -39,7 +39,7 @@ export function Plan() {
   return (
     <div>
       <SkyHeader title="Долги" subtitle="Курс к свободе" action={
-        <motion.button type="button" whileTap={{ scale: 0.95 }} onClick={() => set({ bonus: {} })} className="flex h-10 items-center gap-1.5 rounded-full bg-ink px-4 text-[13.5px] font-medium text-bg"><Gift size={15} strokeWidth={1.8} /> Пришла премия</motion.button>
+        <motion.button type="button" whileTap={{ scale: 0.97 }} onClick={() => set({ bonus: {} })} className="flex h-11 items-center gap-1.5 rounded-full bg-ink px-4 text-[13.5px] font-medium text-bg"><Gift size={15} strokeWidth={1.8} /> Пришла премия</motion.button>
       } />
       <DebtHero />
       <Pager<PlanView> className="mt-5" value={view} onChange={v => set({ planView: v })} pages={[

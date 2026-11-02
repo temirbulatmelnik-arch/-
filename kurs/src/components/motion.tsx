@@ -4,14 +4,29 @@ import { animate, AnimatePresence, motion, useDragControls, useMotionValue, useR
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { num } from '../domain/money';
 
-/** отклик под пальцем, листы и раскрытия, сцена и большие числа */
-export const snappy = { type: 'spring', stiffness: 640, damping: 40 } as const;
-export const spring = { type: 'spring', stiffness: 420, damping: 38 } as const;
-export const soft = { type: 'spring', stiffness: 210, damping: 27 } as const;
+/* Токены движения — навыки emil-design-eng, apple-design и motion-design (.claude/skills):
+   сильные кривые вместо встроенных, отклик 120 мс, пружины без отскока для интерфейса (Apple: damping 1),
+   лёгкий отскок — только после жеста с инерцией. Те же кривые — в index.css (--ease-*). */
+export const ease = {
+  /** вход и выход, отклик */
+  out: [0.23, 1, 0.32, 1],
+  /** движение по экрану */
+  inOut: [0.77, 0, 0.175, 1],
+  /** листы снизу, как в iOS */
+  drawer: [0.32, 0.72, 0, 1],
+} as const;
+/** отклик под пальцем */
+export const snappy = { duration: 0.12, ease: ease.out } as const;
+/** интерфейс: появление, переключение, раскрытие */
+export const spring = { type: 'spring', bounce: 0, duration: 0.35 } as const;
+/** после жеста с инерцией (свайп, бросок): чуть живее */
+export const fling = { type: 'spring', bounce: 0.2, duration: 0.45 } as const;
+/** большие числа и неспешные вещи */
+export const soft = { type: 'spring', bounce: 0, duration: 0.55 } as const;
 
 /** Кнопка с откликом: чуть сжимается под пальцем, как кнопки iOS */
 export function Tap({ className = '', children, ...rest }: HTMLMotionProps<'button'>) {
-  return <motion.button type="button" whileTap={{ scale: 0.96 }} transition={snappy} className={`select-none ${className}`} {...rest}>{children}</motion.button>;
+  return <motion.button type="button" whileTap={{ scale: 0.97 }} transition={snappy} className={`select-none ${className}`} {...rest}>{children}</motion.button>;
 }
 
 /* ---------- Цифры-табло ---------- */
@@ -43,7 +58,7 @@ export function Roll({ value, className = '', sign, rub = true }: { value: numbe
           {chars.map((c, i) => {
             const key = chars.length - i;
             return /\d/.test(c)
-              ? <motion.span key={key} layout="position" initial={{ opacity: 0, y: '-30%' }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: '30%' }} transition={soft}><Digit d={Number(c)} /></motion.span>
+              ? <motion.span key={key} layout="position" initial={{ opacity: 0, y: '-20%' }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: '20%', transition: snappy }} transition={soft}><Digit d={Number(c)} /></motion.span>
               : <motion.span key={`s${key}`} layout="position" className="inline-block w-[0.22em]" />;
           })}
         </AnimatePresence>
@@ -54,7 +69,7 @@ export function Roll({ value, className = '', sign, rub = true }: { value: numbe
 }
 
 /** Число досчитывает от start при первом показе — для больших сумм, которые «рассказывают» (долг тает) */
-export function useTween(value: number, start?: number, ms = 1200): number {
+export function useTween(value: number, start?: number, ms = 1000): number {
   const reduced = useReducedMotion();
   const [shown, setShown] = useState(reduced ? value : start ?? value);
   const cur = useRef(shown);
@@ -84,7 +99,8 @@ export function SwipeRow({ children, left, right = [], className = '', rowClass 
   const max = right.length * W;
   const leftOpacity = useTransform(x, [0, 40, W], [0, 0.6, 1]);
   const rightOpacity = useTransform(x, [-W, -40, 0], [1, 0.6, 0]);
-  const settle = (to: number) => animate(x, to, spring);
+  // после свайпа — пружина с инерцией пальца (apple-design: передать скорость, лёгкий отскок)
+  const settle = (to: number) => animate(x, to, fling);
   const end = (_: unknown, info: PanInfo) => {
     const dx = info.offset.x, vx = info.velocity.x;
     if (left && (dx > W * 1.6 || (dx > W * 0.6 && vx > 500))) { settle(0); left.onAction(); return; }
@@ -93,7 +109,7 @@ export function SwipeRow({ children, left, right = [], className = '', rowClass 
     settle(0);
   };
   return (
-    <div data-noswipe className={`relative overflow-hidden ${className}`}>
+    <div data-noswipe className={`relative overflow-hidden select-none ${className}`}>
       {left && (
         <motion.button type="button" onClick={() => { settle(0); left.onAction(); }} style={{ opacity: leftOpacity, background: ACTION_BG[left.tone] }}
           className="absolute inset-y-0 left-0 flex w-1/2 items-center gap-2 pl-5 text-[13px] font-medium text-white">
@@ -149,10 +165,10 @@ export function Pager<T extends string>({ value, onChange, pages, className = ''
         style={{ touchAction: 'pan-y' }} className="overflow-x-clip">
         <AnimatePresence mode="popLayout" initial={false} custom={dir}>
           <motion.div key={value} custom={dir} variants={{
-            enter: (d: number) => ({ x: d * 48, opacity: 0 }),
+            enter: (d: number) => ({ x: d * 20, opacity: 0 }),
             center: { x: 0, opacity: 1 },
-            exit: (d: number) => ({ x: -d * 48, opacity: 0 }),
-          }} initial="enter" animate="center" exit="exit" transition={spring}>
+            exit: (d: number) => ({ x: -d * 20, opacity: 0, transition: { duration: 0.12, ease: ease.out } }),
+          }} initial="enter" animate="center" exit="exit" transition={{ duration: 0.22, ease: ease.out }}>
             {pages[index]?.render()}
           </motion.div>
         </AnimatePresence>
@@ -165,16 +181,4 @@ export function Pager<T extends string>({ value, onChange, pages, className = ''
 
 /** Первое появление списка: строки приходят снизу по очереди, быстро; дальше — без задержек */
 export const list = { hidden: {}, show: { transition: { staggerChildren: 0.035, delayChildren: 0.05 } } };
-export const item = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0, transition: spring } };
-
-/** Прокрутка страницы — для параллакса сцены и полосы с остатком */
-export function useScrollY(): number {
-  const [y, setY] = useState(() => window.scrollY);
-  useEffect(() => {
-    let raf = 0;
-    const on = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => setY(window.scrollY)); };
-    window.addEventListener('scroll', on, { passive: true });
-    return () => { window.removeEventListener('scroll', on); cancelAnimationFrame(raf); };
-  }, []);
-  return y;
-}
+export const item = { hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0, transition: { duration: 0.28, ease: ease.out } } };

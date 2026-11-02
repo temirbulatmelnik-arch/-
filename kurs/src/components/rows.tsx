@@ -1,5 +1,6 @@
 // Общие строки списков: трата, событие календаря, предупреждение.
 import { AlertTriangle, ArrowDownLeft, Check, ChevronRight, CreditCard, Info, PiggyBank, Receipt, Repeat, Sparkles, Wallet } from 'lucide-react';
+import { motion } from 'motion/react';
 import type { ReactNode } from 'react';
 import { eventGroup, urgency, type EventGroup } from '../domain/calendar';
 import { ddmm, relDays, weekday } from '../domain/dates';
@@ -43,7 +44,9 @@ export function EventRow({ e, mark, now, onClick, onToggle, showDate = true }: {
     <div className={`flex items-center gap-3 px-4 py-3 ${u === 'done' ? 'opacity-55' : ''}`}>
       <button type="button" onClick={onToggle ?? onClick} aria-label={mark?.done ? 'Снять отметку' : g === 'income' ? 'Отметить: пришло' : g === 'weekly' ? 'Отметить: долито' : 'Отметить: оплачено'}
         className={`grid size-10 shrink-0 place-items-center rounded-full border transition ${mark?.done ? 'border-transparent bg-pos/15 text-pos' : hot ? 'border-neg/50 text-neg' : 'border-line text-muted'}`}>
-        {mark?.done ? <Check size={17} strokeWidth={2} /> : <Icon size={17} strokeWidth={1.5} />}
+        {mark?.done
+          ? <motion.span initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: 'spring', bounce: 0.4, duration: 0.35 }}><Check size={17} strokeWidth={2} /></motion.span>
+          : <Icon size={17} strokeWidth={1.5} />}
       </button>
       <button type="button" onClick={onClick} className="flex min-w-0 flex-1 items-center gap-3 text-left">
         <span className="min-w-0 flex-1">

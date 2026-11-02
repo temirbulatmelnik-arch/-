@@ -43,6 +43,9 @@ PR не нужен.
 
 Перед любой работой с внешним видом — навык `.claude/skills/frontend-design` и `kurs/DESIGN.md` (решения владельца:
 основа — «Невская вода», «тетрадный» стиль отклонён). Новый внешний вид сначала показывать макетами на согласование.
+Для движения и «родного» поведения на iPhone — навыки из `.claude/skills/README.md` (Emil Kowalski, LottieFiles, ibelick,
+Vercel): `emil-design-eng`, `apple-design`, `mobile-native`, `animate`, `motion-design` и другие. Токены движения — в
+`kurs/src/components/motion.tsx` и `kurs/src/index.css`. Решения владельца важнее советов навыков.
 
 ## Как работать экономно
 

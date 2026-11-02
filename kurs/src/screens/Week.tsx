@@ -1,7 +1,7 @@
 // «Неделя»: сцена с мостом, остаток недели и кольцо дня. Под сценой — действия и стопка карточек: сегодня,
 // ближайший платёж, дела, резерв. Плашка о перерасходе появляется при входе в приложение и сама растворяется.
 import { ChevronRight, Hourglass, MessagesSquare, PiggyBank, Scale, ScanText, Settings as Cog } from 'lucide-react';
-import { AnimatePresence, motion, useMotionValueEvent, useScroll, useTransform } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { CardStack, type StackCard } from '../components/CardStack';
@@ -76,10 +76,20 @@ export function Week() {
   const ui = useUi();
   const todayIdx = (fromKey(now).getDay() + 6) % 7;
   // сцена уходит медленнее страницы, сверху проявляется стеклянная полоса с остатком
-  const { scrollY } = useScroll();
-  const sceneY = useTransform(scrollY, [0, 600], [0, 210], { clamp: true });
+  // без событий прокрутки (fixing-motion-performance): параллакс — CSS scroll-timeline (.sc-parallax),
+  // полоса и пауза бесконечных анимаций — по видимости сцены (IntersectionObserver)
+  const sceneRef = useRef<HTMLDivElement>(null);
+  const markRef = useRef<HTMLDivElement>(null);
   const [compact, setCompact] = useState(false);
-  useMotionValueEvent(scrollY, 'change', v => setCompact(v > 330));
+  useEffect(() => {
+    const mark = markRef.current, scene = sceneRef.current;
+    if (!mark || !scene) return;
+    const bar = new IntersectionObserver(([e]) => setCompact(!e.isIntersecting && e.boundingClientRect.top < 0));
+    const pause = new IntersectionObserver(([e]) => scene.classList.toggle('sc-paused', !e.isIntersecting));
+    bar.observe(mark);
+    pause.observe(scene);
+    return () => { bar.disconnect(); pause.disconnect(); };
+  }, []);
   const week = useMemo(() => weekSummary(expenses, debts, overrides, now), [expenses, debts, overrides, now]);
   const today = useMemo(() => dayBudget(expenses, debts, overrides, now), [expenses, debts, overrides, now]);
   const money = useMemo(() => weekMoney(expenses, debts, overrides, bridge, weekStart(now)), [expenses, debts, overrides, bridge, now]);
@@ -224,9 +234,10 @@ export function Week() {
   const open = ui.stackOpen ?? (payHot ? 'ahead' : 'today');
 
   return (
-    <div>
+    <div className="relative">
       <CompactBar weekLeft={week.left} dayLeft={today.left} show={compact} />
-      <motion.div style={{ y: sceneY }} className="will-change-transform">
+      <div ref={markRef} aria-hidden="true" className="pointer-events-none absolute top-[330px] h-px w-px" />
+      <div ref={sceneRef} className="sc-parallax">
       <WeekScene today={todayIdx} overlay={<Lamps monday={week.monday} todayIdx={todayIdx} limit={week.limit} dayNorm={today.day} />}>
         <div className="flex items-start justify-between gap-3 px-5 pt-2.5">
           <div style={{ color: 'var(--scene-ink)' }}>
@@ -278,7 +289,7 @@ export function Week() {
           </button>
         )}
       </WeekScene>
-      </motion.div>
+      </div>
 
       {/* действия с данными: всё, что приходит из банка и из чата */}
       <div className="relative z-[1] -mt-1 grid grid-cols-3 gap-2 bg-bg px-4 pt-2">
@@ -287,7 +298,7 @@ export function Week() {
           ['checkup', 'Сверка', Scale],
           ['sync', 'Чат', MessagesSquare],
         ] as const).map(([id, label, Icon], i) => (
-          <motion.button key={id} type="button" whileTap={{ scale: 0.95 }} onClick={() => runQuick(id)}
+          <motion.button key={id} type="button" whileTap={{ scale: 0.97 }} onClick={() => runQuick(id)}
             initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: 0.25 + i * 0.06 }}
             className="flex h-[50px] items-center justify-center gap-2 rounded-[17px] border border-line bg-surface text-[14px] font-medium shadow-[0_6px_18px_-14px_rgba(10,36,51,.5)]">
             <Icon size={18} strokeWidth={1.6} className="text-sea" /> {label}
@@ -356,7 +367,7 @@ function CompactBar({ weekLeft, dayLeft, show }: { weekLeft: number; dayLeft: nu
       {show && (
         <motion.button type="button" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} aria-label="Наверх"
           initial={{ y: -24, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -24, opacity: 0 }} transition={spring}
-          className="fixed inset-x-0 top-[env(safe-area-inset-top)] z-30 mx-auto flex w-full max-w-md items-center justify-between gap-3 border-b border-line bg-bg/80 px-5 py-2.5 text-left backdrop-blur-xl backdrop-saturate-150">
+          className="glass fixed inset-x-0 top-[env(safe-area-inset-top)] z-30 mx-auto flex w-full max-w-md items-center justify-between gap-3 border-b border-line bg-bg/80 px-5 py-2.5 text-left backdrop-blur-xl backdrop-saturate-150">
           <span>
             <span className="block text-[11.5px] text-muted">{weekLeft < 0 ? 'перерасход недели' : 'на неделю'}</span>
             <span className={`figure block text-[19px] leading-tight ${weekLeft < 0 ? 'text-neg' : ''}`}><Roll value={Math.abs(weekLeft)} /></span>
@@ -405,9 +416,9 @@ function Lamps({ monday, todayIdx, limit, dayNorm }: { monday: string; todayIdx:
           const ref = isToday ? dayNorm : avg;
           const over = !future && v > ref + 0.5;
           return (
-            <motion.div key={open} initial={{ opacity: 0, y: 8, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 6, scale: 0.95 }} transition={spring}
+            <motion.div key={open} initial={{ opacity: 0, y: 6, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 4, scale: 0.97, transition: { duration: 0.14 } }} transition={spring}
               className="absolute z-10 w-[176px] -translate-x-1/2 rounded-2xl border px-3.5 py-2.5 text-[13px] leading-snug shadow-lg backdrop-blur-md"
-              style={{ left: `clamp(100px, ${p.x * 100}%, calc(100% - 100px))`, bottom: `${(1 - p.y) * 100 + 7}%`, background: 'var(--pill)', borderColor: 'var(--pill-border)', color: 'var(--scene-ink)' }}>
+              style={{ transformOrigin: 'bottom center', left: `clamp(100px, ${p.x * 100}%, calc(100% - 100px))`, bottom: `${(1 - p.y) * 100 + 7}%`, background: 'var(--pill)', borderColor: 'var(--pill-border)', color: 'var(--scene-ink)' }}>
               <div className="text-[12px] first-letter:uppercase" style={{ color: 'var(--scene-muted)' }}>{isToday ? 'сегодня' : weekdayFull(date)}, {Number(date.slice(8))}-е</div>
               {future
                 ? <div className="mt-0.5 font-medium">впереди, в среднем <Money value={avg} /> в день</div>

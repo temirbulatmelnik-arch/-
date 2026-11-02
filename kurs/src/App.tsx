@@ -1,4 +1,4 @@
-import { AnimatePresence, motion, MotionConfig } from 'motion/react';
+import { MotionConfig } from 'motion/react';
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { TABS, TabBar } from './components/TabBar';
 import { Toast } from './components/ui';
@@ -69,7 +69,7 @@ export default function App() {
   const tourSeen = useStore(s => s.settings.tourSeen ?? 0);
   const { tab, toast, set } = useUi();
   useTabScroll(tab);
-  // вкладка уезжает в ту сторону, куда нажали
+  // новая вкладка въезжает со стороны нажатия
   const index = ORDER.indexOf(tab);
   const last = useRef(index);
   const dir = index >= last.current ? 1 : -1;
@@ -99,16 +99,13 @@ export default function App() {
     <MotionConfig reducedMotion="user">
       <div className="pt-safe mx-auto min-h-dvh w-full max-w-md overflow-x-clip pb-36">
         <div aria-hidden="true" className="fixed inset-x-0 top-0 z-40 h-[env(safe-area-inset-top)]" style={{ background: 'var(--sky-1)' }} />
-        <AnimatePresence mode="popLayout" initial={false} custom={dir}>
-          <motion.main key={tab} custom={dir}
-            variants={{ enter: (d: number) => ({ x: d * 36, opacity: 0 }), center: { x: 0, opacity: 1 }, exit: (d: number) => ({ x: d * -36, opacity: 0 }) }}
-            initial="enter" animate="center" exit="exit" transition={{ type: 'spring', stiffness: 380, damping: 36, opacity: { duration: 0.18 } }}>
-            {tab === 'week' && <Week />}
-            {tab === 'payments' && <Payments />}
-            {tab === 'budget' && <Budget />}
-            {tab === 'plan' && <Plan />}
-          </motion.main>
-        </AnimatePresence>
+        {/* вкладки — как в iOS: сразу, новая чуть въезжает со стороны нажатия (index.css, tab-in-*) */}
+        <main key={tab} className={dir > 0 ? 'tab-in-r' : 'tab-in-l'}>
+          {tab === 'week' && <Week />}
+          {tab === 'payments' && <Payments />}
+          {tab === 'budget' && <Budget />}
+          {tab === 'plan' && <Plan />}
+        </main>
 
         <TabBar />
 

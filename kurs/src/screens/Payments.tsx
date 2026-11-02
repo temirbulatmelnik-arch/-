@@ -242,15 +242,15 @@ function ListView({ month, events, total, incomes }: { month: string; events: Ca
       <div className="mt-5 flex items-center gap-2 px-4" data-noswipe>
         <div className="no-scrollbar flex min-w-0 flex-1 gap-2 overflow-x-auto">
           {FILTERS.map(f => (
-            <motion.button key={f.id} type="button" whileTap={{ scale: 0.94 }} onClick={() => setFilter(f.id)}
-              className={`relative shrink-0 rounded-full border px-3.5 py-1.5 text-[13px] font-medium transition-colors ${filter === f.id ? 'border-transparent text-bg' : 'border-line text-muted'}`}>
+            <motion.button key={f.id} type="button" whileTap={{ scale: 0.95 }} onClick={() => setFilter(f.id)}
+              className={`relative shrink-0 rounded-full border px-3.5 py-2 text-[13px] font-medium transition-colors ${filter === f.id ? 'border-transparent text-bg' : 'border-line text-muted'}`}>
               {filter === f.id && <motion.span layoutId="pay-filter" className="absolute inset-0 rounded-full bg-ink" transition={{ type: 'spring', stiffness: 500, damping: 38 }} />}
               <span className="relative">{f.label}</span>
             </motion.button>
           ))}
           {filter === 'all' && (
             <button type="button" onClick={() => setTopUps(!topUps)}
-              className={`shrink-0 rounded-full border px-3.5 py-1.5 text-[13px] font-medium ${topUps ? 'border-sea text-sea' : 'border-line text-muted'}`}>Пополнения карты</button>
+              className={`shrink-0 rounded-full border px-3.5 py-2 text-[13px] font-medium ${topUps ? 'border-sea text-sea' : 'border-line text-muted'}`}>Пополнения карты</button>
           )}
         </div>
         <IconButton onClick={() => set({ fixed: true })} label="Обязательные платежи"><Repeat size={17} strokeWidth={1.5} /></IconButton>

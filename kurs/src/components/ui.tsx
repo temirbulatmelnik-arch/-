@@ -42,7 +42,7 @@ export function CatIcon({ id, className = '' }: { id: CategoryId; className?: st
 export function IconButton({ onClick, label, children, className = '' }: { onClick: () => void; label: string; children: ReactNode; className?: string }) {
   return (
     <button type="button" onClick={onClick} aria-label={label} title={label}
-      className={`grid size-10 shrink-0 place-items-center rounded-full border border-line bg-surface text-ink transition active:scale-95 ${className}`}>
+      className={`grid size-11 shrink-0 place-items-center rounded-full border border-line bg-surface text-ink transition-transform duration-100 ease-out active:scale-[.97] ${className}`}>
       {children}
     </button>
   );
@@ -53,7 +53,7 @@ export function PrimaryButton({ onClick, children, className = '', disabled, ton
 }) {
   const tones = { sea: 'bg-sea text-on-sea', ink: 'bg-ink text-bg', neg: 'bg-neg text-white' };
   return (
-    <motion.button type="button" whileTap={{ scale: 0.98 }} onClick={onClick} disabled={disabled}
+    <motion.button type="button" whileTap={{ scale: 0.97 }} transition={{ duration: 0.12, ease: [0.23, 1, 0.32, 1] }} onClick={onClick} disabled={disabled}
       className={`flex h-[52px] w-full items-center justify-center gap-2 rounded-[18px] text-[15.5px] font-medium disabled:opacity-35 ${tones[tone]} ${className}`}>
       {children}
     </motion.button>
@@ -62,7 +62,7 @@ export function PrimaryButton({ onClick, children, className = '', disabled, ton
 
 export function SecondaryButton({ onClick, children, className = '', disabled }: { onClick: () => void; children: ReactNode; className?: string; disabled?: boolean }) {
   return (
-    <motion.button type="button" whileTap={{ scale: 0.98 }} onClick={onClick} disabled={disabled}
+    <motion.button type="button" whileTap={{ scale: 0.97 }} transition={{ duration: 0.12, ease: [0.23, 1, 0.32, 1] }} onClick={onClick} disabled={disabled}
       className={`flex h-12 items-center justify-center gap-2 rounded-2xl border border-line bg-surface px-4 text-[14.5px] font-medium text-ink disabled:opacity-35 ${className}`}>
       {children}
     </motion.button>
@@ -87,8 +87,9 @@ export function Chip({ children, tone = 'neutral', className = '' }: { children:
 
 /** Лист снизу, как в iOS: выезжает пружиной, тянется пальцем за шапку вниз и закрывается.
  *  compact — не выше трёх четвертей экрана: над ним видно, откуда он открылся */
-export function Sheet({ open, onClose, title, subtitle, children, footer, compact, action }: {
-  open: boolean; onClose: () => void; title: string; subtitle?: ReactNode; children: ReactNode; footer?: ReactNode; compact?: boolean; action?: ReactNode;
+/** bare — содержимое само раскладывает высоту (например, прокрутка сверху и закреплённая клавиатура снизу) */
+export function Sheet({ open, onClose, title, subtitle, children, footer, compact, action, bare }: {
+  open: boolean; onClose: () => void; title: string; subtitle?: ReactNode; children: ReactNode; footer?: ReactNode; compact?: boolean; action?: ReactNode; bare?: boolean;
 }) {
   const controls = useDragControls();
   const fade = useMotionValue(1);
@@ -102,21 +103,23 @@ export function Sheet({ open, onClose, title, subtitle, children, footer, compac
     return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
   }, [open, onClose, fade]);
 
+  // закрыть можно и коротким броском вниз — не нужно тянуть далеко (apple-design, animate: drag to dismiss)
   const end = (_: unknown, info: PanInfo) => {
-    if (info.offset.y > 110 || info.velocity.y > 650) onClose();
+    if (info.offset.y > 110 || (info.velocity.y > 320 && info.offset.y > 12)) onClose();
     else animate(fade, 1, { duration: 0.2 });
   };
 
   return (
     <AnimatePresence>
       {open && (
-        <motion.div className="fixed inset-0 z-50 flex items-end justify-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.22 }}>
+        <motion.div className="fixed inset-0 z-50 flex items-end justify-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.2 } }} transition={{ duration: 0.25 }}>
           <motion.div className="absolute inset-0 bg-[rgba(4,14,22,.5)] backdrop-blur-[4px]" style={{ opacity: fade }} onClick={onClose} />
           <motion.div role="dialog" aria-modal="true" aria-label={title}
             drag="y" dragListener={false} dragControls={controls} dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0.04, bottom: 0.9 }}
             onDrag={(_, i) => fade.set(1 - Math.min(0.85, Math.max(0, i.offset.y) / 520))} onDragEnd={end}
             className={`relative flex w-full max-w-md flex-col rounded-t-[30px] border-t border-line bg-bg shadow-[0_-18px_48px_-24px_rgba(4,14,22,.55)] ${compact ? 'max-h-[78dvh]' : 'max-h-[94dvh]'}`}
-            initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', stiffness: 380, damping: 38 }}>
+            initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%', transition: { duration: 0.26, ease: [0.32, 0.72, 0, 1] } }}
+            transition={{ duration: 0.45, ease: [0.32, 0.72, 0, 1] }}>
             {/* за шапку лист тянется вниз — как в iOS */}
             <div onPointerDown={e => controls.start(e)} className="cursor-grab touch-none select-none active:cursor-grabbing">
               <div className="mx-auto mt-2.5 h-[5px] w-10 rounded-full bg-line" />
@@ -127,12 +130,14 @@ export function Sheet({ open, onClose, title, subtitle, children, footer, compac
                 </div>
                 <div className="flex shrink-0 items-center gap-2" onPointerDown={e => e.stopPropagation()}>
                   {action}
-                  <IconButton onClick={onClose} label="Закрыть" className="size-9"><X size={17} strokeWidth={1.6} /></IconButton>
+                  <IconButton onClick={onClose} label="Закрыть" className="size-10"><X size={17} strokeWidth={1.6} /></IconButton>
                 </div>
               </div>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-6">{children}</div>
-            {footer ? <div className="pb-safe border-t border-line bg-bg px-5 pt-3"><div className="pb-3">{footer}</div></div> : <div className="pb-safe" />}
+            {bare
+              ? <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+              : <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-6">{children}</div>}
+            {footer ? <div className="pb-safe border-t border-line bg-bg px-5 pt-3"><div className="pb-3">{footer}</div></div> : !bare && <div className="pb-safe" />}
           </motion.div>
         </motion.div>
       )}
@@ -249,10 +254,10 @@ export function Toast({ text, onDone }: { text: string | null; onDone: () => voi
   return (
     <AnimatePresence>
       {text && (
-        <motion.div key={text} role="status" initial={{ opacity: 0, y: -28, scale: 0.92 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -20, scale: 0.95 }}
-          transition={{ type: 'spring', stiffness: 520, damping: 34 }} onClick={() => done.current()}
+        <motion.div key={text} role="status" initial={{ opacity: 0, y: -24, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -16, scale: 0.97, transition: { duration: 0.18, ease: [0.23, 1, 0.32, 1] } }}
+          transition={{ type: 'spring', bounce: 0.2, duration: 0.45 }} onClick={() => done.current()}
           className="fixed inset-x-0 top-[calc(env(safe-area-inset-top)+10px)] z-[70] mx-auto flex w-fit max-w-[90%] items-center gap-2.5 rounded-full bg-ink px-4 py-2.5 text-[13.5px] leading-snug font-medium text-bg shadow-[0_14px_34px_-12px_rgba(4,14,22,.6)]">
-          <motion.span className="size-2 shrink-0 rounded-full bg-sea" initial={{ scale: 0 }} animate={{ scale: [0, 1.6, 1] }} transition={{ duration: 0.5, delay: 0.1 }} />
+          <motion.span className="size-2 shrink-0 rounded-full bg-sea" initial={{ scale: 0.5 }} animate={{ scale: [0.5, 1.5, 1] }} transition={{ duration: 0.45, delay: 0.1, ease: [0.23, 1, 0.32, 1] }} />
           {text}
         </motion.div>
       )}

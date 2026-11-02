@@ -139,6 +139,42 @@ html, body {
   overscroll-behavior-y: none;
 }
 
+/* Кривые движения — те же, что в components/motion.tsx (навыки emil-design-eng, apple-design) */
+:root {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* «Как установленное приложение» (навык mobile-native): без увеличения шрифта в альбомной ориентации,
+   нажатие срабатывает сразу (без ожидания двойного тапа), подписи кнопок не выделяются долгим нажатием */
+html { -webkit-text-size-adjust: 100%; }
+button, a, [role="button"], [role="tab"], label { touch-action: manipulation; }
+button, [role="button"], [role="tab"] { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+h1, h2, h3 { text-wrap: balance; }
+p { text-wrap: pretty; }
+
+/* Вкладки сменяются как в iOS — мгновенно, новая чуть въезжает со стороны нажатия. CSS-анимация идёт мимо
+   основного потока, а заполнение backwards не оставляет transform после конца (иначе «плавающие» элементы съедут) */
+@keyframes tab-in-r { from { opacity: 0; transform: translateX(10px); } }
+@keyframes tab-in-l { from { opacity: 0; transform: translateX(-10px); } }
+@keyframes fade-in { from { opacity: 0; } }
+.tab-in-r { animation: tab-in-r 200ms var(--ease-out) backwards; }
+.tab-in-l { animation: tab-in-l 200ms var(--ease-out) backwards; }
+
+/* Параллакс сцены «Сегодня» — по прокрутке силами браузера (scroll-driven animation), без событий прокрутки */
+@supports (animation-timeline: scroll()) {
+  @keyframes sc-parallax { to { transform: translateY(210px); } }
+  .sc-parallax { animation: sc-parallax linear both; animation-timeline: scroll(root); animation-range: 0 600px; }
+}
+/* сцена ушла с экрана — бесконечные мелочи (облака, чайки, блики) стоят */
+.sc-paused, .sc-paused * { animation-play-state: paused !important; }
+
+/* «Уменьшить прозрачность» в настройках iPhone: стекло становится плотным */
+@media (prefers-reduced-transparency: reduce) {
+  .glass { background: var(--surface) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+}
+
 body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
@@ -204,8 +240,8 @@ button:disabled { cursor: default; }
 @keyframes sc-lakhta { 0%, 100% { opacity: .3; } 3% { opacity: 1; } 11% { opacity: .3; } }
 @keyframes sc-pop { from { opacity: 0; transform: translateY(-8px) scale(.97); } }
 /* плашка о перерасходе: проявляется из размытия, держится, пока бежит полоска, и растворяется вверх */
-@keyframes sc-pill-in { 0% { opacity: 0; transform: translateY(-16px) scale(.95); filter: blur(8px); } 55% { opacity: 1; filter: blur(0); } 100% { opacity: 1; transform: none; filter: none; } }
-@keyframes sc-pill-out { 0% { opacity: 1; transform: none; filter: none; } 100% { opacity: 0; transform: translateY(-12px) scale(.97); filter: blur(10px); } }
+@keyframes sc-pill-in { 0% { opacity: 0; transform: translateY(-12px) scale(.96); filter: blur(4px); } 55% { opacity: 1; filter: blur(0); } 100% { opacity: 1; transform: none; filter: none; } }
+@keyframes sc-pill-out { 0% { opacity: 1; transform: none; filter: none; } 100% { opacity: 0; transform: translateY(-10px) scale(.97); filter: blur(4px); } }
 @keyframes sc-pill-timer { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 .sc-halo { transform-box: fill-box; transform-origin: center; animation: sc-halo 7s ease-in-out infinite; }
 .sc-cloud { transform-box: view-box; animation: sc-cloud 26s ease-in-out infinite alternate; }
@@ -262,4 +298,6 @@ button:disabled { cursor: default; }
    (идут кадрами из Petersburg.tsx) и наполнение воды остаются — они медленные, без рывков и приближений */
 @media (prefers-reduced-motion: reduce) {
   .sc-halo, .sc-cloud, .sc-gull, .sc-flap, .sc-refl, .sc-glit, .sc-tw, .sc-glow, .sc-blink, .sc-wave, .sc-ring, .sc-lakhta { animation: none !important; }
+  .sc-parallax { animation: none !important; }
+  .tab-in-r, .tab-in-l { animation-name: fade-in; }
 }

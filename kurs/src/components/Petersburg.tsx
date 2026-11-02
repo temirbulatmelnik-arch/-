@@ -398,7 +398,7 @@ export function SkyHeader({ title, subtitle, action }: { title: ReactNode; subti
 export function SkyButton({ onClick, label, children }: { onClick: () => void; label: string; children: ReactNode }) {
   return (
     <button type="button" onClick={onClick} aria-label={label} title={label}
-      className="grid size-10 shrink-0 place-items-center rounded-full border border-black/15 bg-white/35 text-[#0a2433] backdrop-blur-md transition active:scale-95 dark:border-white/15 dark:bg-white/10 dark:text-[#f2f6f8]">
+      className="glass grid size-11 shrink-0 place-items-center rounded-full border border-black/15 bg-white/35 text-[#0a2433] backdrop-blur-md transition-transform duration-100 ease-out active:scale-[.97] dark:border-white/15 dark:bg-white/10 dark:text-[#f2f6f8]">
       {children}
     </button>
   );

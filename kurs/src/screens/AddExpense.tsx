@@ -1,10 +1,10 @@
 // Запись траты: своя клавиатура в листе (iPhone не закрывает экран своей), сумма, категория, «Записать».
 // Больше 5 000 — предложить паузу 48 часов. Сверху — «Из банка»: загрузить траты разом.
-import { AlertTriangle, CalendarDays, Delete, Hourglass, ScanText, Trash2 } from 'lucide-react';
+import { AlertTriangle, CalendarDays, CreditCard, Delete, Hourglass, PiggyBank, ScanText, Trash2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import { snappy, spring } from '../components/motion';
-import { CAT_COLOR, CATEGORY_ICON, PrimaryButton, SecondaryButton, Segmented, Sheet } from '../components/ui';
+import { CAT_COLOR, CATEGORY_ICON, PrimaryButton, SecondaryButton, Sheet } from '../components/ui';
 import { bridgeWeek, weekMoney } from '../domain/bridge';
 import { dayMonth, today, weekday, weekStart } from '../domain/dates';
 import { parseAmount, rub } from '../domain/money';
@@ -14,12 +14,15 @@ import type { CategoryId, Source } from '../domain/types';
 import { useStore } from '../store/store';
 import { toast, useUi, type AddPrefill } from '../store/ui';
 
+const SOURCE_NAME: Record<Source, string> = { life: 'Карта', reserve: 'Резерв', credit: 'Кредитка' };
+const NEXT: Record<Source, Source> = { life: 'reserve', reserve: 'credit', credit: 'life' };
+
 export function AddExpenseSheet() {
   const prefill = useUi(s => s.add);
   const set = useUi(s => s.set);
   const close = () => set({ add: null });
   return (
-    <Sheet open={!!prefill} onClose={close} title={prefill?.edit ? 'Трата' : 'Новая трата'}
+    <Sheet bare open={!!prefill} onClose={close} title={prefill?.edit ? 'Трата' : 'Новая трата'}
       action={!prefill?.edit && (
         <motion.button type="button" whileTap={{ scale: 0.94 }} onClick={() => { set({ add: null }); window.setTimeout(() => set({ scan: true }), 200); }}
           className="flex h-9 items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-[13px] font-medium"><ScanText size={15} strokeWidth={1.7} className="text-sea" /> Из банка</motion.button>
@@ -90,7 +93,7 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
 
   if (askPause) {
     return (
-      <div className="space-y-4 pt-2">
+      <div className="space-y-4 overflow-y-auto px-5 pt-2 pb-6">
         <div className="card flex items-start gap-3 p-4">
           <span className="grid size-10 shrink-0 place-items-center rounded-full bg-warn/12 text-warn"><Hourglass size={18} strokeWidth={1.5} /></span>
           <div>
@@ -105,7 +108,9 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   }
 
   return (
-    <div className="space-y-3 pt-0">
+    <>
+    {/* сверху — сумма, когда, откуда, категория; прокручивается сама, если экран невысокий */}
+    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-5 pb-4 [mask-image:linear-gradient(to_bottom,black_calc(100%-18px),transparent)]">
       {/* сумма: цифры выпрыгивают по одной */}
       <div className="flex min-h-[64px] items-end justify-center gap-1 pt-1" aria-live="polite" aria-label={`Сумма ${amount || 0} ₽`}>
         <span className="figure flex text-[52px] leading-none">
@@ -118,12 +123,21 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
         <span className="mb-1.5 text-[26px] text-muted">₽</span>
       </div>
 
-      <div className="flex items-center justify-center gap-2">
-        <button type="button" onClick={() => dateInput.current?.showPicker?.() ?? dateInput.current?.focus()} className="relative flex h-9 items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-[13px] font-medium">
+      {/* дата, откуда платили и что купили — одной строкой; источник переключается по кругу, обычно это карта */}
+      <div className="flex items-center gap-2">
+        <button type="button" onClick={() => dateInput.current?.showPicker?.() ?? dateInput.current?.focus()} className="relative flex h-10 shrink-0 items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-[13px] font-medium">
           <CalendarDays size={15} strokeWidth={1.6} className="text-sea" />{date === today() ? 'Сегодня' : `${weekday(date)}, ${dayMonth(date)}`}
           <input ref={dateInput} type="date" value={date} onChange={e => setDate(e.target.value || today())} className="absolute inset-0 opacity-0" aria-label="Дата" />
         </button>
-        <input value={note} onChange={e => setNote(e.target.value)} placeholder="Что купили" className="h-9 w-[150px] rounded-full border border-line bg-surface px-3.5 text-[16px] outline-none placeholder:text-faint focus:border-sea" />
+        <motion.button type="button" whileTap={{ scale: 0.95 }} transition={snappy} onClick={() => setSource(NEXT[source])} aria-label={`Откуда: ${SOURCE_NAME[source]}. Нажмите, чтобы сменить`}
+          className={`flex h-10 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[13px] font-medium ${source === 'credit' ? 'border-neg/40 bg-neg/10 text-neg' : source === 'reserve' ? 'border-info/40 bg-info/10 text-info' : 'border-line bg-surface'}`}>
+          <AnimatePresence mode="popLayout" initial={false}>
+            <motion.span key={source} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={snappy} className="flex items-center gap-1.5">
+              {source === 'reserve' ? <PiggyBank size={15} strokeWidth={1.6} /> : <CreditCard size={15} strokeWidth={1.6} className={source === 'life' ? 'text-sea' : ''} />}{SOURCE_NAME[source]}
+            </motion.span>
+          </AnimatePresence>
+        </motion.button>
+        <input value={note} onChange={e => setNote(e.target.value)} placeholder="Что купили" className="h-10 min-w-0 flex-1 rounded-full border border-line bg-surface px-3.5 text-[16px] outline-none placeholder:text-faint focus:border-sea" />
       </div>
 
       <div className="grid grid-cols-5 gap-2">
@@ -131,7 +145,7 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
           const Icon = CATEGORY_ICON[c.id];
           const on = category === c.id;
           return (
-            <motion.button key={c.id} type="button" onClick={() => setCategory(c.id)} whileTap={{ scale: 0.9 }} transition={snappy}
+            <motion.button key={c.id} type="button" onClick={() => setCategory(c.id)} whileTap={{ scale: 0.95 }} transition={snappy}
               className={`relative flex aspect-[1/0.92] flex-col items-center justify-center gap-1 overflow-hidden rounded-[18px] border text-center ${on ? 'border-transparent text-white' : 'border-line bg-surface'}`}>
               {on && <motion.span layoutId="cat-pick" className="absolute inset-0" style={{ background: CAT_COLOR[c.id] }} transition={spring} />}
               <motion.span className="relative" animate={on ? { rotate: [0, -12, 10, 0], scale: [1, 1.25, 1] } : { rotate: 0, scale: 1 }} transition={{ duration: 0.45 }}>
@@ -143,43 +157,41 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
         })}
       </div>
 
-      <Segmented<Source> value={source} onChange={setSource} options={[
-        { id: 'life', label: 'Карта жизни' },
-        { id: 'reserve', label: 'Из резерва' },
-        { id: 'credit', label: 'Кредитка' },
-      ]} />
       <AnimatePresence initial={false}>
         {source === 'credit' && !bridgeWeek(bridge, weekStart(date)) && (
           <motion.p key="credit" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-            className="flex items-start gap-2 overflow-hidden rounded-2xl bg-neg/10 px-4 py-3 text-[13px] leading-snug text-neg">
-            <AlertTriangle size={16} className="mt-0.5 shrink-0" /> Кредитки заморожены — только гасим. Запишу как нарушение плана.
+            className="flex items-start gap-2 overflow-hidden px-1 text-[12.5px] leading-snug text-neg">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0" /> Кредитки заморожены — только гасим. Запишу как нарушение плана.
           </motion.p>
         )}
         {source === 'reserve' && (
           <motion.p key="reserve" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden rounded-2xl bg-info/10 px-4 py-3 text-[13px] leading-snug text-info">Из резерва — только здоровье по назначению и срочное. Не входит в недельный лимит.</motion.p>
+            className="overflow-hidden px-1 text-[12.5px] leading-snug text-info">Из резерва — только здоровье и срочное, в недельный лимит не входит.</motion.p>
         )}
       </AnimatePresence>
-
-      <div className="grid grid-cols-3 gap-2" role="group" aria-label="Клавиатура">
-        {['1', '2', '3', '4', '5', '6', '7', '8', '9', ',', '0', 'del'].map(k => (
-          <motion.button key={k} type="button" onClick={() => press(k)} whileTap={{ scale: 0.9, backgroundColor: 'var(--surface-2)' }} transition={snappy}
-            aria-label={k === 'del' ? 'Стереть' : k === ',' ? 'Запятая' : k}
-            className="figure grid h-[48px] place-items-center rounded-[15px] bg-surface text-[23px] select-none">
-            {k === 'del' ? <Delete size={22} strokeWidth={1.6} /> : k}
-          </motion.button>
-        ))}
-      </div>
-
-      {/* кнопка всегда на виду: прилипает к низу листа */}
-      <div className="sticky bottom-0 -mx-5 bg-bg/95 px-5 pt-2 pb-1 backdrop-blur">
-        <PrimaryButton onClick={save} disabled={!valid}>{edit ? 'Сохранить' : !value ? 'Введите сумму' : category ? `Записать ${rub(value)}` : 'Выберите категорию'}</PrimaryButton>
-      </div>
       {edit && (
         <SecondaryButton onClick={() => { store.removeExpense(edit.id); toast('Трата удалена'); onDone(); }} className="w-full text-neg">
           <Trash2 size={16} strokeWidth={1.5} /> Удалить
         </SecondaryButton>
       )}
     </div>
+
+    {/* снизу всегда на месте — клавиатура и «Записать», как в банковских приложениях */}
+    <div className="pb-safe bg-bg px-5 pt-2">
+      <div className="grid grid-cols-3 gap-2" role="group" aria-label="Клавиатура">
+        {['1', '2', '3', '4', '5', '6', '7', '8', '9', ',', '0', 'del'].map(k => (
+          <motion.button key={k} type="button" onClick={() => press(k)} whileTap={{ scale: 0.95, backgroundColor: 'var(--surface-2)' }} transition={snappy}
+            aria-label={k === 'del' ? 'Стереть' : k === ',' ? 'Запятая' : k}
+            className="figure grid h-[46px] place-items-center rounded-[15px] bg-surface text-[23px] select-none">
+            {k === 'del' ? <Delete size={22} strokeWidth={1.6} /> : k}
+          </motion.button>
+        ))}
+      </div>
+
+      <div className="pt-2.5 pb-3">
+        <PrimaryButton onClick={save} disabled={!valid}>{edit ? 'Сохранить' : !value ? 'Введите сумму' : category ? `Записать ${rub(value)}` : 'Выберите категорию'}</PrimaryButton>
+      </div>
+    </div>
+    </>
   );
 }

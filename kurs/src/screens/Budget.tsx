@@ -164,8 +164,8 @@ export function Budget() {
         </div>
         <div className="no-scrollbar mt-2.5 flex gap-2 overflow-x-auto px-4">
           {SOURCES.map(s => (
-            <motion.button key={s.id} type="button" whileTap={{ scale: 0.94 }} onClick={() => setSource(s.id)}
-              className={`relative shrink-0 rounded-full border px-3.5 py-1.5 text-[13px] font-medium ${source === s.id ? 'border-transparent text-bg' : 'border-line text-muted'}`}>
+            <motion.button key={s.id} type="button" whileTap={{ scale: 0.95 }} onClick={() => setSource(s.id)}
+              className={`relative shrink-0 rounded-full border px-3.5 py-2 text-[13px] font-medium ${source === s.id ? 'border-transparent text-bg' : 'border-line text-muted'}`}>
               {source === s.id && <motion.span layoutId="spend-source" className="absolute inset-0 rounded-full bg-ink" transition={spring} />}
               <span className="relative">{s.label}</span>
             </motion.button>
@@ -175,7 +175,15 @@ export function Budget() {
           <span className="text-[14px] font-medium">{cat ? CATEGORY[cat].short : 'Все траты'}{needle ? ', поиск' : ''}</span>
           <span className="text-[12.5px] text-muted">{filtered.length} на <Money value={filteredSum} /></span>
         </div>
-        {byDay.length === 0 ? <div className="px-4"><Empty>{monthList.length ? 'Ничего не нашлось — смените фильтр или поиск.' : 'В этом месяце трат нет. Нажмите «+», чтобы записать.'}</Empty></div> : (
+        {byDay.length === 0 ? (
+          <div className="space-y-2 px-4">
+            <Empty>{monthList.length ? 'Ничего не нашлось — смените фильтр или поиск.' : 'В этом месяце трат нет.'}</Empty>
+            {/* у пустого экрана — одно понятное действие (baseline-ui) */}
+            {monthList.length
+              ? <button type="button" onClick={() => { setCat(null); setSource('all'); setQ(''); }} className="h-11 w-full rounded-2xl border border-line text-[14px] font-medium text-sea">Сбросить фильтры</button>
+              : <button type="button" onClick={() => set({ add: {} })} className="h-11 w-full rounded-2xl bg-ink text-[14px] font-medium text-bg">Записать трату</button>}
+          </div>
+        ) : (
           <motion.div key={`${month}${cat}${source}${needle}`} variants={listAnim} initial="hidden" animate="show">
             {byDay.map(([date, list]) => (
               <motion.div key={date} variants={item} className="mb-3">
