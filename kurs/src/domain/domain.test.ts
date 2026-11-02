@@ -9,7 +9,7 @@ import { rub, parseAmount } from './money';
 import { categoryLimit, currentPhase, DEFAULT_PLAN, setPlanSource, splitBonus, targetDebt, weeklyLimit, type PlanConfig } from './plan';
 import { fromAi, fromDrafts } from './proposals';
 import { PROTOCOL_VERSION } from './sync';
-import { checkupPlan, ledger, type Checkup } from './ledger';
+import { checkupPlan, ledger, type Checkup, type LedgerInput } from './ledger';
 import { cashFlow, dailyLevels } from './cashflow';
 import { mergeSeed, type PlanState } from './planUpdate';
 import { applyExchange, buildExchange, dropChatTwins, exchangeDigest, normalize, parseExchange, previewExchange, type ExchangeState } from './exchange';
@@ -665,6 +665,28 @@ describe('учёт по счетам для воскресной сверки', 
     expect(l.card).toBe(3000 + 8000 + 50_000 - 5000 - 1200);
     expect(l.incomeOnCard).toBe(50_000);
     expect(l.reserve).toBe(40_000 - 20_000 - 700);
+  });
+
+  it('кредитки: первой — кредитка моста, затем открытые по порядку; долг по учёту — остаток плюс покупки после обновления', () => {
+    const card = (id: string, order: number, balance: number, extra: Partial<Debt> = {}): Debt => ({
+      id, name: `Кредитка ${id}`, short: id, kind: 'card', balance, startBalance: balance, rate: 0.3, dueDay: 10,
+      rule: { type: 'interestPlus', plus: 1000 } as Debt['rule'], frozen: true, order, closed: false, updatedAt: '2026-11-01T10:00:00.000Z', ...extra,
+    });
+    const bridge = { card: 'c3', cap: 30_000, weeks: [{ monday: '2026-11-02', fromReserve: 5000, fromCredit: 3000 }] } as unknown as LedgerInput['bridge'];
+    const l = ledger({
+      ...base, bridge,
+      debts: [card('c1', 1, 10_000), card('c2', 2, 20_000), card('c3', 5, 30_000, { limit: 100_000 }), card('c4', 3, 0, { closed: true }),
+        { ...card('loan', 0, 50_000), kind: 'loan' }],
+      expenses: [
+        { ...spend('2026-11-03', 500, 'credit'), creditCard: 'c2' },
+        spend('2026-11-04', 700, 'credit'), // без карты — с кредитки моста
+        { ...spend('2026-10-30', 900, 'credit'), creditCard: 'c1' }, // до обновления остатка — уже в нём
+      ],
+    });
+    expect(l.cards.map(c => c.debt.id)).toEqual(['c3', 'c1', 'c2']);
+    expect(l.cards.map(c => c.expected)).toEqual([30_700, 10_000, 20_500]);
+    expect(l.cards[0].bridge).toBe(true);
+    expect(l.credit).toBe(30_700);
   });
 
   it('перевод: без моста — лимит минус остаток недели, поступления с карты — в резерв', () => {

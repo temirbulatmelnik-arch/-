@@ -29,6 +29,8 @@ export interface Checkup {
   /** остатки после перевода — точка отсчёта следующей сверки */
   after: { card: number; reserve: number };
   creditCard?: string;
+  /** остальные кредитки, кроме кредитки моста: долг по учёту и в банке; после сверки остаток долга берётся из банка */
+  cards?: { id: string; expected: number | null; actual: number }[];
 }
 
 export interface LedgerInput {
@@ -43,6 +45,8 @@ export interface LedgerInput {
   bridge: Bridge | null;
 }
 
+export interface CardLedger { debt: Debt; expected: number; bridge: boolean }
+
 export interface Ledger {
   /** ожидаемый остаток карты; null — нет точки отсчёта */
   card: number | null;
@@ -52,6 +56,9 @@ export interface Ledger {
   /** ожидаемый долг на кредитке моста */
   credit: number | null;
   creditCard: Debt | null;
+  /** все кредитки для сверки: первой — кредитка моста, затем открытые по порядку закрытия.
+   *  expected — долг по учёту: остаток плюс покупки с этой карты после последнего обновления остатка */
+  cards: CardLedger[];
   /** обычные поступления, пришедшие на карту после сверки и ещё не переведённые в резерв */
   incomeOnCard: number;
 }
@@ -116,18 +123,24 @@ export function ledger(s: LedgerInput): Ledger {
     for (const e of s.expenses) if (e.source === 'reserve' && after(e, anchor.at, anchor.date)) reserve -= e.amount;
   }
 
-  // кредитка моста: остаток долга плюс покупки после его последнего обновления
+  // кредитки: остаток долга плюс покупки с карты после его последнего обновления
+  // (трата с кредитки без указанной карты — с кредитки моста)
   const b = s.bridge && s.bridge.weeks.length ? s.bridge : null;
-  const creditCard = b ? s.debts.find(d => d.id === b.card) ?? null : null;
-  let credit: number | null = null;
-  if (creditCard) {
-    const at = creditCard.updatedAt ?? '';
+  const owed = (d: Debt) => {
+    const at = d.updatedAt ?? '';
     const date = at.slice(0, 10);
-    credit = creditCard.balance;
-    for (const e of s.expenses) if (e.source === 'credit' && (e.creditCard ?? b!.card) === creditCard.id && at && (e.date > date || (e.date === date && e.createdAt > at))) credit += e.amount;
-  }
+    let x = d.balance;
+    if (at) for (const e of s.expenses) if (e.source === 'credit' && (e.creditCard ?? b?.card) === d.id && (e.date > date || (e.date === date && e.createdAt > at))) x += e.amount;
+    return Math.round(x * 100) / 100;
+  };
+  const creditCard = b ? s.debts.find(d => d.id === b.card) ?? null : null;
+  const credit = creditCard ? owed(creditCard) : null;
+  const cards = s.debts
+    .filter(d => d.id === creditCard?.id || (d.kind === 'card' && !d.closed))
+    .sort((x, y) => Number(y.id === creditCard?.id) - Number(x.id === creditCard?.id) || x.order - y.order)
+    .map(d => ({ debt: d, expected: owed(d), bridge: d.id === creditCard?.id }));
 
-  return { card, cardFrom: ref ? { at: ref.at, date: ref.date } : null, reserve, credit, creditCard, incomeOnCard: Math.max(0, Math.round(incomeOnCard * 100) / 100) };
+  return { card, cardFrom: ref ? { at: ref.at, date: ref.date } : null, reserve, credit, creditCard, cards, incomeOnCard: Math.max(0, Math.round(incomeOnCard * 100) / 100) };
 }
 
 export interface CheckupPlan {

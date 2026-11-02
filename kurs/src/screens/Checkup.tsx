@@ -1,12 +1,14 @@
-// Воскресная сверка с банком: остатки на карте, в резерве и долг на кредитке моста против учёта приложения.
+// Воскресная сверка с банком: остатки на карте, в резерве и долги на кредитках против учёта приложения.
+// Кредитки — все открытые: первой кредитка моста, под ней остальные. У карты с лимитом «Долг» и «Доступно» связаны:
+// вписали одно — второе считается само (доступно = лимит − долг). «Без изменений» — долг как по учёту, без ввода.
 // Расхождения — словами, с кнопкой «внести трату»; затем сколько перевести между картой и резервом и «Перевёл».
 // Показывается сама в воскресенье после 18:00 при входе в приложение, пока сверка недели не сохранена.
 import { Check } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { AmountInput, Money, PrimaryButton, Segmented, Sheet } from '../components/ui';
+import { AmountInput, Money, PrimaryButton, Sheet } from '../components/ui';
 import { addDays, ddmm, today, weekStart } from '../domain/dates';
-import { checkupPlan, ledger, MATCH, weekLeftover, type Ledger } from '../domain/ledger';
+import { checkupPlan, ledger, MATCH, weekLeftover, type CardLedger, type Ledger } from '../domain/ledger';
 import { num, parseAmount, round } from '../domain/money';
 import { weekReport } from '../domain/weekly';
 import { useStore } from '../store/store';
@@ -67,14 +69,15 @@ function Body({ monday }: { monday: string }) {
   const led = useLedger();
   const [card, setCard] = useState('');
   const [reserve, setReserve] = useState('');
-  const [credit, setCredit] = useState('');
-  const limit = led.creditCard?.limit;
-  const [creditMode, setCreditMode] = useState<'debt' | 'available'>('debt');
+  // кредитки: что вписано, в каком поле (долг или доступно) и отмечено ли «без изменений»
+  const [entries, setEntries] = useState<Record<string, CardEntry>>({});
+  const entryOf = (id: string) => entries[id] ?? NO_ENTRY;
+  const patchEntry = (id: string, p: Partial<CardEntry>) => setEntries(e => ({ ...e, [id]: { ...(e[id] ?? NO_ENTRY), ...p } }));
 
   const cardV = parseAmount(card);
   const reserveV = parseAmount(reserve);
-  const creditRaw = parseAmount(credit);
-  const creditV = creditRaw == null ? null : creditMode === 'available' && limit ? round(limit - creditRaw) : creditRaw;
+  const bridgeCard = led.cards.find(c => c.bridge);
+  const otherCards = led.cards.filter(c => !c.bridge);
 
   const leftover = useMemo(() => weekLeftover(expenses, debts, overrides, bridge, monday), [expenses, debts, overrides, bridge, monday]);
   const plan = useMemo(() => checkupPlan({ expenses, debts, overrides, bridge, marks, monday, leftover, incomeOnCard: led.incomeOnCard }),
@@ -85,12 +88,11 @@ function Body({ monday }: { monday: string }) {
 
   const dCard = cardV != null && led.card != null ? round(cardV - led.card) : null;
   const dReserve = reserveV != null ? round(reserveV - led.reserve) : null;
-  const dCredit = creditV != null && led.credit != null ? round(creditV - led.credit) : null;
   const mirror = dCard != null && dReserve != null && Math.abs(dCard) > MATCH && Math.abs(dCard + dReserve) <= MATCH;
-  const ready = cardV != null && reserveV != null && (!led.creditCard || creditV != null);
+  const ready = cardV != null && reserveV != null && led.cards.every(c => debtOf(c, entryOf(c.debt.id)) != null);
 
-  const addSpend = (amount: number, source: 'life' | 'credit') =>
-    set({ add: { amount: Math.round(amount * 100) / 100, source, date: addDays(monday, 6) > today() ? today() : addDays(monday, 6), creditCard: source === 'credit' ? led.creditCard?.id : undefined } });
+  const addSpend = (amount: number, source: 'life' | 'credit', creditCard?: string) =>
+    set({ add: { amount: Math.round(amount * 100) / 100, source, date: addDays(monday, 6) > today() ? today() : addDays(monday, 6), creditCard: source === 'credit' ? creditCard : undefined } });
 
   const save = (transfer: boolean) => {
     if (!ready) return;
@@ -104,9 +106,10 @@ function Body({ monday }: { monday: string }) {
     const r = weekReport(expenses, debts, overrides, monday, bridge);
     useStore.getState().checkup({
       monday,
-      expected: { card: led.card, reserve: round(led.reserve), credit: led.credit },
-      actual: { card: cardV!, reserve: reserveV!, credit: creditV },
-      topUp, toReserve, creditCard: led.creditCard?.id,
+      expected: { card: led.card, reserve: round(led.reserve), credit: bridgeCard ? bridgeCard.expected : null },
+      actual: { card: cardV!, reserve: reserveV!, credit: bridgeCard ? debtOf(bridgeCard, entryOf(bridgeCard.debt.id)) : null },
+      topUp, toReserve, creditCard: bridgeCard?.debt.id,
+      ...(otherCards.length ? { cards: otherCards.map(c => ({ id: c.debt.id, expected: c.expected, actual: debtOf(c, entryOf(c.debt.id))! })) } : {}),
     }, transfer ? { monday, limit: r.limit, spent: r.spent, left: r.left, transferred: 0 } : null);
     toast(transfer ? (closures[monday] ? 'Сверка сохранена' : 'Сверка сохранена, неделя закрыта') : 'Остатки сохранены, перевод — позже');
     // неделя закрыта в плюс — маленький салют
@@ -133,16 +136,9 @@ function Body({ monday }: { monday: string }) {
           more={x => <>Больше, чем по учёту, на <Money value={x} />: проценты или поступление, которое не отмечено.</>} />}
       </Account>
 
-      {led.creditCard && (
-        <Account label={/кредит/i.test(led.creditCard.short) ? led.creditCard.short : `${led.creditCard.short}, кредитка`} hint={creditMode === 'debt' ? 'сколько должны банку' : 'сколько доступно'} value={credit} onChange={setCredit}
-          top={limit ? <Segmented value={creditMode} onChange={setCreditMode} options={[{ id: 'debt', label: 'Долг' }, { id: 'available', label: 'Доступно' }]} /> : undefined}>
-          {creditV != null && led.credit != null && <Verdict d={dCredit!} expected={led.credit}
-            less={x => <>Долг меньше, чем по учёту, на <Money value={x} />: погашение или возврат не отмечены.</>}
-            more={x => <>Долг больше, чем по учёту, на <Money value={x} />: покупки с кредитки не внесены или начислены проценты.{' '}
-              <button type="button" onClick={() => addSpend(x, 'credit')} className="font-medium text-sea">Добавить трату с кредитки {num(x)} ₽</button></>} />}
-          {creditMode === 'available' && creditV != null && <Note>Долг = лимит <Money value={limit!} /> − доступно = <Money value={creditV} /></Note>}
-        </Account>
-      )}
+      {led.cards.map(c => (
+        <CardAccount key={c.debt.id} c={c} entry={entryOf(c.debt.id)} onEntry={p => patchEntry(c.debt.id, p)} onAddSpend={x => addSpend(x, 'credit', c.debt.id)} />
+      ))}
 
       {mirror && <Note>Карта и резерв разошлись на одну сумму в разные стороны: похоже, <Money value={Math.abs(dCard!)} /> уже переведены между ними. Это не ошибка, сверка запомнит остатки из банка.</Note>}
 
@@ -180,7 +176,8 @@ function Body({ monday }: { monday: string }) {
               <div key={c.id} className="px-4 py-3 text-[12.5px] leading-snug">
                 <div className="flex justify-between text-[13.5px]"><span className="font-medium">{ddmm(c.date)}</span>
                   <span className="text-muted">{c.topUp > 0 ? <>на карту <Money value={c.topUp} /></> : c.toReserve > 0 ? <>в резерв <Money value={c.toReserve} /></> : 'без перевода'}</span></div>
-                <div className="mt-1 text-muted">{line('карта', c.expected.card, c.actual.card)}; {line('резерв', c.expected.reserve, c.actual.reserve)}{c.actual.credit != null ? <>; {line('кредитка', c.expected.credit, c.actual.credit)}</> : null}</div>
+                <div className="mt-1 text-muted">{line('карта', c.expected.card, c.actual.card)}; {line('резерв', c.expected.reserve, c.actual.reserve)}{c.actual.credit != null ? <>; {line(debts.find(d => d.id === c.creditCard)?.short ?? 'кредитка', c.expected.credit, c.actual.credit)}</> : null}
+                  {(c.cards ?? []).map(k => <span key={k.id}>; {line(debts.find(d => d.id === k.id)?.short ?? 'кредитка', k.expected, k.actual)}</span>)}</div>
               </div>
             ))}
           </div>
@@ -197,6 +194,79 @@ function line(name: string, expected: number | null, actual: number): ReactNode 
   if (expected == null) return <>{name} <Money value={actual} /></>;
   const d = round(actual - expected);
   return <>{name} {Math.abs(d) <= MATCH ? 'сошлось' : <Money value={d} sign className={d < 0 ? 'text-neg' : ''} />}</>;
+}
+
+/** Кредитка в сверке: что вписано, в каком поле, и «без изменений» */
+type CardEntry = { text: string; src: 'debt' | 'available'; same: boolean };
+const NO_ENTRY: CardEntry = { text: '', src: 'debt', same: false };
+
+/** долг по карте из того, что вписано: «без изменений» — как по учёту; вписали доступно — лимит минус доступно */
+function debtOf(c: CardLedger, e: CardEntry): number | null {
+  if (e.same) return c.expected;
+  const v = parseAmount(e.text);
+  if (v == null) return null;
+  return e.src === 'available' && c.debt.limit ? round(c.debt.limit - v) : v;
+}
+
+/** сумма для поля ввода: целые — с пробелами между разрядами, копейки — через запятую */
+function amountText(x: number): string {
+  const [i, f] = Math.abs(round(x)).toFixed(2).split('.');
+  return `${x < 0 ? '−' : ''}${num(Number(i))}${f === '00' ? '' : `,${f}`}`;
+}
+
+function CardAccount({ c, entry, onEntry, onAddSpend }: {
+  c: CardLedger; entry: CardEntry; onEntry: (p: Partial<CardEntry>) => void; onAddSpend: (x: number) => void;
+}) {
+  const { debt, expected } = c;
+  const limit = debt.limit;
+  const v = debtOf(c, entry);
+  // поле, которое вписывали, показывает вписанное; второе — посчитанное по лимиту. Долг выше лимита — доступно 0,
+  // как и показывает банк
+  const shown = (field: CardEntry['src']): string => {
+    if (entry.same) return field === 'debt' ? amountText(expected) : limit ? amountText(Math.max(0, limit - expected)) : '';
+    if (entry.src === field) return entry.text;
+    const x = parseAmount(entry.text);
+    return x == null || !limit ? '' : amountText(Math.max(0, limit - x));
+  };
+  const d = v == null ? null : round(v - expected);
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3 px-1">
+        <span className="min-w-0">
+          <span className="block truncate text-[14px] font-medium">{debt.name || debt.short}</span>
+          <span className="block text-[12px] text-faint">{c.bridge ? 'кредитка моста' : debt.frozen ? 'проверить списания' : 'проверить покупки'}</span>
+        </span>
+        <button type="button" role="checkbox" aria-checked={entry.same} onClick={() => onEntry({ same: !entry.same })}
+          className={`flex min-h-10 shrink-0 items-center gap-2 rounded-full border px-3.5 text-[13px] font-medium transition-colors duration-150 ${entry.same ? 'border-transparent bg-pos/14 text-pos' : 'border-line text-muted'}`}>
+          <span className={`grid size-[18px] place-items-center rounded-full border transition-colors duration-150 ${entry.same ? 'border-transparent bg-pos text-white' : 'border-faint'}`}>
+            {entry.same && <Check size={12} strokeWidth={3} />}
+          </span>
+          Без изменений
+        </button>
+      </div>
+      <div className={limit ? 'grid grid-cols-2 gap-2' : ''}>
+        <label className="block space-y-1">
+          <span className="block px-1 text-[12px] text-muted">Долг</span>
+          <AmountInput size={limit ? 'sm' : 'md'} label={`${debt.short}: долг`} value={shown('debt')} disabled={entry.same} onChange={t => onEntry({ text: t, src: 'debt' })} />
+        </label>
+        {limit ? (
+          <label className="block space-y-1">
+            <span className="block px-1 text-[12px] text-muted">Доступно</span>
+            <AmountInput size="sm" label={`${debt.short}: доступно`} value={shown('available')} disabled={entry.same} onChange={t => onEntry({ text: t, src: 'available' })} />
+          </label>
+        ) : null}
+      </div>
+      {entry.same
+        ? <p className="flex items-center gap-1.5 px-1 text-[13px] text-pos"><Check size={15} strokeWidth={2} /> Без изменений: долг как по учёту — <Money value={expected} /></p>
+        : d != null && <Verdict d={d} expected={expected}
+            less={x => <>Долг меньше, чем по учёту, на <Money value={x} />: погашение или возврат не отмечены.</>}
+            more={x => <>Долг больше, чем по учёту, на <Money value={x} />: {c.bridge ? 'покупки с кредитки не внесены' : 'списания с карты не внесены'} или начислены проценты.{' '}
+              <button type="button" onClick={() => onAddSpend(x)} className="font-medium text-sea">Добавить трату с карты {num(x)} ₽</button></>} />}
+      {limit && v != null && !entry.same && (v > limit
+        ? <Note>Долг выше лимита <Money value={limit} />, доступно 0 — по нему долг не посчитать, впишите долг.</Note>
+        : <Note>Второе поле посчитано по лимиту <Money value={limit} />.</Note>)}
+    </div>
+  );
 }
 
 function Account({ label, hint, value, onChange, top, children }: { label: string; hint: string; value: string; onChange: (v: string) => void; top?: ReactNode; children?: ReactNode }) {

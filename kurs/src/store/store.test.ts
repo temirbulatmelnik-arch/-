@@ -46,6 +46,18 @@ describe('воскресная сверка с банком', () => {
     expect(s().reserve).toBe(43_000);
   });
 
+  it('долги кредиток — из банка: кредитка моста и остальные карты после сверки', () => {
+    const debt = (id: string, balance: number) => ({ id, name: id, short: id, kind: 'card' as const, balance, startBalance: balance, rate: 0.3, dueDay: 10,
+      rule: { type: 'interestPlus', plus: 1000 } as never, frozen: true, order: 1, closed: false });
+    useStore.setState({ debts: [debt('a', 10_000), debt('b', 20_000), debt('m', 30_000)] });
+    s().checkup({ monday: '2026-10-26', expected: { card: null, reserve: 50_000, credit: 30_000 }, actual: { card: 2000, reserve: 50_000, credit: 31_000 },
+      topUp: 0, toReserve: 0, creditCard: 'm', cards: [{ id: 'a', expected: 10_000, actual: 10_000 }, { id: 'b', expected: 20_000, actual: 20_350 }] }, null);
+    const by = Object.fromEntries(s().debts.map(d => [d.id, d]));
+    expect([by.a.balance, by.b.balance, by.m.balance]).toEqual([10_000, 20_350, 31_000]);
+    expect(by.a.updatedAt).toBeTruthy();
+    expect(s().checkups.at(-1)?.cards).toHaveLength(2);
+  });
+
   it('резерв пришёл из чата в воскресенье — закрытие недели пополнение второй раз не вычитает', () => {
     s().applySync({ reserve: 44_000 });
     const sundayKey = s().reserveLog.at(-1)!.date;

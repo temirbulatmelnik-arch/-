@@ -256,8 +256,11 @@ export const useStore = create<State>()(
         const marks = c.topUp > 0 ? { ...s.marks, [key]: { done: true, amount: c.topUp, at } } : s.marks;
         const closures = closure && !s.closures[c.monday] ? { ...s.closures, [c.monday]: { ...closure, topUp: c.topUp, at } } : s.closures;
         const note = [c.topUp > 0 ? `на карту ${Math.round(c.topUp)}` : '', c.toReserve > 0 ? `с карты ${Math.round(c.toReserve)}` : ''].filter(Boolean).join(', ');
+        // долги кредиток — из банка: кредитка моста и остальные, сверенные в тот же раз
         let debts = s.debts;
-        if (c.creditCard && c.actual.credit != null) debts = s.debts.map(d => (d.id === c.creditCard ? patchDebt(d, c.actual.credit!) : d));
+        const owe = (id: string, balance: number) => { debts = debts.map(d => (d.id === id ? patchDebt(d, balance) : d)); };
+        if (c.creditCard && c.actual.credit != null) owe(c.creditCard, c.actual.credit);
+        for (const k of c.cards ?? []) owe(k.id, k.actual);
         return {
           checkups: [...s.checkups, entry].slice(-26),
           marks,
