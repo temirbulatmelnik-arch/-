@@ -220,6 +220,161 @@ export function SwipeRow({ children, left, right = [], className = '', rowClass 
   );
 }
 
+/* ---------- Лента: текущая страница и соседние по бокам ---------- */
+
+/** Положения пружины по кадрам (60 в секунду) от 0 до 1 — критическое затухание, без отскока. v — начальная скорость
+ *  в долях пути за секунду: лента продолжает движение пальца, а не начинает его заново (навык apple-design) */
+function springPath(v: number): number[] {
+  const k = 380, c = 2 * Math.sqrt(k), dt = 1 / 480;
+  // скорость больше собственной частоты пружины дала бы перелёт за край — край пуст, соседа за соседом нет
+  let x = 0, s = Math.max(-3, Math.min(Math.sqrt(k) * 0.8, v)), t = 0, frame = 1;
+  const out = [0];
+  while (t < 1) {
+    s += (k * (1 - x) - c * s) * dt; x += s * dt; t += dt;
+    if (t >= frame / 60) { out.push(Math.min(1, x)); frame++; }
+    if (1 - x < 0.002 && Math.abs(s) < 0.05) break;
+  }
+  out.push(1);
+  return out;
+}
+
+/**
+ * Лента из трёх страниц: prev — слева, current — на месте, next — справа. Лента идёт за пальцем; отпустили дальше
+ * трети ширины или бросили — доезжает пружиной до соседней и только потом зовёт onShift: ключи сдвигаются, соседняя
+ * страница становится текущей тем же DOM (без пересборки), а с дальнего края собирается новая, невидимая.
+ * Доезд — WAAPI по ключевым кадрам пружины: его ведёт видеокарта, он не встаёт, даже если основной поток занят.
+ * Высота — по текущей странице (heightOf, без измерений); при листании плавно меняется на высоту соседней.
+ * control — для стрелок: та же анимация, что от пальца; false — лента скрыта, менять сразу.
+ */
+export function Flip({ keys, render, heightOf, onShift, control, gap = 24, className = '' }: {
+  keys: readonly [string, string, string];
+  render: (key: string, slot: -1 | 0 | 1) => ReactNode;
+  heightOf: (key: string) => number;
+  onShift: (dir: 1 | -1) => void;
+  control?: { current: ((dir: 1 | -1) => boolean) | null };
+  /** расстояние между страницами во время листания, px — это поля по бокам */
+  gap?: number;
+  className?: string;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  const strip = useRef<HTMLDivElement>(null);
+  const pos = useRef(0);
+  const anim = useRef<Animation | null>(null);
+  /** куда едет пружина: 1 — к следующей, −1 — к предыдущей, 0 — обратно на место */
+  const going = useRef<1 | -1 | 0>(0);
+  /** сдвиг отдан в onShift, ключи ещё не сменились */
+  const shifted = useRef<1 | -1 | 0>(0);
+  /** нажатия стрелок, пока лента едет: +2 — ещё две вперёд */
+  const queue = useRef(0);
+  const drag = useRef<{ from: number } | null>(null);
+  const reduce = useReducedMotion();
+  const cur = keys[1];
+
+  const put = (v: number) => { pos.current = v; if (strip.current) strip.current.style.transform = v ? `translate3d(${v}px,0,0)` : ''; };
+  const lift = (on: boolean) => { if (strip.current) strip.current.style.willChange = on ? 'transform' : ''; };
+  const height = (key: string) => {
+    const el = box.current;
+    if (!el) return;
+    el.style.transition = reduce ? '' : 'height .4s cubic-bezier(.32,.72,0,1)';
+    el.style.height = `${heightOf(key)}px`;
+  };
+  /** остановить пружину там, где она сейчас: палец перехватывает ленту */
+  const grab = () => {
+    const a = anim.current, el = strip.current;
+    if (!a || !el) return;
+    const t = getComputedStyle(el).transform;
+    const x = t && t !== 'none' ? new DOMMatrixReadOnly(t).m41 : 0;
+    a.cancel(); anim.current = null; going.current = 0;
+    put(x);
+  };
+  const settle = (dir: 1 | -1 | 0, v = 0) => {
+    const el = strip.current, w = box.current?.clientWidth ?? 0;
+    if (!el) return;
+    const from = pos.current, to = -dir * w;
+    going.current = dir;
+    height(keys[1 + dir]);
+    const done = () => {
+      anim.current = null; going.current = 0;
+      put(to);
+      if (dir) { shifted.current = dir; onShift(dir); } else lift(false);
+    };
+    if (reduce || !w || Math.abs(to - from) < 1) { done(); return; }
+    const path = springPath(v / (to - from));
+    const a = el.animate(path.map(p => ({ transform: `translate3d(${(from + (to - from) * p).toFixed(2)}px,0,0)` })),
+      { duration: ((path.length - 1) * 1000) / 60, easing: 'linear' });
+    anim.current = a;
+    // конечное положение — сразу в стиль: анимация лежит поверх и, закончившись, просто снимается
+    put(to);
+    a.onfinish = () => { if (anim.current === a) done(); };
+  };
+
+  const pan = usePan({
+    axis: 'x',
+    onMove: d => {
+      // палец перехватил ленту — нажатые до этого стрелки больше не в счёт
+      if (!drag.current) { grab(); lift(true); queue.current = 0; drag.current = { from: pos.current }; }
+      const w = box.current?.clientWidth ?? 0;
+      put(rubber(drag.current.from + d, -w, w, 0.2));
+    },
+    onEnd: (_, v) => {
+      drag.current = null;
+      const w = box.current?.clientWidth ?? 0, at = pos.current;
+      // бросок решает сам, иначе — дальше трети ширины
+      const dir = v < -350 ? 1 : v > 350 ? -1 : at < -w * 0.3 ? 1 : at > w * 0.3 ? -1 : 0;
+      settle(dir, v);
+    },
+  });
+
+  // ключи сменились: соседняя страница встала на место текущей — сдвигаем ленту на ширину, на экране всё как было
+  const first = useRef(true);
+  useLayoutEffect(() => {
+    if (first.current) { first.current = false; return; }
+    const dir = shifted.current, w = box.current?.clientWidth ?? 0;
+    shifted.current = 0;
+    if (dir) {
+      put(pos.current + dir * w);
+      if (drag.current) drag.current.from += dir * w;
+    } else {
+      // месяц сменили извне (например, нажали на название) — без ленты, страница просто проявляется
+      anim.current?.cancel(); anim.current = null; going.current = 0; queue.current = 0;
+      put(0);
+      if (!reduce) strip.current?.animate([{ opacity: 0.35 }, { opacity: 1 }], { duration: 240, easing: 'cubic-bezier(.23,1,.32,1)' });
+    }
+    if (box.current) { box.current.style.transition = ''; box.current.style.height = `${heightOf(cur)}px`; }
+    if (!drag.current) lift(false);
+    const q = queue.current;
+    if (q && !drag.current) { const d = q > 0 ? 1 : -1; queue.current -= d; lift(true); settle(d); }
+  }, [cur]);
+
+  const go = (dir: 1 | -1) => {
+    if (!box.current?.clientWidth) return false;
+    if (drag.current) return true;
+    // едем к соседней или ждём смены ключей — стрелка встаёт в очередь
+    if ((anim.current && going.current) || shifted.current) { queue.current += dir; return true; }
+    grab(); lift(true); settle(dir);
+    return true;
+  };
+  useEffect(() => {
+    if (!control) return;
+    control.current = go;
+    return () => { control.current = null; };
+  });
+
+  return (
+    <div ref={box} {...pan} className={`relative overflow-hidden select-none ${className}`} style={{ height: heightOf(cur), touchAction: 'pan-y' }}>
+      <div ref={strip} className="absolute inset-0">
+        {keys.map((k, i) => (
+          <div key={k} inert={i !== 1} aria-hidden={i !== 1 || undefined} className="absolute top-0" style={{
+            left: gap / 2, right: gap / 2, transform: i === 1 ? undefined : `translateX(calc(${i - 1} * (100% + ${gap}px)))`,
+          }}>
+            {render(k, (i - 1) as -1 | 0 | 1)}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ---------- Переключатель страниц, листается пальцем ---------- */
 
 export interface PageDef<T extends string> { id: T; label: ReactNode; render: () => ReactNode }

@@ -6,11 +6,11 @@ import { Hold } from '../components/Hold';
 import { toast } from '../store/ui';
 import { animate, AnimatePresence, motion, useMotionValue } from 'motion/react';
 import { haptic } from '../components/haptics';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { CoverageCard, useCoverage } from '../components/Coverage';
-import { ease, item, list as listAnim, Pager, Roll, spring, SwipeRow, useEnter, usePan } from '../components/motion';
-import { LevelChart, MonthGrid, verdict, type DayMoney } from '../components/MoneyLevel';
+import { ease, Flip, item, list as listAnim, Pager, Roll, spring, SwipeRow, useEnter, usePan } from '../components/motion';
+import { LevelChart, MonthGrid, monthHeight, verdict, Weekdays, type DayMoney } from '../components/MoneyLevel';
 import { SkyButton, SkyHeader } from '../components/Petersburg';
 import { EventRow } from '../components/rows';
 import { runQuick } from '../components/TabBar';
@@ -31,6 +31,25 @@ const FILTERS: { id: Filter; label: string }[] = [
 ];
 const matches = (f: Filter, g: EventGroup) => (f === 'all' ? g !== 'weekly' : f === 'fixed' ? g === 'fixed' || g === 'other' : g === f);
 
+interface MonthData { month: string; events: CalEvent[]; days: DayMoney[] }
+
+/** События и дни месяцев — запомнены по месяцу: при листании соседний месяц становится текущим тем же объектом,
+ *  и его 30 ячеек не перерисовываются. Дни — неоплаченное дня и резерв к вечеру по прогнозу покрытия */
+function useMonths(months: readonly string[], cal: ReturnType<typeof useCal>, marks: Record<string, EventMark>, cov: ReturnType<typeof useCoverage>['cov'], now: string): MonthData[] {
+  const cache = useRef(new Map<string, { deps: readonly unknown[]; data: MonthData }>());
+  const deps = [cal, marks, cov, now] as const;
+  const out = months.map(m => {
+    const hit = cache.current.get(m);
+    if (hit && hit.deps.every((d, i) => d === deps[i])) return hit.data;
+    const events = eventsBetween(cal, `${m}-01`, `${m}-${String(lastDay(m)).padStart(2, '0')}`);
+    const data = { month: m, events, days: monthDays(events, marks, cov, m, now) };
+    cache.current.set(m, { deps, data });
+    return data;
+  });
+  for (const k of [...cache.current.keys()]) if (!months.includes(k)) cache.current.delete(k);
+  return out;
+}
+
 export function Payments() {
   const now = useToday();
   const cal = useCal();
@@ -40,22 +59,26 @@ export function Payments() {
   const set = useUi(s => s.set);
   const view = useUi(s => s.payView);
   const [month, setMonth] = useState(monthKey(now));
-  const from = `${month}-01`, to = `${month}-${String(lastDay(month)).padStart(2, '0')}`;
-  const events = useMemo(() => eventsBetween(cal, from, to), [cal, from, to]);
-  const [selected, setSelected] = useState(now);
-  useEffect(() => {
-    // в другом месяце — первый день, где что-то происходит
-    setSelected(month === monthKey(now) ? now : events.find(e => e.kind !== 'weekly')?.date ?? from);
-  }, [month]);
+  // месяц и соседи по бокам ленты: соседние собраны заранее, листание не ждёт расчёта
+  const keys = useMemo(() => [addMonths(month, -1), month, addMonths(month, 1)] as const, [month]);
+  const [prev, cur, next] = useMonths(keys, cal, marks, cov, now);
+  const { events, days } = cur;
+  // выбранный день живёт в своём месяце; в другом месяце — сегодня или первый день, где что-то происходит.
+  // Считается при отрисовке, а не эффектом: новый месяц сразу приходит с выбранным днём, без второй перерисовки
+  const [picked, setPicked] = useState(now);
+  const selected = monthKey(picked) === month ? picked : month === monthKey(now) ? now : events.find(e => e.kind !== 'weekly')?.date ?? `${month}-01`;
 
   const amount = (e: CalEvent) => (marks[e.key]?.done && marks[e.key].amount != null ? marks[e.key].amount! : e.amount);
   const total = events.filter(e => e.kind === 'payment').reduce((s, e) => s + amount(e), 0);
   const incomes = events.filter(e => e.kind === 'income').reduce((s, e) => s + amount(e), 0);
 
-  // день за днём: неоплаченное дня и резерв к вечеру по прогнозу покрытия
-  const days = useMemo<DayMoney[]>(() => monthDays(events, marks, cov, month, now), [events, marks, cov, month, now]);
   const said = verdict(days);
-  const shift = (n: 1 | -1) => setMonth(addMonths(month, n));
+  // смена месяца — переход (startTransition): соседний месяц уже на экране, а сборка нового дальнего соседа, линии и
+  // заголовка идёт кусками между кадрами и не держит палец, если сразу листать дальше
+  const shift = useCallback((n: 1 | -1) => startTransition(() => setMonth(m => addMonths(m, n))), []);
+  // стрелки листают ту же ленту, что и палец; лента скрыта (другой вид) — месяц меняется сразу
+  const flip = useRef<((dir: 1 | -1) => boolean) | null>(null);
+  const arrow = (n: 1 | -1) => { if (!(view === 'month' && flip.current?.(n))) shift(n); };
 
   return (
     <div>
@@ -64,12 +87,12 @@ export function Payments() {
         subtitle={<>уйдёт <Roll value={total} />, придёт <Roll value={incomes} /></>}
         action={
           <div className="flex gap-2">
-            <SkyButton onClick={() => shift(-1)} label="Предыдущий месяц"><ChevronLeft size={18} strokeWidth={1.7} /></SkyButton>
-            <SkyButton onClick={() => shift(1)} label="Следующий месяц"><ChevronRight size={18} strokeWidth={1.7} /></SkyButton>
+            <SkyButton onClick={() => arrow(-1)} label="Предыдущий месяц"><ChevronLeft size={18} strokeWidth={1.7} /></SkyButton>
+            <SkyButton onClick={() => arrow(1)} label="Следующий месяц"><ChevronRight size={18} strokeWidth={1.7} /></SkyButton>
           </div>
         } />
       <Pager<PayView> className="mt-3" value={view} onChange={v => set({ payView: v })} pages={[
-        { id: 'month', label: 'Месяц', render: () => <MonthView month={month} days={days} events={events} selected={selected} onSelect={setSelected} onShift={shift} said={said} /> },
+        { id: 'month', label: 'Месяц', render: () => <MonthView months={[prev, cur, next]} selected={selected} onSelect={setPicked} onShift={shift} flip={flip} said={said} /> },
         { id: 'cover', label: 'Хватит ли', render: () => <CoverView /> },
         { id: 'list', label: 'Список', render: () => <ListView month={month} events={events} total={total} incomes={incomes} /> },
       ]} />
@@ -105,17 +128,29 @@ function SwipeEvent({ e, mark, now, showDate = false }: { e: CalEvent; mark?: Ev
   );
 }
 
-function MonthView({ month, days, events, selected, onSelect, onShift, said }: {
-  month: string; days: DayMoney[]; events: CalEvent[]; selected: string; onSelect: (d: string) => void; onShift: (n: 1 | -1) => void; said: ReturnType<typeof verdict>;
+/** Высота воды в ячейках: от наибольшего резерва месяца, но не ниже четырёх запасов */
+const topOf = (days: DayMoney[]) => Math.max(NARROW * 4, ...days.map(d => d.total ?? 0));
+
+function MonthView({ months, selected, onSelect, onShift, flip, said }: {
+  /** предыдущий, текущий и следующий месяцы — лента календаря */
+  months: readonly [MonthData, MonthData, MonthData];
+  selected: string; onSelect: (d: string) => void; onShift: (n: 1 | -1) => void;
+  flip: { current: ((dir: 1 | -1) => boolean) | null }; said: ReturnType<typeof verdict>;
 }) {
   const now = useToday();
   const [marks, expenses, debts, overrides, bridge] = useStore(useShallow(s => [s.marks, s.expenses, s.debts, s.weeklyOverrides, s.bridge] as const));
-  const top = Math.max(NARROW * 4, ...days.map(d => d.total ?? 0));
+  const { month, days, events } = months[1];
+  const top = topOf(days);
   // текущая неделя: сколько ещё на карте и с кредитки по мосту — вторая строка карточки дня
   const week = useMemo(() => weekMoney(expenses, debts, overrides, bridge, weekStart(now)), [expenses, debts, overrides, bridge, now]);
   const sel = days.find(d => d.date === selected);
   // открытый день и откуда он раскрывается (центр ячейки на экране)
   const [opened, setOpened] = useState<{ date: string; x: number; y: number } | null>(null);
+  const open = useCallback((d: string, r: DOMRect) => { setOpened({ date: d, x: r.left + r.width / 2, y: r.top + r.height / 2 }); haptic(); }, []);
+  // водой наполняется только первый показанный месяц; соседние приезжают налитыми
+  const first = useRef(month);
+  const byKey = new Map(months.map(m => [m.month, m]));
+  const keys = useMemo(() => [months[0].month, month, months[2].month] as const, [months[0].month, month, months[2].month]);
   return (
     <>
       {/* вывод по резерву день за днём — те же числа, что в «Хватит ли» */}
@@ -124,10 +159,13 @@ function MonthView({ month, days, events, selected, onSelect, onShift, said }: {
           className={`mx-4 mt-3 rounded-2xl px-4 py-2.5 text-[13.5px] leading-snug ${said.tone === 'neg' ? 'bg-neg/10 text-neg' : said.tone === 'warn' ? 'bg-warn/12 text-warn' : 'bg-pos/10 text-pos'}`}>{said.text}</motion.p>
       )}
       <section className="mt-3 px-3" data-noswipe>
-        <motion.div key={month} initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ type: 'spring', stiffness: 300, damping: 30 }}>
-          <MonthGrid month={month} days={days} top={top} now={now} selected={selected} onSelect={onSelect} onSwipe={onShift}
-            onOpen={(d, r) => { setOpened({ date: d, x: r.left + r.width / 2, y: r.top + r.height / 2 }); haptic(); }} />
-        </motion.div>
+        <Weekdays />
+        {/* лента месяцев: идёт за пальцем, соседние месяцы уже собраны по бокам */}
+        <Flip className="-mx-3 mt-1.5" keys={keys} heightOf={monthHeight} onShift={onShift} control={flip} render={(k, slot) => {
+          const m = byKey.get(k)!;
+          return <MonthGrid month={k} days={m.days} top={topOf(m.days)} now={now} selected={slot === 0 ? selected : ''} still={k !== first.current}
+            onSelect={onSelect} onOpen={open} />;
+        }} />
       </section>
       <section className="mx-4 mt-5" data-noswipe>
         <div className="flex items-baseline justify-between gap-3">
@@ -170,7 +208,8 @@ function DayCard({ date, from, day, events, marks, now, top, week, onClose }: {
   });
   return (
     <motion.div className="fixed inset-0 z-[48]" initial={{ opacity: 1 }} exit={{ opacity: 1 }}>
-      <motion.div className="absolute inset-0 bg-[rgba(4,14,22,.4)] backdrop-blur-[6px]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
+      {/* просто затемнение, без размытия: размытие во весь экран пересчитывается на каждом кадре анимации под ним */}
+      <motion.div className="absolute inset-0 bg-[rgba(4,14,22,.46)]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
       <motion.div className="absolute inset-x-4 top-[18%] overflow-hidden rounded-[30px] bg-surface shadow-[0_30px_60px_-24px_rgba(4,14,22,.7)]"
         initial={{ opacity: 0, scale: 0.35 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.35, transition: { duration: 0.2, ease: ease.out } }}
         transition={{ type: 'spring', bounce: 0.15, duration: 0.45 }}

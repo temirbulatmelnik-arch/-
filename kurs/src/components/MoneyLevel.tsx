@@ -3,7 +3,7 @@
 // Ячейка — сумма неоплаченных событий дня; оплаченное на числа не влияет.
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { NARROW, type DayMoney } from '../domain/coverage';
-import { fromKey, weekday } from '../domain/dates';
+import { fromKey, lastDay, weekday } from '../domain/dates';
 import { num } from '../domain/money';
 import { isWorkday } from '../domain/workdays';
 
@@ -18,45 +18,53 @@ export function short(n: number): string {
 
 const WAVE = 'M0 4 Q7.5 1 15 4 T30 4 T45 4 T60 4 T75 4 T90 4 T105 4 T120 4';
 
-export function MonthGrid({ month, days, top, now, selected, onSelect, onSwipe, onOpen }: {
+/** Ячейка дня и зазор между ними, px: по ним высота месяца считается без измерений (лента месяцев на «Платежах») */
+const CELL = 54, GAP = 4;
+const lead = (month: string) => (fromKey(`${month}-01`).getDay() + 6) % 7;
+/** Высота сетки месяца: 4–6 строк по неделям */
+export const monthHeight = (month: string) => {
+  const rows = Math.ceil((lead(month) + lastDay(month)) / 7);
+  return rows * CELL + (rows - 1) * GAP;
+};
+
+/** Дни недели над сеткой — одни на все месяцы, при листании стоят на месте */
+export function Weekdays() {
+  return (
+    <div className="grid grid-cols-7 gap-1 text-center text-[12px] text-muted" aria-hidden="true">
+      {['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].map(d => <span key={d}>{d}</span>)}
+    </div>
+  );
+}
+
+export function MonthGrid({ month, days, top, now, selected, still = false, onSelect, onOpen }: {
   month: string; days: DayMoney[]; top: number; now: string; selected: string;
-  onSelect: (d: string) => void; onSwipe: (dir: 1 | -1) => void;
+  /** без наполнения водой: соседние месяцы ленты приезжают уже налитыми */
+  still?: boolean;
+  onSelect: (d: string) => void;
   /** нажатие на день — раскрыть его карточку прямо из ячейки: from — где ячейка на экране */
   onOpen?: (d: string, from: DOMRect) => void;
 }) {
-  const lead = (fromKey(`${month}-01`).getDay() + 6) % 7;
-  const touch = useRef<number | null>(null);
-  // вода наполняет ячейки один раз на месяц: скрытая вкладка (display:none) при каждом показе перезапускала бы
-  // наполнение всех ячеек. Считаем окончания — после последнего класс sc-once снимает анимацию
-  const [filled, setFilled] = useState<string | null>(null);
-  const ends = useRef({ month, n: 0 });
-  if (ends.current.month !== month) ends.current = { month, n: 0 };
+  // вода наполняет ячейки один раз: скрытая вкладка (display:none) при каждом показе перезапускала бы наполнение
+  // всех ячеек. Считаем окончания — после последнего класс sc-once снимает анимацию (и слои видеокарты вместе с ней)
+  const [filled, setFilled] = useState(still);
+  const ends = useRef(0);
   const fills = days.filter(d => d.total != null).length;
   // обработчик нажатия — один и тот же между перерисовками, иначе запомненные ячейки перерисовывались бы все
   const cb = useRef({ onSelect, onOpen });
   cb.current = { onSelect, onOpen };
   const tap = useCallback((date: string, from: DOMRect) => { cb.current.onSelect(date); cb.current.onOpen?.(date, from); }, []);
   return (
-    <div onTouchStart={e => { touch.current = e.touches[0].clientX; }}
-      onTouchEnd={e => {
-        if (touch.current == null) return;
-        const dx = e.changedTouches[0].clientX - touch.current;
-        touch.current = null;
-        if (Math.abs(dx) > 60) onSwipe(dx < 0 ? 1 : -1);
-      }}>
-      <div className="grid grid-cols-7 gap-1 text-center text-[12px] text-muted">
-        {['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].map(d => <span key={d}>{d}</span>)}
-      </div>
-      <div className={`mt-1.5 grid grid-cols-7 gap-1 ${filled === month ? 'sc-once' : ''}`}
-        onAnimationEnd={e => { if (e.animationName === 'sc-fill' && ++ends.current.n >= fills) setFilled(month); }}>
-        {Array.from({ length: lead }, (_, i) => <span key={`e${i}`} />)}
-        {days.map((d, i) => <DayCell key={d.date} d={d} i={i} top={top} on={d.date === selected} isToday={d.date === now} onTap={tap} />)}
-      </div>
+    <div className={`grid grid-cols-7 gap-1 ${filled ? 'sc-once' : ''}`}
+      onAnimationEnd={e => { if (e.animationName === 'sc-fill' && ++ends.current >= fills) setFilled(true); }}>
+      {Array.from({ length: lead(month) }, (_, i) => <span key={`e${i}`} />)}
+      {days.map((d, i) => <DayCell key={d.date} d={d} i={i} top={top} on={d.date === selected} isToday={d.date === now} onTap={tap} />)}
     </div>
   );
 }
 
-/** Ячейка дня. Запомнена (memo): при нажатии на день перерисовываются две ячейки — старый и новый выбор, а не все 30 */
+/** Ячейка дня. Запомнена (memo): при нажатии на день перерисовываются две ячейки — старый и новый выбор, а не все 30.
+ *  Волна качается только в выбранной: бесконечная анимация в каждой из 30 скруглённых ячеек — 30 слоёв с масками
+ *  на видеокарте iPhone, от них календарь и подвисал */
 const DayCell = memo(function DayCell({ d, i, top, on, isToday, onTap }: {
   d: DayMoney; i: number; top: number; on: boolean; isToday: boolean; onTap: (date: string, from: DOMRect) => void;
 }) {
@@ -73,7 +81,7 @@ const DayCell = memo(function DayCell({ d, i, top, on, isToday, onTap }: {
           height: `${level}%`, animationDelay: `${0.1 + i * 0.03}s`, opacity: d.past ? 0.5 : 1,
           background: `linear-gradient(180deg, var(${low ? '--water-low-a' : '--water-a'}), var(${low ? '--water-low-b' : '--water-b'}))`,
         }}>
-          <svg className="sc-wave absolute -top-1 left-0 h-1.5 w-[200%]" viewBox="0 0 120 8" preserveAspectRatio="none" aria-hidden="true">
+          <svg className={`absolute -top-1 left-0 h-1.5 w-[200%] ${on ? 'sc-wave' : ''}`} viewBox="0 0 120 8" preserveAspectRatio="none" aria-hidden="true">
             <path d={WAVE} fill="none" strokeWidth="1.3" style={{ stroke: low ? 'var(--mark-out)' : 'var(--sea)' }} />
           </svg>
           <span className="absolute -top-px left-[34%] h-0.5 w-[34%] rounded-full bg-[linear-gradient(90deg,transparent,rgba(255,150,100,.95),transparent)]" />
