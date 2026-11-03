@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { categorize, fixDefaultCategories, isNotSpending } from './categorize';
-import { eventsBetween, estimatePayment, urgency } from './calendar';
+import { eventsBetween, estimatePayment, paidOn, urgency } from './calendar';
 import { addMonths, dayIn, monthsBetween, weekStart } from './dates';
 import { forecast } from './forecast';
 import { buildIcs } from './ics';
@@ -10,7 +10,6 @@ import { categoryLimit, currentPhase, DEFAULT_PLAN, setPlanSource, splitBonus, t
 import { fromAi, fromDrafts } from './proposals';
 import { PROTOCOL_VERSION } from './sync';
 import { accruedOnCard, checkupPlan, ledger, type Checkup, type LedgerInput } from './ledger';
-import { cashFlow, dailyLevels } from './cashflow';
 import { mergeSeed, type PlanState } from './planUpdate';
 import { applyExchange, buildExchange, dropChatTwins, exchangeDigest, normalize, parseExchange, previewExchange, type ExchangeState } from './exchange';
 import { parseStatementText, isIncomeLine } from './pdf';
@@ -21,7 +20,7 @@ import { isWorkday, workdayOnOrBefore } from './workdays';
 import { draft } from './statements';
 import { parseCsv, parseText } from './statements';
 import type { CalEvent, Debt, EventMark, Expense, PlanSeed } from './types';
-import { coverage, coverageHints } from './coverage';
+import { coverage, coverageHints, coverageInput, monthDays } from './coverage';
 import { open, seal } from './vault';
 
 const debt = (p: Partial<Debt>): Debt => ({
@@ -260,30 +259,49 @@ describe('обязательные платежи по датам и прогн�
     const ev = eventsBetween({ ...cal, overrides: { 'fix:sub:2026-11': { date: '2026-12-02', amount: 2500 } } }, '2026-12-01', '2026-12-05');
     expect(ev.find(e => e.key === 'fix:sub:2026-11')).toMatchObject({ date: '2026-12-02', amount: 2500, moved: true });
   });
-  it('баланс карты по дням: минимум перед зарплатой', () => {
+  const input = (c: typeof cal & { bridge?: Bridge | null }, marks: Record<string, EventMark>) => ({ cal: c, marks, reserve: 20_000, debts: [], expenses: [], bridge: c.bridge ?? null });
+  const nov = (c: typeof cal, marks: Record<string, EventMark>) => {
+    const cov = coverage(input(c, marks), '2026-11-01');
+    return { cov, days: monthDays(eventsBetween(c, '2026-11-01', '2026-11-30'), marks, cov, '2026-11', '2026-11-01') };
+  };
+
+  it('остаток дня в календаре — резерв к вечеру по прогнозу покрытия: самопроверка по каждому дню', () => {
     const paid = { 'fix:sub:2026-10': { done: true, amount: 2400, at: '' } };
-    const f = cashFlow(cal, paid, { amount: 5000, date: '2026-11-01', source: 'manual' }, '2026-11-30');
-    // вс 01.11 пополнение уже в балансе этого дня; вс 08.11 −1 000 связь и −10 000 пополнение карты жизни, 10.11 +50 000 зарплата
-    expect(f.byDay['2026-11-02']).toBeUndefined();
-    expect(f.byDay['2026-11-08']).toBe(-6000);
-    expect(f.byDay['2026-11-10']).toBe(44_000);
-    expect(f.min!.balance).toBe(-6000);
-    expect(f.min!.event.date).toBe('2026-11-08');
-    // пополнение отмечено при закрытии недели — оно уже вычтено из резерва, с карты его не вычитаем
-    const topped = cashFlow(cal, { ...paid, 'wk:2026-11-09': { done: true, amount: 7000, at: '' } }, { amount: 5000, date: '2026-11-01', source: 'manual' }, '2026-11-30');
-    expect(topped.byDay['2026-11-08']).toBe(4000);
-    // неоплаченная подписка прошлого месяца учитывается как платёж к оплате
-    expect(cashFlow(cal, {}, { amount: 5000, date: '2026-11-01', source: 'manual' }, '2026-11-30').points[0]).toMatchObject({ overdue: true, delta: -2400 });
+    const { cov, days } = nov(cal, paid);
+    // самопроверка: остаток каждого дня = остаток прогноза после последнего события в этот день или раньше
+    let expected = cov.start;
+    for (const d of days) {
+      for (const st of cov.steps) if (st.date === d.date) expected = st.balance;
+      expect(d.total).toBe(expected);
+    }
+    const top = eventsBetween(cal, '2026-11-08', '2026-11-08').find(e => e.key === 'wk:2026-11-09')!.amount;
+    expect(days[1].total).toBe(20_000); // 02.11 — событий нет
+    expect(days[7]).toMatchObject({ total: 20_000 - 1000 - top, sum: -1000 - top }); // 08.11: связь и пополнение карты
+    expect(days[9]).toMatchObject({ total: 20_000 - 1000 - top + 50_000, sum: 50_000 }); // 10.11: зарплата
+    // прошедшие дни: прогноза назад нет
+    const oct = monthDays(eventsBetween(cal, '2026-10-01', '2026-10-31'), paid, cov, '2026-10', '2026-11-01');
+    expect(oct.every(d => d.total === null)).toBe(true);
+    // неоплаченная подписка прошлого месяца — к оплате сегодня
+    expect(nov(cal, {}).cov.steps[0]).toMatchObject({ date: '2026-11-01', delta: -2400 });
   });
-  it('деньги по дням для календаря: карта + резерв, между событиями — как накануне, назад — по календарю', () => {
-    const t = dailyLevels(cal, {}, { amount: 5000, date: '2026-11-01', source: 'manual' }, 20_000, '2026-10-20', '2026-11-11');
-    expect(t['2026-10-31']).toBe(5000 + 10_000 + 20_000); // до воскресного пополнения 01.11 денег было больше
-    expect(t['2026-10-21']).toBe(5000 + 10_000 + 2400 + 20_000); // и до подписки 22-го (пополнение 25.10 — на неделю этапа 0, лимит 0)
-    expect(t['2026-11-01']).toBe(5000 - 2400 + 20_000); // неоплаченная подписка уже вычтена
-    expect(t['2026-11-05']).toBe(t['2026-11-01']); // между событиями — как накануне
-    expect(t['2026-11-10']).toBe(2600 - 1000 - 10_000 + 50_000 + 20_000);
-    expect(Object.keys(t).sort()).toEqual(expect.arrayContaining(['2026-10-20', '2026-11-11']));
-    expect(t['2026-11-12']).toBeUndefined();
+
+  it('оплаченное заранее не уменьшает ни сумму будущего дня, ни остаток; день оплаты — день отметки', () => {
+    const gift = { key: 'gift', date: '2026-11-18', dateMode: 'until' as const, kind: 'payment' as const, title: 'Подарок', amount: 7500 };
+    const marks = { gift: { done: true, amount: 7500, at: '2026-10-27T10:00:00.000Z' } };
+    const without = nov(cal, {}).days;
+    const withGift = nov({ ...cal, oneOff: [gift] }, marks).days;
+    expect(withGift.map(d => d.total)).toEqual(without.map(d => d.total));
+    expect(withGift[17]).toMatchObject({ sum: 0, paid: true, paidTotal: 7500 });
+    expect(paidOn(gift, marks.gift)).toBe('2026-10-27');
+    expect(paidOn(gift, { ...marks.gift, paidDate: '2026-10-28' })).toBe('2026-10-28');
+    expect(paidOn({ date: '2026-10-20' }, { at: '2026-10-27T10:00:00.000Z' })).toBe('2026-10-20');
+  });
+
+  it('неделя моста: из резерва уходит только воскресное пополнение fromReserve, траты с кредитки — нет', () => {
+    const bridge: Bridge = { card: 'card-x', cap: 30_000, weeks: [{ monday: '2026-11-09', fromReserve: 4000, fromCredit: 4000 }] };
+    const { cov, days } = nov({ ...cal, bridge } as typeof cal, { 'fix:sub:2026-10': { done: true, amount: 2400, at: '' } });
+    expect(cov.steps.find(s => s.key === 'wk:2026-11-09')!.delta).toBe(-4000);
+    expect(days[7].total).toBe(20_000 - 1000 - 4000);
   });
 });
 
@@ -489,9 +507,37 @@ describe('файл обмена с чатом', () => {
       { title: 'Чего нет в плане', date: '2026-11-15', done: true },
     ] }))!, base);
     const sections = previewExchange(f, base, NOW);
-    expect(sections[0].lines.map(l => l.replace(/\s/g, ' '))).toEqual(['Подарок 16.11: оплачено 15 000 ₽', 'Не нашёл в календаре: Чего нет в плане 15.11, пропускаю']);
+    expect(sections[0].lines.map(l => l.replace(/\s/g, ' '))).toEqual(['Подарок 16.11: оплачено 15 000 ₽ (04.11)', 'Не нашёл в календаре: Чего нет в плане 15.11, пропускаю']);
     const patch = applyExchange(f, base, NOW, new Set(['calendar']), id);
     expect(patch.marks!.gift).toMatchObject({ done: true, amount: 15_000 });
+  });
+
+  it('дата оплаты: из чата — paidDate, без неё — день импорта; в выгрузке — paidDate', () => {
+    const f = normalize(parseExchange(JSON.stringify({ app: 'kurs-exchange', version: 2, calendar: [
+      { key: 'gift', done: true, paid: 15_000, paidDate: '2026-10-27' },
+      { key: 'fix:tel:2026-11', done: true, paid: 1000 },
+    ] }))!, base);
+    const patch = applyExchange(f, base, NOW, new Set(['calendar']), id);
+    expect(patch.marks!.gift).toMatchObject({ done: true, paidDate: '2026-10-27' });
+    expect(patch.marks!['fix:tel:2026-11']).toMatchObject({ done: true, paidDate: NOW });
+    const s2 = { ...base, marks: patch.marks! };
+    const out = buildExchange(s2, NOW);
+    expect(out.calendar!.find(e => e.key === 'gift')).toMatchObject({ done: true, paidDate: '2026-10-27' });
+    expect(previewExchange(normalize(parseExchange(JSON.stringify(out))!, s2), s2, NOW)).toEqual([]);
+  });
+
+  it('status.coverage и остаток дня в календаре — одно и то же', () => {
+    const s: ExchangeState = { ...base, reserve: 6000 };
+    const out = buildExchange(s, NOW);
+    const led = ledger({ checkups: [], cardBalance: s.cardBalance, reserve: s.reserve, reserveLog: [], marks: s.marks, expenses: s.expenses, oneOff: s.oneOff, debts: s.debts, bridge: null });
+    const cov = coverage(coverageInput(s, led), NOW);
+    const narrow = out.status!.coverage!.narrow!;
+    expect(narrow.length).toBeGreaterThan(0);
+    for (const n of narrow) {
+      const m = n.date.slice(0, 7);
+      const day = monthDays(eventsBetween(s, `${m}-01`, `${m}-31`), s.marks, cov, m, NOW).find(d => d.date === n.date)!;
+      expect(Math.round(day.total!)).toBe(n.left);
+    }
   });
 
   it('трата из чата, уже внесённая под другим названием и категорией, — повтор; две одинаковые поездки — нет', () => {

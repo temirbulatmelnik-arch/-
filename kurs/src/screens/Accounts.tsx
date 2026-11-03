@@ -1,60 +1,48 @@
-// Зарплатная карта (для прогноза по дням) и копилка недельных остатков.
+// Зарплатная карта (точка отсчёта учёта карты) и копилка недельных остатков.
 import { useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { AmountInput, Field, Money, PrimaryButton, Segmented, Sheet } from '../components/ui';
-import { cashFlow } from '../domain/cashflow';
+import { useCoverage } from '../components/Coverage';
+import { NARROW } from '../domain/coverage';
 import { addDays, dayMonth, ddmm, today } from '../domain/dates';
 import { parseAmount } from '../domain/money';
 import { useStore } from '../store/store';
-import { toast, useCal, useUi } from '../store/ui';
+import { toast, useUi } from '../store/ui';
 
 export function CardSheet() {
   const open = useUi(s => s.card);
   const set = useUi(s => s.set);
   return (
-    <Sheet open={open} onClose={() => set({ card: false })} title="Зарплатная карта" subtitle="Остаток — от него считается прогноз по дням">
+    <Sheet open={open} onClose={() => set({ card: false })} title="Зарплатная карта" subtitle="Остаток карты жизни — точка отсчёта учёта">
       {open && <CardBody onClose={() => set({ card: false })} />}
     </Sheet>
   );
 }
 
 function CardBody({ onClose }: { onClose: () => void }) {
-  const cal = useCal();
-  const [cardBalance, marks, setCardBalance, reserve] = useStore(useShallow(s => [s.cardBalance, s.marks, s.setCardBalance, s.reserve] as const));
+  const [cardBalance, setCardBalance] = useStore(useShallow(s => [s.cardBalance, s.setCardBalance] as const));
   const [amount, setAmount] = useState(cardBalance ? String(cardBalance.amount) : '');
   const [date, setDate] = useState(today());
   const value = parseAmount(amount);
-  const flow = cardBalance ? cashFlow(cal, marks, cardBalance, addDays(cardBalance.date, 45)) : null;
-  const firstNeg = flow?.points.find(p => p.balance < 0);
-  const low = flow?.min;
+  // прогноз — общий: резерв к вечеру, как в календаре, в «Хватит ли» и в status.coverage; от остатка карты он не зависит
+  const { cov } = useCoverage();
+  const s = cov.shortage, low = cov.min;
 
   return (
     <div className="space-y-4 pt-1">
-      <Field label="Сколько сейчас на карте" hint="Платежи и поступления до этой даты включительно считаются уже прошедшими. Выписка обновит остаток сама.">
+      <Field label="Сколько сейчас на карте" hint="От этого остатка приложение ведёт учёт карты до следующей сверки. Выписка обновит остаток сама.">
         <AmountInput value={amount} onChange={setAmount} size="md" />
       </Field>
       <input type="date" value={date} onChange={e => setDate(e.target.value || today())} className="field" aria-label="На какую дату" />
       <PrimaryButton onClick={() => { setCardBalance({ amount: value!, date, source: 'manual' }); toast('Остаток обновлён'); onClose(); }} disabled={value == null}>Сохранить</PrimaryButton>
 
-      {flow && (
-        <div className="card p-4">
-          <div className="eyebrow mb-2 text-muted">Ближайшие 45 дней</div>
-          {flow.points.filter(p => p.event.kind !== 'weekly').slice(0, 14).map(p => (
-            <div key={p.event.key} className="flex items-baseline justify-between gap-2 py-1.5 text-[13px]">
-              <span className="min-w-0 truncate text-muted">{ddmm(p.event.date)} {p.event.title}</span>
-              <span className="flex shrink-0 gap-3">
-                <Money value={p.delta} sign className={p.delta > 0 ? 'text-pos' : ''} />
-                <Money value={p.balance} className={`w-20 text-right ${p.balance < 0 ? 'text-neg' : 'text-faint'}`} />
-              </span>
-            </div>
-          ))}
-          {firstNeg && low && (
-            <p className={`mt-3 rounded-xl px-3 py-2.5 text-[13px] leading-snug ${reserve + low.balance < 0 ? 'bg-neg/10 text-neg' : 'bg-warn/10 text-warn'}`}>
-              С {dayMonth(firstNeg.event.date)} зарплаты не хватает — по плану нехватку закрывает резерв. Самая тонкая точка — {dayMonth(low.event.date)}: из резерва понадобится <Money value={-low.balance} />, {reserve + low.balance < 0 ? 'а в нём столько нет.' : <>останется <Money value={reserve + low.balance} />.</>}
-            </p>
-          )}
-          <p className="mt-2 text-[11.5px] text-faint">Понедельничные переводы недельного лимита тоже учтены.</p>
-        </div>
+      {(s || low) && (
+        <p className={`rounded-xl px-3 py-2.5 text-[13px] leading-snug ${s ? 'bg-neg/10 text-neg' : low && low.balance < NARROW ? 'bg-warn/10 text-warn' : 'bg-surface-2 text-muted'}`}>
+          {s
+            ? <>С {dayMonth(s.date)} резерва не хватает: <Money value={s.amount} /> — на «{s.title}».</>
+            : <>Самая тонкая точка — {dayMonth(low!.date)}: в резерве останется <Money value={low!.balance} />.</>}
+          {' '}Недельные деньги на карте к дням платежей не прибавляются: по плану они тратятся до нуля.
+        </p>
       )}
     </div>
   );

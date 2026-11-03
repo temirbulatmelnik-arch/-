@@ -100,6 +100,8 @@ export interface EventMark {
   prevBalance?: number;
   /** откуда оплачен платёж: из резерва или с карты; кредитка не бывает источником платежа по долгу */
   paidFrom?: 'reserve' | 'card';
+  /** день фактической оплаты (ГГГГ-ММ-ДД): отметка в приложении — сегодня, из чата — paidDate или день импорта */
+  paidDate?: string;
   at: string;
 }
 

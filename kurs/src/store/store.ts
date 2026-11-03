@@ -307,7 +307,7 @@ export const useStore = create<State>()(
         const debt = e.debtId ? s.debts.find(d => d.id === e.debtId) : undefined;
         if (done) {
           const paid = amount ?? e.amount;
-          marks[e.key] = { done: true, amount: paid, at: nowIso(), prevBalance: debt?.balance, ...(e.kind === 'payment' ? { paidFrom: paidFrom ?? 'reserve' } : {}) };
+          marks[e.key] = { done: true, amount: paid, at: nowIso(), paidDate: today(), prevBalance: debt?.balance, ...(e.kind === 'payment' ? { paidFrom: paidFrom ?? 'reserve' } : {}) };
           if (e.kind === 'weekly') return { marks, ...topUpMove(s, e.key, paid) };
           if (debt && e.kind === 'payment' && !prev?.done) {
             // погашение основного долга ≈ платёж минус проценты; закрывающий платёж обнуляет долг. По кредитке проценты —

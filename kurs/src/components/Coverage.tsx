@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { CheckCircle2, ChevronDown, TriangleAlert } from 'lucide-react';
 import { useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { coverage, coverageHints, NARROW, type CoverageStep } from '../domain/coverage';
+import { coverage, coverageHints, coverageInput, NARROW, type Coverage, type CoverageInput, type CoverageStep } from '../domain/coverage';
 import { dayMonth, ddmm, monthName } from '../domain/dates';
 import { num } from '../domain/money';
 import { useLedger } from '../screens/Checkup';
@@ -13,6 +13,28 @@ import { useCal, useToday, useUi } from '../store/ui';
 import { haptic } from './haptics';
 import { ease, spring } from './motion';
 import { Money } from './ui';
+
+/**
+ * Прогноз покрытия — один на всё приложение: «Хватит ли», остаток дня в календаре, «самая тонкая точка» на карте и
+ * status.coverage в файле для чата считаются одной функцией с одним входом (coverageInput). Результат запоминается:
+ * экраны, которые живут одновременно, не пересчитывают его каждый своё.
+ */
+let covCache: { key: unknown[]; input: CoverageInput; cov: Coverage } | null = null;
+export function useCoverage(): { input: CoverageInput; cov: Coverage; now: string } {
+  const now = useToday();
+  const cal = useCal();
+  const [marks, expenses] = useStore(useShallow(s => [s.marks, s.expenses] as const));
+  const led = useLedger();
+  return useMemo(() => {
+    // ключ — сами данные хранилища (у каждого экрана свой объект cal, но поля в нём общие)
+    const key = [...Object.values(cal), marks, expenses, led.reserve, led.incomeOnCard, now];
+    if (!covCache || covCache.key.some((k, i) => k !== key[i])) {
+      const input = coverageInput({ ...cal, marks, expenses }, led);
+      covCache = { key, input, cov: coverage(input, now) };
+    }
+    return { input: covCache.input, cov: covCache.cov, now };
+  }, [cal, marks, expenses, led.reserve, led.incomeOnCard, now]);
+}
 
 const W = 340, H = 132, PAD = 14;
 
@@ -78,16 +100,11 @@ function ReserveScrub({ steps, start, from, to, focus }: { steps: CoverageStep[]
 }
 
 export function CoverageCard() {
-  const now = useToday();
-  const cal = useCal();
-  const [marks, debts, expenses, bridge] = useStore(useShallow(s => [s.marks, s.debts, s.expenses, s.bridge] as const));
   const set = useUi(s => s.set);
   // резерв по учёту: минус оплаченное из него после последнего остатка из банка, плюс поступления, ждущие перевода с карты
-  const led = useLedger();
-  const reserve = led.reserve + led.incomeOnCard;
+  const { input, cov, now } = useCoverage();
+  const reserve = input.reserve;
   const [open, setOpen] = useState(false);
-  const input = useMemo(() => ({ cal, marks, reserve, debts, expenses, bridge }), [cal, marks, reserve, debts, expenses, bridge]);
-  const cov = useMemo(() => coverage(input, now), [input, now]);
   const hints = useMemo(() => coverageHints(input, now, cov), [input, now, cov]);
   const s = cov.shortage, m = cov.min;
   const focus = Math.max(0, (s ? cov.steps.findIndex(x => x.balance < 0) : m ? cov.steps.indexOf(m) : -1) + 1);

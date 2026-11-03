@@ -3,7 +3,8 @@
 // Регулировать можно только недельные деньги на жизнь: пополнение карты и мост на кредитке.
 import { activeBridge, bridgeState, type Bridge } from './bridge';
 import { eventsBetween, type CalendarInput } from './calendar';
-import { addDays, daysBetween, ddmm, monthKey } from './dates';
+import { addDays, daysBetween, ddmm, lastDay, monthKey } from './dates';
+import type { Ledger } from './ledger';
 import type { CalEvent, Debt, EventMark, Expense } from './types';
 
 /** запас, ниже которого день считается узким местом */
@@ -57,6 +58,16 @@ export interface CoverageInput {
   debts: Debt[];
   expenses: Expense[];
   bridge?: Bridge | null;
+}
+
+/**
+ * Вход прогноза — один на всё приложение: календарь (остаток дня), «Хватит ли», «самая тонкая точка» и status.coverage
+ * в файле для чата. Резерв — по учёту плюс поступления на карте, ждущие перевода в резерв. Недельные деньги считаются
+ * потраченными до нуля: из резерва уходит только воскресное пополнение карты (в неделю моста — fromReserve), траты с
+ * кредитки моста резерв не уменьшают — они растят долг по кредитке.
+ */
+export function coverageInput(s: CalendarInput & { marks: Record<string, EventMark>; expenses: Expense[] }, led: Pick<Ledger, 'reserve' | 'incomeOnCard'>): CoverageInput {
+  return { cal: s, marks: s.marks, reserve: led.reserve + led.incomeOnCard, debts: s.debts, expenses: s.expenses, bridge: s.bridge ?? null };
 }
 
 /** Погашение моста и рост минималок по кредитке моста — как события прогноза */
@@ -169,4 +180,66 @@ export function coverageHints(input: CoverageInput, from: string, cov: Coverage)
   for (const o of oneOff) hints.push({ text: `Если «${o.title}» ещё не оплачено — сдвинуть или уменьшить`, closes: -o.delta >= s.amount });
   if (!hints.some(h => h.closes)) hints.push({ text: 'Подсказки нехватку не закрывают — нужен пересчёт плана, отправьте файл в Claude', closes: false });
   return hints;
+}
+
+/**
+ * Резерв к вечеру каждого дня [from..to] по прогнозу: в день с событиями — остаток после них, без событий — как
+ * накануне. До начала прогноза (прошедшие дни) и после его конца — null: остаток дня в календаре — это ровно прогноз
+ * покрытия, другого расчёта нет.
+ */
+export function reserveByDay(cov: Coverage, from: string, to: string): Record<string, number | null> {
+  const out: Record<string, number | null> = {};
+  let v = cov.start;
+  for (let d = cov.from; d < from && d <= cov.to; d = addDays(d, 1)) if (cov.byDay[d] != null) v = cov.byDay[d];
+  for (let d = from; d <= to; d = addDays(d, 1)) {
+    if (d < cov.from || d > cov.to) { out[d] = null; continue; }
+    if (cov.byDay[d] != null) v = cov.byDay[d];
+    out[d] = v;
+  }
+  return out;
+}
+
+/** День календаря */
+export interface DayMoney {
+  date: string;
+  /** неоплаченное: что уходит (платежи, пополнение карты) и что приходит */
+  out: number;
+  in: number;
+  /** сумма неоплаченных событий дня со знаком — её и показывает ячейка */
+  sum: number;
+  /** события дня есть, и все отмечены (оплачены, пришли, долито) */
+  paid: boolean;
+  /** всего отмечено в этот день — для зачёркнутой подписи, на суммы не влияет */
+  paidTotal: number;
+  /** резерв к вечеру по прогнозу покрытия; null — день прошёл или за горизонтом прогноза */
+  total: number | null;
+  past: boolean;
+  /** шаги прогноза без события в календаре (погашение моста) */
+  extra: { title: string; delta: number }[];
+}
+
+/**
+ * Дни месяца для календаря. Остаток — из прогноза покрытия (reserveByDay); в сумму дня входят только неоплаченные
+ * события: оплаченное уже ушло из резерва в день оплаты, на будущих днях оно не считается ни в сумме, ни в остатке.
+ */
+export function monthDays(events: CalEvent[], marks: Record<string, EventMark>, cov: Coverage, month: string, now: string): DayMoney[] {
+  const from = `${month}-01`, to = `${month}-${String(lastDay(month)).padStart(2, '0')}`;
+  const level = reserveByDay(cov, from, to);
+  return Array.from({ length: lastDay(month) }, (_, i) => {
+    const date = `${month}-${String(i + 1).padStart(2, '0')}`;
+    const list = events.filter(e => e.date === date);
+    const open = list.filter(e => !marks[e.key]?.done);
+    const done = list.filter(e => marks[e.key]?.done);
+    const extra = cov.steps.filter(x => x.kind === 'bridge' && x.date === date).map(x => ({ title: x.title, delta: x.delta }));
+    const out = open.filter(e => e.kind !== 'income').reduce((t, e) => t + e.amount, 0) - extra.reduce((t, x) => t + Math.min(0, x.delta), 0);
+    const inc = open.filter(e => e.kind === 'income').reduce((t, e) => t + e.amount, 0);
+    return {
+      date, out, in: inc, sum: inc - out,
+      paid: list.length > 0 && open.length === 0,
+      paidTotal: done.reduce((t, e) => t + (marks[e.key].amount ?? e.amount), 0),
+      total: level[date],
+      past: date < now,
+      extra,
+    };
+  });
 }

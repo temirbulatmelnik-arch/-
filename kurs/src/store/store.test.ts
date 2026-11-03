@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { CalEvent } from '../domain/types';
 import { useStore } from './store';
+import { today } from '../domain/dates';
 
 const sunday: CalEvent = { key: 'wk:2026-11-02', date: '2026-11-01', dateMode: 'exact', kind: 'weekly', title: 'Долить карту жизни до лимита', amount: 8000 };
 const s = () => useStore.getState();
@@ -56,6 +57,12 @@ describe('воскресная сверка с банком', () => {
     expect([by.a.balance, by.b.balance, by.m.balance]).toEqual([10_000, 20_350, 31_000]);
     expect(by.a.updatedAt).toBeTruthy();
     expect(s().checkups.at(-1)?.cards).toHaveLength(2);
+  });
+
+  it('отметка оплаты в приложении — дата оплаты сегодня', () => {
+    const pay: CalEvent = { key: 'fix:x:2026-12', date: '2026-12-20', dateMode: 'exact', kind: 'payment', title: 'Х', amount: 500 };
+    s().markEvent(pay, true);
+    expect(s().marks['fix:x:2026-12']).toMatchObject({ done: true, paidDate: today() });
   });
 
   it('платёж по кредитке: проценты — по дням с последнего обновления остатка, а не за целый месяц', () => {

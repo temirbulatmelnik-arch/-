@@ -4,9 +4,9 @@
 // Перед применением приложение показывает разницу по разделам; присланное без изменений ничего не трогает.
 import { bridgeState, weekMoney, type Bridge } from './bridge';
 import { ledger, type Checkup } from './ledger';
-import { coverage } from './coverage';
+import { coverage, coverageInput } from './coverage';
 import { PROTOCOL_VERSION } from './sync';
-import { eventsBetween, type CalendarInput } from './calendar';
+import { eventsBetween, paidOn, type CalendarInput } from './calendar';
 import { categorize } from './categorize';
 import { addDays, daysBetween, ddmm, plural } from './dates';
 import { rub } from './money';
@@ -71,7 +71,7 @@ export interface ExchangeFile {
   incomes?: IncomeTemplate[];
   /** события календаря по key: amount и date — плановые, paid — фактически оплачено или пришло */
   /** событие ищется по key, а без него — по названию, дате (±7 дней) и сумме */
-  calendar?: { key?: string; date?: string; title?: string; kind?: string; amount?: number; done?: boolean; paid?: number; paidFrom?: string; reset?: boolean; approx?: boolean; exact?: boolean; planned?: string; dateMode?: string }[];
+  calendar?: { key?: string; date?: string; title?: string; kind?: string; amount?: number; done?: boolean; paid?: number; paidFrom?: string; paidDate?: string; reset?: boolean; approx?: boolean; exact?: boolean; planned?: string; dateMode?: string }[];
   /** разовые платежи и поступления */
   events?: ({ key?: string; date?: string; title?: string; amount?: number; kind?: 'payment' | 'income'; dateMode?: CalEvent['dateMode']; note?: string; debtId?: string } & Del)[];
   expensesFrom?: string;
@@ -124,7 +124,8 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
   const need = reserveNeed(now, s.debts);
   const from = addDays(now, short ? -14 : -EXPENSE_DAYS);
   const led = ledger({ checkups: s.checkups ?? [], cardBalance: s.cardBalance, reserve: s.reserve, reserveLog: s.reserveLog ?? [], marks: s.marks, expenses: s.expenses, oneOff: s.oneOff, debts: s.debts, bridge: s.bridge ?? null });
-  const cov = coverage({ cal: s, marks: s.marks, reserve: led.reserve + led.incomeOnCard, debts: s.debts, expenses: s.expenses, bridge: s.bridge }, now);
+  // тот же вход прогноза, что у календаря и «Хватит ли» в приложении: остаток дня в календаре = status.coverage
+  const cov = coverage(coverageInput(s, led), now);
   // окно −45…+75 дней и, дальше него, всё, что поправлено в приложении вручную: точные суммы и даты будущих платежей;
   // воскресные пополнения карты — только прошедшие и ближайшее, чтобы сверить их с переводами из резерва
   const calendar = short
@@ -165,6 +166,7 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
         // сумма или дата внесены в приложении вручную — это не оценка
         ...(s.overrides[e.key] ? { exact: true } : {}), ...(e.planned ? { planned: e.planned } : {}),
         done: !!m?.done, ...(m?.done && m.amount != null ? { paid: r0(m.amount) } : {}), ...(m?.paidFrom ? { paidFrom: m.paidFrom } : {}),
+        ...(m?.done ? { paidDate: paidOn(e, m) } : {}),
       };
     }),
     ...(short ? {} : { events: s.oneOff.filter(e => e.date >= addDays(now, -45)).map(e => ({
@@ -518,10 +520,12 @@ const stepCalendar: Step = (f, s, ctx) => {
     const mark = marks[e.key];
     if (p.done === true) {
       const paid = isNum(p.paid) ? p.paid : mark?.done && mark.amount != null ? mark.amount : isNum(p.amount) ? p.amount : e.amount;
-      if (!mark?.done || Math.abs((mark.amount ?? e.amount) - paid) >= 1) {
-        marks[e.key] = { ...mark, done: true, amount: paid, at: ctx.at, ...(p.paidFrom === 'card' || p.paidFrom === 'reserve' ? { paidFrom: p.paidFrom } : {}) };
+      // день фактической оплаты: из файла (paidDate); у уже отмеченного — прежний; у новой отметки — день импорта
+      const paidDate = isDate(p.paidDate) ? p.paidDate : mark?.done ? paidOn(e, mark) : ctx.now;
+      if (!mark?.done || Math.abs((mark.amount ?? e.amount) - paid) >= 1 || paidDate !== paidOn(e, mark)) {
+        marks[e.key] = { ...mark, done: true, amount: paid, at: ctx.at, paidDate, ...(p.paidFrom === 'card' || p.paidFrom === 'reserve' ? { paidFrom: p.paidFrom } : {}) };
         mc = true;
-        lines.push(`${name}: ${e.kind === 'income' ? 'пришло' : 'оплачено'} ${money(paid)}`);
+        lines.push(`${name}: ${e.kind === 'income' ? 'пришло' : 'оплачено'} ${money(paid)}${paidDate !== e.date ? ` (${ddmm(paidDate)})` : ''}`);
         // платёж по долгу с кредитки — против правил плана: отмечаем, но предупреждаем
         if ((p.paidFrom as string) === 'credit' && e.debtId) lines.push(`⚠ ${name}: платёж по долгу с кредитки — так нельзя по правилам плана`);
       }

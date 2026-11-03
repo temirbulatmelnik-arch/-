@@ -140,3 +140,11 @@ export function urgency(e: CalEvent, mark: EventMark | undefined, now: string): 
   if (e.kind === 'payment' && e.date <= addDays(now, 3)) return 'soon';
   return 'later';
 }
+
+/** День фактической оплаты отмеченного события: paidDate, а у старых отметок без неё — день отметки, если плановая
+ *  дата позже (оплатили заранее), иначе плановая дата. Оплаченное считается в этот день, а не в плановый */
+export function paidOn(e: Pick<CalEvent, 'date'>, m: Pick<EventMark, 'paidDate' | 'at'>): string {
+  if (m.paidDate) return m.paidDate;
+  const marked = m.at?.slice(0, 10);
+  return marked && e.date > marked ? marked : e.date;
+}

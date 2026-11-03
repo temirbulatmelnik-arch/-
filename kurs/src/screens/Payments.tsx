@@ -8,16 +8,17 @@ import { animate, AnimatePresence, motion, useMotionValue } from 'motion/react';
 import { haptic } from '../components/haptics';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { CoverageCard } from '../components/Coverage';
+import { CoverageCard, useCoverage } from '../components/Coverage';
 import { ease, item, list as listAnim, Pager, Roll, spring, SwipeRow, useEnter, usePan } from '../components/motion';
 import { LevelChart, MonthGrid, verdict, type DayMoney } from '../components/MoneyLevel';
 import { SkyButton, SkyHeader } from '../components/Petersburg';
 import { EventRow } from '../components/rows';
 import { runQuick } from '../components/TabBar';
 import { Bar, Empty, IconButton, Money } from '../components/ui';
-import { cashFlow, dailyLevels, LOW_WATER } from '../domain/cashflow';
+import { weekMoney, type WeekMoney } from '../domain/bridge';
+import { monthDays, NARROW, reserveByDay } from '../domain/coverage';
 import { eventGroup, eventsBetween, type EventGroup } from '../domain/calendar';
-import { addDays, addMonths, dayMonth, ddmm, lastDay, monthKey, monthName, weekday, weekdayFull } from '../domain/dates';
+import { addDays, addMonths, dayMonth, ddmm, lastDay, monthKey, monthName, weekday, weekdayFull, weekStart } from '../domain/dates';
 import type { CalEvent, EventMark } from '../domain/types';
 import { useStore } from '../store/store';
 import { useCal, useToday, useUi, type PayView } from '../store/ui';
@@ -33,7 +34,9 @@ const matches = (f: Filter, g: EventGroup) => (f === 'all' ? g !== 'weekly' : f 
 export function Payments() {
   const now = useToday();
   const cal = useCal();
-  const [marks, cardBalance, reserve] = useStore(useShallow(s => [s.marks, s.cardBalance, s.reserve] as const));
+  const marks = useStore(s => s.marks);
+  // прогноз покрытия — тот же, что в «Хватит ли» и в status.coverage: остаток дня в календаре — его резерв к вечеру
+  const { cov } = useCoverage();
   const set = useUi(s => s.set);
   const view = useUi(s => s.payView);
   const [month, setMonth] = useState(monthKey(now));
@@ -49,23 +52,8 @@ export function Payments() {
   const total = events.filter(e => e.kind === 'payment').reduce((s, e) => s + amount(e), 0);
   const incomes = events.filter(e => e.kind === 'income').reduce((s, e) => s + amount(e), 0);
 
-  // день за днём: что уходит, что приходит, сколько на карте и в резерве к вечеру
-  const days = useMemo<DayMoney[]>(() => {
-    const totals = dailyLevels(cal, marks, cardBalance ?? { amount: 0, date: now, source: 'manual' }, reserve, from, to);
-    return Array.from({ length: lastDay(month) }, (_, i) => {
-      const date = `${month}-${String(i + 1).padStart(2, '0')}`;
-      const list = events.filter(e => e.date === date);
-      const pays = list.filter(e => e.kind === 'payment');
-      return {
-        date,
-        out: list.filter(e => e.kind !== 'income').reduce((s, e) => s + amount(e), 0),
-        in: list.filter(e => e.kind === 'income').reduce((s, e) => s + amount(e), 0),
-        paid: pays.length > 0 && pays.every(e => marks[e.key]?.done),
-        total: totals[date],
-        past: date < now,
-      };
-    });
-  }, [cal, cardBalance, reserve, now, from, to, month, events, marks]);
+  // день за днём: неоплаченное дня и резерв к вечеру по прогнозу покрытия
+  const days = useMemo<DayMoney[]>(() => monthDays(events, marks, cov, month, now), [events, marks, cov, month, now]);
   const said = verdict(days);
   const shift = (n: 1 | -1) => setMonth(addMonths(month, n));
 
@@ -118,20 +106,22 @@ function SwipeEvent({ e, mark, now, showDate = false }: { e: CalEvent; mark?: Ev
 }
 
 function MonthView({ month, days, events, selected, onSelect, onShift, said }: {
-  month: string; days: DayMoney[]; events: CalEvent[]; selected: string; onSelect: (d: string) => void; onShift: (n: 1 | -1) => void; said: string | null;
+  month: string; days: DayMoney[]; events: CalEvent[]; selected: string; onSelect: (d: string) => void; onShift: (n: 1 | -1) => void; said: ReturnType<typeof verdict>;
 }) {
   const now = useToday();
-  const marks = useStore(s => s.marks);
-  const top = Math.max(LOW_WATER * 1.25, ...days.map(d => d.total ?? 0));
+  const [marks, expenses, debts, overrides, bridge] = useStore(useShallow(s => [s.marks, s.expenses, s.debts, s.weeklyOverrides, s.bridge] as const));
+  const top = Math.max(NARROW * 4, ...days.map(d => d.total ?? 0));
+  // текущая неделя: сколько ещё на карте и с кредитки по мосту — вторая строка карточки дня
+  const week = useMemo(() => weekMoney(expenses, debts, overrides, bridge, weekStart(now)), [expenses, debts, overrides, bridge, now]);
   const sel = days.find(d => d.date === selected);
   // открытый день и откуда он раскрывается (центр ячейки на экране)
   const [opened, setOpened] = useState<{ date: string; x: number; y: number } | null>(null);
   return (
     <>
-      {/* вывод по воде в календаре: деньги на карте и в резерве день за днём */}
+      {/* вывод по резерву день за днём — те же числа, что в «Хватит ли» */}
       {said && (
-        <motion.p key={said} initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, ease: [0.23, 1, 0.32, 1] }}
-          className={`mx-4 mt-3 rounded-2xl px-4 py-2.5 text-[13.5px] leading-snug ${said.startsWith('Не хватит') ? 'bg-neg/10 text-neg' : /мало|тонк|ниже/.test(said) ? 'bg-warn/12 text-warn' : 'bg-pos/10 text-pos'}`}>{said}</motion.p>
+        <motion.p key={said.text} initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, ease: [0.23, 1, 0.32, 1] }}
+          className={`mx-4 mt-3 rounded-2xl px-4 py-2.5 text-[13.5px] leading-snug ${said.tone === 'neg' ? 'bg-neg/10 text-neg' : said.tone === 'warn' ? 'bg-warn/12 text-warn' : 'bg-pos/10 text-pos'}`}>{said.text}</motion.p>
       )}
       <section className="mt-3 px-3" data-noswipe>
         <motion.div key={month} initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ type: 'spring', stiffness: 300, damping: 30 }}>
@@ -141,14 +131,15 @@ function MonthView({ month, days, events, selected, onSelect, onShift, said }: {
       </section>
       <section className="mx-4 mt-5" data-noswipe>
         <div className="flex items-baseline justify-between gap-3">
-          <span className="text-[14px] font-medium">Деньги на карте и в резерве</span>
+          <span className="text-[14px] font-medium">В резерве к вечеру</span>
           {sel?.total != null && <span className="font-display text-[13px] font-medium whitespace-nowrap">{Number(selected.slice(8))}-го <Roll value={sel.total} /></span>}
         </div>
         <div className="mt-2"><LevelChart month={month} days={days} top={top} selected={selected} onSelect={onSelect} /></div>
       </section>
       <p className="px-5 pt-3 text-[12.5px] text-faint">Нажмите на день — он раскроется: что уходит, что приходит, сколько останется.</p>
       <AnimatePresence>
-        {opened && <DayCard key={opened.date} date={opened.date} from={opened} day={days.find(d => d.date === opened.date)} events={events.filter(e => e.date === opened.date)} marks={marks} now={now} onClose={() => setOpened(null)} />}
+        {opened && <DayCard key={opened.date} date={opened.date} from={opened} day={days.find(d => d.date === opened.date)} events={events.filter(e => e.date === opened.date)} marks={marks} now={now} top={top}
+          week={opened.date >= week.monday && opened.date <= addDays(week.monday, 6) ? week : null} onClose={() => setOpened(null)} />}
       </AnimatePresence>
     </>
   );
@@ -157,14 +148,19 @@ function MonthView({ month, days, events, selected, onSelect, onShift, said }: {
 /** Карточка дня: вырастает из нажатой ячейки и уходит обратно в неё (навык apple-design: из источника в источник).
  *  Масштаб от точки ячейки — только transform и opacity; общая layout-анимация motion обходила бы все элементы
  *  приложения на каждом кадре. Лежит ниже листов (z-48): платёж, открытый из дня, встаёт поверх него */
-function DayCard({ date, from, day, events, marks, now, onClose }: { date: string; from: { x: number; y: number }; day?: DayMoney; events: CalEvent[]; marks: Record<string, EventMark>; now: string; onClose: () => void }) {
+function DayCard({ date, from, day, events, marks, now, top, week, onClose }: {
+  date: string; from: { x: number; y: number }; day?: DayMoney; events: CalEvent[]; marks: Record<string, EventMark>; now: string; top: number;
+  /** только для дней текущей недели: остаток на карте и с кредитки по мосту */
+  week: WeekMoney | null; onClose: () => void;
+}) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
-  const low = day?.total != null && day.total < LOW_WATER;
-  const level = day?.total == null ? 0 : Math.max(0.06, Math.min(1, Math.max(0, day.total) / Math.max(LOW_WATER * 4, day.total)));
+  // резерв к вечеру: красный — меньше нуля, жёлтый — меньше запаса NARROW
+  const low = day?.total != null && day.total < NARROW;
+  const level = day?.total == null ? 0 : Math.max(0.06, Math.min(1, Math.max(0, day.total) / Math.max(top, 1)));
   // смахнуть вниз — закрыть: карточка идёт за пальцем с сопротивлением
   const y = useMotionValue(0);
   const pan = usePan({
@@ -179,7 +175,7 @@ function DayCard({ date, from, day, events, marks, now, onClose }: { date: strin
         initial={{ opacity: 0, scale: 0.35 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.35, transition: { duration: 0.2, ease: ease.out } }}
         transition={{ type: 'spring', bounce: 0.15, duration: 0.45 }}
         {...pan} style={{ y, transformOrigin: `${from.x - 16}px ${from.y - window.innerHeight * 0.18}px`, touchAction: 'pan-x' }}>
-        {/* вода дня: сколько на карте и в резерве к вечеру — поднимается снизу (scaleY, на видеокарте) */}
+        {/* вода дня: сколько в резерве к вечеру — поднимается снизу (scaleY, на видеокарте) */}
         <motion.div className="pointer-events-none absolute inset-x-0 bottom-0 origin-bottom" initial={{ scaleY: 0 }} animate={{ scaleY: 1 }} transition={{ type: 'spring', bounce: 0.2, duration: 0.9, delay: 0.15 }}
           style={{ height: `${level * 100}%`, background: `linear-gradient(180deg, var(${low ? '--water-low-a' : '--water-a'}), var(${low ? '--water-low-b' : '--water-b'}))` }} />
         <motion.div className="relative" initial={{ opacity: 0 }} animate={{ opacity: 1, transition: { delay: 0.12, duration: 0.2 } }} exit={{ opacity: 0, transition: { duration: 0.08 } }}>
@@ -190,15 +186,27 @@ function DayCard({ date, from, day, events, marks, now, onClose }: { date: strin
             </div>
             {day?.total != null && (
               <div className="text-right">
-                <div className="text-[11.5px] text-muted">к вечеру на карте<br />и в резерве</div>
+                <div className="text-[11.5px] text-muted">в резерве<br />к вечеру</div>
                 <Money value={day.total} className={`figure mt-0.5 block text-[20px] ${day.total < 0 ? 'text-neg' : low ? 'text-warn' : ''}`} />
               </div>
             )}
           </div>
+          {/* недельные деньги — отдельно: по плану они тратятся до нуля и к дням платежей запаса не прибавляют */}
+          {week && (
+            <p className="px-5 pt-2 text-[12.5px] text-muted">
+              на неделю: на карте <Money value={Math.max(0, week.cardLeft)} />{week.creditCap > 0 && <> + с кредитки <Money value={Math.max(0, week.creditLeft)} /></>}
+            </p>
+          )}
           <div className="mt-4 max-h-[46dvh] overflow-y-auto overscroll-contain px-2 pb-3">
-            {events.length ? (
+            {events.length || day?.extra.length ? (
               <div className="divide-hair overflow-hidden rounded-[20px] bg-surface/90">
                 {events.map(e => <SwipeEvent key={e.key} e={e} mark={marks[e.key]} now={now} />)}
+                {/* шаги прогноза без события в календаре: погашение моста */}
+                {day?.extra.map(x => (
+                  <div key={x.title} className="flex items-center justify-between gap-3 px-4 py-3 text-[14.5px]">
+                    <span className="min-w-0 truncate font-medium">{x.title}</span><Money value={-x.delta} className="shrink-0 text-[15px]" />
+                  </div>
+                ))}
               </div>
             ) : <p className="px-3 pb-3 text-[14.5px] text-muted">Ничего не уходит и не приходит.</p>}
             {events.some(e => !marks[e.key]?.done) && <p className="px-3 pt-2 text-[12px] text-faint">Сдвиньте строку вправо — отметить. Удержите — ещё действия.</p>}
@@ -265,17 +273,14 @@ function CoverView() {
 function ListView({ month, events, total, incomes }: { month: string; events: CalEvent[]; total: number; incomes: number }) {
   const now = useToday();
   const enter = useEnter();
-  const cal = useCal();
-  const [marks, cardBalance, reserve] = useStore(useShallow(s => [s.marks, s.cardBalance, s.reserve] as const));
+  const marks = useStore(s => s.marks);
   const set = useUi(s => s.set);
   const [filter, setFilter] = useState<Filter>('all');
   const [topUps, setTopUps] = useState(false);
   const to = `${month}-${String(lastDay(month)).padStart(2, '0')}`;
-  const flow = useMemo(() => {
-    if (!cardBalance) return null;
-    const until = addDays(cardBalance.date, 75);
-    return cashFlow(cal, marks, cardBalance, until > to ? until : to);
-  }, [cal, marks, cardBalance, to]);
+  // резерв к вечеру по датам — тот же прогноз покрытия, что в календаре и в «Хватит ли»
+  const { cov } = useCoverage();
+  const levels = useMemo(() => reserveByDay(cov, `${month}-01`, to), [cov, month, to]);
   const amount = (e: CalEvent) => (marks[e.key]?.done && marks[e.key].amount != null ? marks[e.key].amount! : e.amount);
   const payments = events.filter(e => e.kind === 'payment');
   const paid = payments.filter(e => marks[e.key]?.done).reduce((s, e) => s + amount(e), 0);
@@ -323,7 +328,7 @@ function ListView({ month, events, total, incomes }: { month: string; events: Ca
       {byDate.length === 0 && <div className="mt-5 px-4"><Empty>В этом месяце ничего нет.</Empty></div>}
       <motion.div key={`${month}-${filter}-${topUps}`} variants={listAnim} initial={enter} animate="show">
         {byDate.map(([date, list]) => {
-          const bal = flow?.byDay[date];
+          const bal = levels[date];
           const isToday = date === now;
           return (
             <motion.section key={date} variants={item} className="mt-5">
@@ -333,7 +338,7 @@ function ListView({ month, events, total, incomes }: { month: string; events: Ca
                   <span className="text-[12.5px] text-muted">{isToday ? 'сегодня' : weekday(date)}</span>
                 </div>
                 {bal != null && date >= now && (
-                  <span className={`text-[12px] ${bal + reserve < 0 ? 'text-neg' : bal < 0 ? 'text-warn' : 'text-muted'}`}>{bal < 0 ? <>с резервом ≈ <Money value={bal + reserve} /></> : <>на карте ≈ <Money value={bal} /></>}</span>
+                  <span className={`text-[12px] ${bal < 0 ? 'text-neg' : bal < NARROW ? 'text-warn' : 'text-muted'}`}>в резерве ≈ <Money value={bal} /></span>
                 )}
               </div>
               <div className="card divide-hair mx-4 overflow-hidden">

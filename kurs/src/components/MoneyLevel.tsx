@@ -1,22 +1,13 @@
-// Месяц на «Платежах»: каждый день наполняется водой по деньгам на карте и в резерве,
-// под календарём — одна линия уровня с выводом словами. Одни данные, два взгляда.
+// Месяц на «Платежах»: каждый день наполняется водой по резерву к вечеру — это прогноз покрытия, тот же, что в
+// «Хватит ли» и в status.coverage для чата (monthDays в domain/coverage.ts); под календарём — линия того же резерва.
+// Ячейка — сумма неоплаченных событий дня; оплаченное на числа не влияет.
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { LOW_WATER } from '../domain/cashflow';
+import { NARROW, type DayMoney } from '../domain/coverage';
 import { fromKey, weekday } from '../domain/dates';
 import { num } from '../domain/money';
 import { isWorkday } from '../domain/workdays';
 
-export interface DayMoney {
-  date: string;
-  out: number;
-  in: number;
-  /** все платежи дня отмечены оплаченными */
-  paid: boolean;
-  /** деньги на карте и в резерве к вечеру */
-  total?: number;
-  /** день уже прошёл: вода бледнее, в вывод не идёт */
-  past?: boolean;
-}
+export type { DayMoney };
 
 /** −14,7к / +450 */
 export function short(n: number): string {
@@ -70,10 +61,10 @@ const DayCell = memo(function DayCell({ d, i, top, on, isToday, onTap }: {
   d: DayMoney; i: number; top: number; on: boolean; isToday: boolean; onTap: (date: string, from: DOMRect) => void;
 }) {
   const n = Number(d.date.slice(8));
-  const low = d.total != null && d.total < LOW_WATER;
+  const low = d.total != null && d.total < NARROW;
   const level = d.total == null ? 0 : Math.max(10, Math.min(80, (Math.max(0, d.total) / (top || 1)) * 80));
-  const aria = [`${n}`, !isWorkday(d.date) && 'выходной', d.out > 0 && `уходит ${num(d.out)} ₽${d.paid ? ', оплачено' : ''}`,
-    d.in > 0 && `приходит ${num(d.in)} ₽`, d.total != null && `на карте и в резерве ${num(d.total)} ₽`].filter(Boolean).join(', ');
+  const aria = [`${n}`, !isWorkday(d.date) && 'выходной', d.sum !== 0 && `${d.sum < 0 ? 'уходит' : 'приходит'} ${num(Math.abs(d.sum))} ₽`,
+    d.paid && 'всё отмечено', d.total != null && `в резерве к вечеру ${num(d.total)} ₽`].filter(Boolean).join(', ');
   return (
     <button type="button" onClick={e => onTap(d.date, e.currentTarget.getBoundingClientRect())} aria-label={aria} aria-pressed={on}
       className="relative flex h-[54px] flex-col items-start gap-px overflow-hidden rounded-t-[16px] rounded-b-[6px] border border-line bg-surface px-[5px] pt-1 text-left [text-shadow:0_0_3px_var(--surface),0_0_2px_var(--surface)]">
@@ -89,8 +80,10 @@ const DayCell = memo(function DayCell({ d, i, top, on, isToday, onTap }: {
         </span>
       )}
       <span className={`relative text-[13px] leading-tight ${on || isToday ? 'font-semibold' : 'font-medium'} ${isToday ? 'text-sea' : isWorkday(d.date) ? '' : 'text-faint'}`}>{n}</span>
-      {d.out > 0 && <span className={`relative text-[10.5px] leading-tight font-semibold tracking-[-0.01em] ${d.paid ? 'text-muted line-through' : 'text-neg'}`}>{short(-d.out)}</span>}
-      {d.in > 0 && <span className="relative text-[10.5px] leading-tight font-semibold tracking-[-0.01em] text-pos">{short(d.in)}</span>}
+      {/* сумма неоплаченных событий дня со знаком; если всё отмечено — что ушло, зачёркнуто и бледно */}
+      {d.sum !== 0
+        ? <span className={`relative text-[10.5px] leading-tight font-semibold tracking-[-0.01em] ${d.sum < 0 ? 'text-neg' : 'text-pos'}`}>{short(d.sum)}</span>
+        : d.paid && d.paidTotal > 0 && <span className="relative text-[10.5px] leading-tight font-semibold tracking-[-0.01em] text-muted line-through">{short(-d.paidTotal).slice(1)}</span>}
       {isToday && !on && <span className="absolute inset-0 rounded-t-[14px] rounded-b-[4px] ring-[1.5px] ring-sea ring-inset" />}
       {on && (
         <>
@@ -112,7 +105,7 @@ export function LevelChart({ days, selected, onSelect }: {
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const known = days.filter(d => d.total != null) as (DayMoney & { total: number })[];
-  const max = Math.max(LOW_WATER * 1.3, ...known.map(d => d.total));
+  const max = Math.max(NARROW * 4, ...known.map(d => d.total));
   const min = Math.min(0, ...known.map(d => d.total));
   // одна ось от минимума до максимума: ноль — где выпадет, минус виден в том же масштабе, что и плюс
   const y = (v: number) => +(BOTTOM - ((v - min) / (max - min || 1)) * (BOTTOM - TOP)).toFixed(1);
@@ -159,10 +152,10 @@ export function LevelChart({ days, selected, onSelect }: {
   const last = pts[pts.length - 1];
   line += ` L${last[0] + DW / 2} ${last[1]}`;
   const area = `${line} V${BASE} H${pts[0][0] - DW / 2} Z`;
-  const lowY = y(LOW_WATER);
+  const lowY = y(NARROW);
   const s = sel >= 0 ? days[sel] : undefined;
   const sx = sel >= 0 ? cx(sel) : 0, sy = s?.total != null ? y(s.total) : BASE;
-  const tone = (v: number) => (v < 0 ? 'var(--neg)' : v < LOW_WATER ? 'var(--warn)' : 'var(--sea)');
+  const tone = (v: number) => (v < 0 ? 'var(--neg)' : v < NARROW ? 'var(--warn)' : 'var(--sea)');
 
   return (
     <div ref={scroller} className="hs -mx-4 overflow-x-auto overscroll-x-contain" style={{ scrollSnapType: 'x proximity' }}>
@@ -192,8 +185,8 @@ export function LevelChart({ days, selected, onSelect }: {
             <path d={line} fill="none" strokeWidth="2.8" strokeLinecap="round" clipPath="url(#lvl-low)" style={{ stroke: 'var(--warn)' }} />
             <path d={line} fill="none" strokeWidth="3" strokeLinecap="round" clipPath="url(#lvl-below)" style={{ stroke: 'var(--neg)' }} />
           </g>
-          {min < 0 && <text x="6" y={Math.min(BOTTOM, BASE + 15)} fontSize="10.5" style={{ fill: 'var(--neg)' }}>ниже нуля — кредит</text>}
-          <text x="6" y={lowY - 5} fontSize="10.5" style={{ fill: 'var(--warn)' }}>{num(LOW_WATER)}</text>
+          {min < 0 && <text x="6" y={Math.min(BOTTOM, BASE + 15)} fontSize="10.5" style={{ fill: 'var(--neg)' }}>ниже нуля — резерва не хватит</text>}
+          <text x="6" y={lowY - 5} fontSize="10.5" style={{ fill: 'var(--warn)' }}>{num(NARROW)}</text>
           {days.map((d, i) => (
             <g key={d.date} transform={`translate(${cx(i)} 0)`}>
               {d.out > 0 && <path d={`M${d.in > 0 ? -7 : -3} ${BOTTOM + 8} h6 l-3 6 Z`} style={{ fill: 'var(--mark-out)' }} />}
@@ -227,13 +220,16 @@ export function LevelChart({ days, selected, onSelect }: {
 }
 
 /** Вывод словами по дням, которые ещё впереди */
-export function verdict(days: DayMoney[]): string | null {
+/** Вывод по резерву за месяц словами: те же числа, что в календаре и в «Хватит ли» (только дни прогноза) */
+export function verdict(days: DayMoney[]): { text: string; tone: 'neg' | 'warn' | 'pos' } | null {
   const known = days.filter(d => d.total != null && !d.past) as (DayMoney & { total: number })[];
   if (!known.length) return null;
   const minV = Math.min(...known.map(d => d.total));
   const at = known.filter(d => d.total === minV).map(d => Number(d.date.slice(8)));
   const range = at.length > 1 && at[at.length - 1] - at[0] === at.length - 1 ? `${at[0]}–${at[at.length - 1]}-го` : `${at[0]}-го`;
-  if (minV < 0) return `Не хватит ${num(-minV)} ₽ к ${at[0]}-му, даже с резервом`;
-  if (minV < LOW_WATER) return `Хватает, но ${range} останется мало: ${num(minV)} ₽`;
-  return `Хватает на весь месяц, меньше всего ${range}: ${num(minV)} ₽`;
+  // с какого дня не хватает — тот же первый день нехватки, что в «Хватит ли»
+  const first = known.find(d => d.total < 0);
+  if (minV < 0) return { text: `Резерва не хватит с ${Number(first!.date.slice(8))}-го, меньше всего ${range}: ${num(minV)} ₽`, tone: 'neg' };
+  if (minV < NARROW) return { text: `Резерва хватает, но ${range} останется мало: ${num(minV)} ₽`, tone: 'warn' };
+  return { text: `Резерва хватает на весь месяц, меньше всего ${range}: ${num(minV)} ₽`, tone: 'pos' };
 }
