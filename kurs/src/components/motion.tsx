@@ -116,11 +116,13 @@ export function usePan({ axis, onMove, onEnd, accept }: {
   /** начинать ли жест с этого места (например, не с календаря внутри страницы) */
   accept?: (target: Element) => boolean;
 }) {
-  const st = useRef<{ x0: number; y0: number; id: number; lock: 'x' | 'y' | null; last: number; lastT: number; v: number } | null>(null);
+  // hist — положения пальца за последние 60 мс: скорость по ним, а не по одному шагу между событиями (тот бывает
+  // в 8 мс и даёт случайный разброс — бросок то срабатывал, то нет); окно короткое, чтобы бросок не «остывал»
+  const st = useRef<{ x0: number; y0: number; id: number; lock: 'x' | 'y' | null; last: number; lastT: number; hist: [number, number][] } | null>(null);
   const moved = useRef(false);
   const onPointerDown = (e: ReactPointerEvent) => {
     if ((e.pointerType === 'mouse' && e.button !== 0) || (accept && !accept(e.target as Element))) return;
-    st.current = { x0: e.clientX, y0: e.clientY, id: e.pointerId, lock: null, last: 0, lastT: e.timeStamp, v: 0 };
+    st.current = { x0: e.clientX, y0: e.clientY, id: e.pointerId, lock: null, last: 0, lastT: e.timeStamp, hist: [[e.timeStamp, 0]] };
     moved.current = false;
   };
   const onPointerMove = (e: ReactPointerEvent) => {
@@ -135,16 +137,19 @@ export function usePan({ axis, onMove, onEnd, accept }: {
       (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
     }
     const d = axis === 'x' ? dx : dy;
-    const dt = e.timeStamp - s.lastT;
-    if (dt > 0) s.v = ((d - s.last) / dt) * 1000;
     s.last = d; s.lastT = e.timeStamp;
+    s.hist.push([e.timeStamp, d]);
+    while (s.hist.length > 2 && e.timeStamp - s.hist[0][0] > 60) s.hist.shift();
     onMove(d);
   };
   const finish = (e: ReactPointerEvent) => {
     const s = st.current;
     st.current = null;
     if (!s || s.lock !== axis) return;
-    onEnd(s.last, e.timeStamp - s.lastT > 90 ? 0 : s.v);
+    const [t0, d0] = s.hist[0];
+    // палец остановился перед отпусканием — броска нет
+    const v = e.timeStamp - s.lastT > 90 || s.lastT <= t0 ? 0 : ((s.last - d0) / (s.lastT - t0)) * 1000;
+    onEnd(s.last, v);
   };
   // нажатие после жеста не считается нажатием
   const onClickCapture = (e: ReactMouseEvent) => { if (moved.current) { moved.current = false; e.stopPropagation(); e.preventDefault(); } };
@@ -266,7 +271,10 @@ export function Flip({ keys, render, heightOf, onShift, control, gap = 24, class
   const shifted = useRef<1 | -1 | 0>(0);
   /** нажатия стрелок, пока лента едет: +2 — ещё две вперёд */
   const queue = useRef(0);
-  const drag = useRef<{ from: number } | null>(null);
+  /** палец на ленте: from + d — где лента, d — сдвиг пальца */
+  const drag = useRef<{ from: number; d: number } | null>(null);
+  /** палец отпустили, пока ключи ещё не сменились: скорость запомнена, решение — после смены */
+  const release = useRef<number | null>(null);
   const reduce = useReducedMotion();
   const cur = keys[1];
 
@@ -308,20 +316,32 @@ export function Flip({ keys, render, heightOf, onShift, control, gap = 24, class
     a.onfinish = () => { if (anim.current === a) done(); };
   };
 
+  const decide = (v: number) => {
+    const w = box.current?.clientWidth ?? 0, at = pos.current;
+    // бросок решает сам, иначе — дальше трети ширины
+    const dir = v < -350 ? 1 : v > 350 ? -1 : at < -w * 0.3 ? 1 : at > w * 0.3 ? -1 : 0;
+    settle(dir, v);
+  };
   const pan = usePan({
     axis: 'x',
     onMove: d => {
-      // палец перехватил ленту — нажатые до этого стрелки больше не в счёт
-      if (!drag.current) { grab(); lift(true); queue.current = 0; drag.current = { from: pos.current }; }
-      const w = box.current?.clientWidth ?? 0;
-      put(rubber(drag.current.from + d, -w, w, 0.2));
+      if (!drag.current) {
+        // палец перехватил ленту на лету. Если она ехала к соседнему месяцу — тот уже выбран: ключи меняются сразу,
+        // и палец ведёт ленту дальше от него (второй свайп подряд — ещё месяц, как в iOS). Нажатые стрелки — не в счёт
+        const was = going.current;
+        grab(); lift(true); queue.current = 0; release.current = null;
+        drag.current = { from: pos.current - d, d };
+        if (was) { shifted.current = was; onShift(was); }
+      }
+      drag.current.d = d;
+      const w = box.current?.clientWidth ?? 0, raw = drag.current.from + d;
+      // пока ключи не сменились, резинки нет: иначе после смены лента прыгнула бы на сжатое резинкой
+      put(shifted.current ? raw : rubber(raw, -w, w, 0.2));
     },
     onEnd: (_, v) => {
       drag.current = null;
-      const w = box.current?.clientWidth ?? 0, at = pos.current;
-      // бросок решает сам, иначе — дальше трети ширины
-      const dir = v < -350 ? 1 : v > 350 ? -1 : at < -w * 0.3 ? 1 : at > w * 0.3 ? -1 : 0;
-      settle(dir, v);
+      if (shifted.current) { release.current = v; return; }
+      decide(v);
     },
   });
 
@@ -332,18 +352,22 @@ export function Flip({ keys, render, heightOf, onShift, control, gap = 24, class
     const dir = shifted.current, w = box.current?.clientWidth ?? 0;
     shifted.current = 0;
     if (dir) {
-      put(pos.current + dir * w);
-      if (drag.current) drag.current.from += dir * w;
+      const g = drag.current;
+      if (g) { g.from += dir * w; put(rubber(g.from + g.d, -w, w, 0.2)); } else put(pos.current + dir * w);
     } else {
       // месяц сменили извне (например, нажали на название) — без ленты, страница просто проявляется
-      anim.current?.cancel(); anim.current = null; going.current = 0; queue.current = 0;
+      anim.current?.cancel(); anim.current = null; going.current = 0; queue.current = 0; release.current = null;
+      if (drag.current) drag.current.from = -drag.current.d;
       put(0);
       if (!reduce) strip.current?.animate([{ opacity: 0.35 }, { opacity: 1 }], { duration: 240, easing: 'cubic-bezier(.23,1,.32,1)' });
     }
     if (box.current) { box.current.style.transition = ''; box.current.style.height = `${heightOf(cur)}px`; }
-    if (!drag.current) lift(false);
+    if (drag.current) return;
+    lift(false);
+    // палец отпустили до смены ключей — решаем теперь, от нового месяца
+    if (release.current != null) { const v = release.current; release.current = null; lift(true); decide(v); return; }
     const q = queue.current;
-    if (q && !drag.current) { const d = q > 0 ? 1 : -1; queue.current -= d; lift(true); settle(d); }
+    if (q) { const d = q > 0 ? 1 : -1; queue.current -= d; lift(true); settle(d); }
   }, [cur]);
 
   const go = (dir: 1 | -1) => {

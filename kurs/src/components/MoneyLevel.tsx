@@ -161,6 +161,10 @@ export function LevelChart({ days, selected, onSelect }: {
   line += ` L${last[0] + DW / 2} ${last[1]}`;
   const area = `${line} V${BASE} H${pts[0][0] - DW / 2} Z`;
   const lowY = y(NARROW);
+  // подписи у нуля и у запаса: если резерв уходит в минус совсем чуть-чуть, линии почти сливаются — подпись запаса
+  // поднимается над подписью «ниже нуля», а не налезает на неё
+  const belowY = Math.min(BOTTOM, BASE + 15);
+  const narrowY = min < 0 ? Math.min(lowY - 5, belowY - 13) : lowY - 5;
   const s = sel >= 0 ? days[sel] : undefined;
   const sx = sel >= 0 ? cx(sel) : 0, sy = s?.total != null ? y(s.total) : BASE;
   const tone = (v: number) => (v < 0 ? 'var(--neg)' : v < NARROW ? 'var(--warn)' : 'var(--sea)');
@@ -193,8 +197,8 @@ export function LevelChart({ days, selected, onSelect }: {
             <path d={line} fill="none" strokeWidth="2.8" strokeLinecap="round" clipPath="url(#lvl-low)" style={{ stroke: 'var(--warn)' }} />
             <path d={line} fill="none" strokeWidth="3" strokeLinecap="round" clipPath="url(#lvl-below)" style={{ stroke: 'var(--neg)' }} />
           </g>
-          {min < 0 && <text x="6" y={Math.min(BOTTOM, BASE + 15)} fontSize="10.5" style={{ fill: 'var(--neg)' }}>ниже нуля — резерва не хватит</text>}
-          <text x="6" y={lowY - 5} fontSize="10.5" style={{ fill: 'var(--warn)' }}>{num(NARROW)}</text>
+          {min < 0 && <text x="6" y={belowY} fontSize="10.5" style={{ fill: 'var(--neg)' }}>ниже нуля — резерва не хватит</text>}
+          <text x="6" y={narrowY} fontSize="10.5" style={{ fill: 'var(--warn)' }}>{num(NARROW)}</text>
           {days.map((d, i) => (
             <g key={d.date} transform={`translate(${cx(i)} 0)`}>
               {d.out > 0 && <path d={`M${d.in > 0 ? -7 : -3} ${BOTTOM + 8} h6 l-3 6 Z`} style={{ fill: 'var(--mark-out)' }} />}
