@@ -167,6 +167,51 @@ p { text-wrap: pretty; }
   .glass { background: var(--surface) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
 }
 
+/* «Остров» — жидкое стекло, вариант «Тонированное» (решение владельца, DESIGN.md): матовое, светлое днём и дымчатое
+   ночью. Слои — стекло, блик, свет от касания, обод — соседи содержимого: прозрачность или фильтр на их предке отрезали бы
+   стекло от того, что под ним (backdrop root). Размеры перетекают CSS-переходами с лёгким перелётом — «жидкость» */
+.lg { --lg-track: rgba(10, 36, 51, .14); --lg-chip: rgba(10, 36, 51, .06); }
+.dark .lg { --lg-track: rgba(255, 255, 255, .16); --lg-chip: rgba(255, 255, 255, .08); }
+.lg-layer { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; }
+.lg-glass {
+  background: rgba(246, 250, 252, .6);
+  -webkit-backdrop-filter: blur(22px) saturate(1.8); backdrop-filter: blur(22px) saturate(1.8);
+  box-shadow: 0 0 0 .5px rgba(10, 36, 51, .16), 0 16px 36px -14px rgba(4, 14, 22, .5),
+    inset 0 1px 1px rgba(255, 255, 255, .6), inset 0 -1px 1px rgba(255, 255, 255, .18), inset 0 0 18px rgba(255, 255, 255, .1);
+}
+.dark .lg-glass {
+  background: rgba(16, 30, 42, .56);
+  -webkit-backdrop-filter: blur(22px) saturate(1.6); backdrop-filter: blur(22px) saturate(1.6);
+  box-shadow: 0 0 0 .5px rgba(0, 0, 0, .45), 0 16px 36px -14px rgba(0, 0, 0, .6),
+    inset 0 1px 1px rgba(255, 255, 255, .3), inset 0 -1px 1px rgba(255, 255, 255, .1), inset 0 0 18px rgba(255, 255, 255, .06);
+}
+.lg-shine { background: radial-gradient(120% 90% at 20% -40%, rgba(255, 255, 255, .55), rgba(255, 255, 255, 0) 56%), radial-gradient(70% 60% at 88% 135%, rgba(255, 255, 255, .24), rgba(255, 255, 255, 0) 70%); }
+.dark .lg-shine { opacity: .6; }
+.lg-touch { opacity: 0; transition: opacity .7s; background: radial-gradient(120px 120px at var(--tx, 50%) var(--ty, 50%), rgba(255, 255, 255, .45), rgba(255, 255, 255, 0) 70%); }
+.lg-lit .lg-touch { opacity: 1; transition: opacity .08s; }
+.lg-rim {
+  padding: 1px;
+  background: linear-gradient(155deg, rgba(255, 255, 255, .95), rgba(255, 255, 255, .3) 22%, rgba(255, 255, 255, .05) 50%, rgba(255, 255, 255, .22) 78%, rgba(255, 255, 255, .8));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+.lg-morph { transition: width .62s cubic-bezier(.3, 1.3, .45, 1), height .62s cubic-bezier(.3, 1.22, .45, 1), border-radius .55s cubic-bezier(.3, 1.2, .45, 1), transform .45s cubic-bezier(.3, 1.5, .45, 1); }
+.lg-press { transform: scale(1.035); }
+/* ушёл вверх: появление — прозрачностью каждого слоя отдельно, у самого острова — только transform */
+.lg-gone { transform: translateY(-58px) scale(.55, .7); pointer-events: none; transition: width .62s, height .62s, border-radius .55s, transform .3s cubic-bezier(.5, 0, .75, 0); }
+.lg-fade { transition: opacity .3s; }
+.lg-gone > .lg-layer { opacity: 0; }
+.lg-pill { transition: opacity .22s, filter .22s; }
+.lg-open .lg-pill { opacity: 0; filter: blur(4px); pointer-events: none; }
+.lg-panel { opacity: 0; filter: blur(6px); pointer-events: none; transition: opacity .16s, filter .16s; }
+.lg-open .lg-panel { opacity: 1; filter: none; pointer-events: auto; transition: opacity .3s .1s, filter .3s .1s; }
+@media (prefers-reduced-transparency: reduce) {
+  .lg-glass, .dark .lg-glass { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lg-morph, .lg-morph * { transition: none !important; }
+}
+
 body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
