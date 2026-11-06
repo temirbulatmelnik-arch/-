@@ -86,3 +86,22 @@ export function bridgeState(expenses: Expense[], bridge: Bridge | null | undefin
     weeks: bridge.weeks.map(w => ({ ...w, used: credit.filter(e => e.date >= w.monday && e.date <= addDays(w.monday, 6)).reduce((s, e) => s + e.amount, 0) })),
   };
 }
+
+export interface WeekParts {
+  /** своё в лимите недели — с карты жизни */
+  own: number;
+  /** в долг в лимите недели — с кредитки (мост) */
+  loan: number;
+  /** сверх лимита — новый долг; сначала покрыт кредиткой, остаток — карта */
+  over: number;
+  /** шкала полосы: лимит или все траты, если их больше */
+  scale: number;
+}
+
+/** Раскладка недели для строки «Неделя» на «Сегодня»: свои + в долг по мосту + сверх лимита = потрачено.
+ *  Перерасход сначала относится на кредитку: карта в минус не уходит, лишнее проходит через кредит */
+export function weekParts(m: WeekMoney): WeekParts {
+  const over = Math.max(0, m.spent - m.limit);
+  const creditOver = Math.min(m.spentCredit, over);
+  return { own: m.spentLife - (over - creditOver), loan: m.spentCredit - creditOver, over, scale: Math.max(m.limit, m.spent) };
+}

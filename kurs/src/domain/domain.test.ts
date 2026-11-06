@@ -15,7 +15,7 @@ import { applyExchange, buildExchange, dropChatTwins, exchangeDigest, normalize,
 import { parseStatementText, isIncomeLine } from './pdf';
 import { weekReport, weekToClose } from './weekly';
 import { dayBudget, weekSummary } from './summary';
-import { bridgeState, weekMoney, type Bridge } from './bridge';
+import { bridgeState, weekMoney, weekParts, type Bridge } from './bridge';
 import { isWorkday, workdayOnOrBefore } from './workdays';
 import { draft } from './statements';
 import { parseCsv, parseText } from './statements';
@@ -639,6 +639,14 @@ describe('мост на кредитке', () => {
     expect(previewExchange(normalize(parseExchange(JSON.stringify(out))!, after), after, '2026-11-03')).toEqual([]);
     const closed = applyExchange(normalize(parseExchange(JSON.stringify({ app: 'kurs-exchange', version: 2, bridge: { closed: true } }))!, after), after, '2026-11-03', new Set(['bridge' as const]), () => 'z');
     expect(closed.bridge!.closed).toBe(true);
+  });
+
+  it('строка «Неделя»: свои + в долг по мосту + сверх лимита = потрачено; перерасход сначала на кредитку', () => {
+    const m = (spentLife: number, spentCredit: number) => ({ ...weekMoney([], DEBTS, ov, null, '2026-11-02'), spentLife, spentCredit, spent: spentLife + spentCredit });
+    expect(weekParts(m(7000, 5000))).toEqual({ own: 7000, loan: 1000, over: 4000, scale: 12_000 });
+    expect(weekParts(m(4000, 1000))).toEqual({ own: 4000, loan: 1000, over: 0, scale: 8000 });
+    // кредитки мало, чтобы покрыть перерасход: остальное сверх лимита — со своей карты
+    expect(weekParts(m(9500, 500))).toEqual({ own: 8000, loan: 0, over: 2000, scale: 10_000 });
   });
 
   it('неделя ушла в минус: кольцо 0 без второго «минуса»; cardLeft — карта по учёту; status.today; проценты моста', () => {

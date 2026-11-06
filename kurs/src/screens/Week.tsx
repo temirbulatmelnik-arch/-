@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { CardStack, type StackCard } from '../components/CardStack';
 import { DayRing } from '../components/DayRing';
+import { WeekStrip } from '../components/WeekStrip';
 import { bridgeControl, lampAt, setSceneHidden, SkyButton, WeekScene } from '../components/Petersburg';
 import { haptic } from '../components/haptics';
 import { Roll, spring } from '../components/motion';
@@ -13,7 +14,7 @@ import { runQuick } from '../components/TabBar';
 import { AlertRow, EventRow } from '../components/rows';
 import { CatIcon, Money } from '../components/ui';
 import { eventsBetween, urgency } from '../domain/calendar';
-import { weekMoney } from '../domain/bridge';
+import { activeBridge, bridgeState, weekMoney } from '../domain/bridge';
 import { addDays, dayMonth, ddmm, fromKey, monthIn, plural, weekday, weekdayFull, weekRange, weekStart } from '../domain/dates';
 import { BIG_PURCHASE_HOURS, currentPhase, phaseByDate, reserveNeed, totalDebt } from '../domain/plan';
 import { alerts as buildAlerts, type Alert, countsWeekly, dayBudget, weekSummary } from '../domain/summary';
@@ -139,6 +140,7 @@ export function Week() {
   const today = useMemo(() => dayBudget(expenses, debts, overrides, now), [expenses, debts, overrides, now]);
   const money = useMemo(() => weekMoney(expenses, debts, overrides, bridge, weekStart(now)), [expenses, debts, overrides, bridge, now]);
   const led = useLedger();
+  const bridgeNow = useMemo(() => (activeBridge(bridge) ? bridgeState(expenses, bridge) : null), [expenses, bridge]);
   const bridgeCardName = `${debts.find(d => d.id === bridge?.card)?.short ?? 'кредитка'}-кредитка`.replace('кредитка-кредитка', 'кредитка');
   const phase = currentPhase(debts, now);
   const planPhase = phaseByDate(now);
@@ -310,21 +312,9 @@ export function Week() {
             </div>
             {/* сколько на самом деле на карте (по учёту): остаток не сгорает, а уменьшает воскресное пополнение. При перерасходе
                 через кредитку моста на карте может остаться плюс — это нормально */}
-            {/* пока виден расклад моста «на карте / кредитка», второй «на карте» не показываем — два разных числа путают */}
-            {led.card != null && !(money.creditCap > 0 && !over) && (
+            {led.card != null && (
               <div className="mt-1.5 max-w-[200px] text-[12.5px] leading-snug" style={{ color: 'var(--scene-muted)' }}>
                 На карте <Money value={Math.max(0, led.card)} />{led.card > 0 && <> — уменьшат пополнение {today.nextWeek ? 'сегодня вечером' : 'в воскресенье'}</>}
-              </div>
-            )}
-            {/* неделя моста: сколько из этого на карте, а сколько — кредитка */}
-            {money.creditCap > 0 && !over && (
-              <div className="mt-2.5 w-[168px] text-[12px] leading-snug" style={{ color: 'var(--scene-muted)' }}>
-                <div className="flex h-2 overflow-hidden rounded-full bg-white/20">
-                  <span style={{ width: `${(Math.max(0, money.cardLeft) / money.limit) * 100}%`, background: 'linear-gradient(90deg, var(--ring-1), var(--ring-2))' }} />
-                  <span style={{ width: `${(Math.max(0, money.creditLeft) / money.limit) * 100}%`, background: 'repeating-linear-gradient(135deg, #c77dff 0 5px, #9b5de5 5px 10px)' }} />
-                </div>
-                <div className="mt-1.5 flex items-center gap-1.5"><span className="size-2 rounded-[3px]" style={{ background: 'var(--ring-1)' }} />на карте <Money value={Math.max(0, money.cardLeft)} /></div>
-                <div className="flex items-center gap-1.5"><span className="size-2 rounded-[3px] bg-[#b06ef3]" />кредитка <Money value={Math.max(0, money.creditLeft)} /></div>
               </div>
             )}
           </div>
@@ -355,8 +345,13 @@ export function Week() {
       </div>
       </div>
 
+      {/* строка «Неделя»: свои, в долг по мосту и сверх лимита — раскладка во всю ширину, сцена остаётся чистой */}
+      <div className="relative z-[1] -mt-1 bg-bg px-4 pt-2">
+        <WeekStrip money={money} bridge={bridgeNow} onOpen={() => ui.set({ week: week.monday })} />
+      </div>
+
       {/* действия с данными: всё, что приходит из банка и из чата */}
-      <div className="relative z-[1] -mt-1 grid grid-cols-3 gap-2 bg-bg px-4 pt-2">
+      <div className="relative z-[1] grid grid-cols-3 gap-2 bg-bg px-4 pt-2">
         {([
           ['scan', 'Из банка', ScanText],
           ['checkup', 'Сверка', Scale],

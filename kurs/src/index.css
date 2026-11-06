@@ -73,6 +73,8 @@
   --ring-1: #2f86a8; --ring-2: #7c8fc0; --ring-3: #f08a62; --ring-track: .5; --ring-over: #d93a16;
   --ring-ink: #0a2433; --ring-label: #3a4e62; --ring-neg: #a8320f;
   --pill: rgba(255, 248, 242, .42); --pill-border: rgba(255, 255, 255, .6);
+  /* заёмные деньги (мост на кредитке) — фиолетовым, как штриховка кредитки на полосе недели */
+  --loan-ink: #6b3fa0;
   /* стопка карточек «Недели»: сегодня — Нева, платежи — закат, дела — золото, резерв — сумерки */
   --stack-today: linear-gradient(155deg, #dcedf4, #c9e2ec 70%); --stack-today-line: #b5d3df; --stack-today-kicker: #1f6f8f;
   --stack-ahead: linear-gradient(155deg, #f6e2db, #eed0c7 70%); --stack-ahead-line: #e2b9ad; --stack-ahead-kicker: #b8401a;
@@ -124,6 +126,7 @@
   --ring-1: #45a9cb; --ring-2: #a9b8ea; --ring-3: #f08a62; --ring-track: .16; --ring-over: #ff6b3d;
   --ring-ink: #f2f6f8; --ring-label: #b9c6d6; --ring-neg: #ff9a70;
   --pill: rgba(14, 26, 48, .55); --pill-border: rgba(255, 255, 255, .18);
+  --loan-ink: #c9a7f5;
   --stack-today: linear-gradient(155deg, #1e4c66, #0f2c3d 70%); --stack-today-line: #2a5a75; --stack-today-kicker: #9ed7ea;
   --stack-ahead: linear-gradient(155deg, #4a2a33, #23192a 70%); --stack-ahead-line: #5a3540; --stack-ahead-kicker: #ff9a70;
   --stack-todo: linear-gradient(155deg, #41361f, #1e1d20 70%); --stack-todo-line: #54462a; --stack-todo-kicker: #f0b24a;
