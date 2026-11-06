@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8a9fbe"/>
+      <stop offset=".45" stop-color="#c4b0d0"/>
+      <stop offset=".8" stop-color="#f0a98e"/>
+      <stop offset="1" stop-color="#f8b276"/>
+    </linearGradient>
+    <linearGradient id="water" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d99a8c"/>
+      <stop offset=".3" stop-color="#6e7fa1"/>
+      <stop offset="1" stop-color="#1a4a62"/>
+    </linearGradient>
+    <radialGradient id="sun">
+      <stop offset="0" stop-color="#fff1d6"/>
+      <stop offset=".55" stop-color="#ffc48a"/>
+      <stop offset="1" stop-color="#ff9152"/>
+    </radialGradient>
+    <radialGradient id="halo">
+      <stop offset="0" stop-color="#ffc08a" stop-opacity=".9"/>
+      <stop offset="1" stop-color="#f1a487" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="332" fill="url(#sky)"/>
+  <circle cx="306" cy="318" r="150" fill="url(#halo)"/>
+  <circle cx="306" cy="316" r="44" fill="url(#sun)"/>
+  <g fill="#2c3a4f">
+    <rect x="150" y="316" width="212" height="16"/>
+    <rect x="234" y="284" width="44" height="40"/>
+    <rect x="241" y="254" width="30" height="32"/>
+    <rect x="246" y="230" width="20" height="26"/>
+    <path d="M249 232 L256 104 L263 232 Z"/>
+  </g>
+  <rect y="330" width="512" height="182" fill="url(#water)"/>
+  <g stroke="#ffe0be" stroke-width="7" stroke-linecap="round" opacity=".85">
+    <path d="M286 352 h40"/><path d="M276 378 h28"/><path d="M300 404 h44"/><path d="M270 432 h30"/>
+  </g>
+  <g fill="#1b2b3b" stroke="#1b2b3b" stroke-linejoin="round">
+    <path d="M128 372 L214 159 L234.4 167.3 L176 391.5 Z" fill-opacity=".5" stroke-width="7"/>
+    <path d="M384 372 L298 159 L277.6 167.3 L336 391.5 Z" fill-opacity=".5" stroke-width="7"/>
+    <path d="M145 329 L189 347 M162 287 L201 302 M179 244 L212 258 M196 202 L222 212 M145 329 L201 302 L179 244 L222 212" fill="none" stroke-width="5"/>
+    <path d="M367 329 L323 347 M350 287 L311 302 M333 244 L300 258 M316 202 L290 212 M367 329 L311 302 L333 244 L290 212" fill="none" stroke-width="5"/>
+  </g>
+  <circle cx="214" cy="152" r="8" fill="#ff5a3c"/>
+  <circle cx="298" cy="152" r="8" fill="#ff5a3c"/>
+  <g fill="#26384a">
+    <rect x="30" y="364" width="132" height="96"/>
+    <rect x="350" y="364" width="132" height="96"/>
+  </g>
+  <path d="M24 362 H168 M344 362 H488" stroke="#f1a487" stroke-width="6"/>
+</svg>
