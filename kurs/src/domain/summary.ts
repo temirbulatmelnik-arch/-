@@ -45,7 +45,7 @@ export interface DayBudget {
   /** можно потратить сегодня: остаток недели на утро, делённый на дни до воскресенья */
   day: number;
   spentToday: number;
-  /** осталось на сегодня; меньше нуля — перерасход */
+  /** норма дня минус траты сегодня; меньше нуля — сверх нормы. Для экрана — canSpend и mode */
   left: number;
   /** лимит на день с завтра; в воскресенье — на новой неделе */
   tomorrow: number;
@@ -56,6 +56,17 @@ export interface DayBudget {
   /** остаток недели на утро и сколько дней до воскресенья, включая сегодня — из них считается day */
   morning: number;
   daysLeft: number;
+  /** итог недели после сегодняшних трат: лимит минус все траты недели; меньше нуля — перерасход недели */
+  weekLeft: number;
+  /** сколько ещё можно сегодня — число в кольце; меньше нуля не бывает: второго «минуса» рядом с итогом недели нет */
+  canSpend: number;
+  /** ok — в пределах нормы дня; day — сегодня сверх нормы, но неделя в плюсе; week — лимит недели исчерпан */
+  mode: 'ok' | 'day' | 'week';
+  /** на сколько сегодня сверх нормы дня (mode = day) */
+  overDay: number;
+  /** сегодняшние траты по источникам: с карты жизни и с кредитки */
+  spentLife: number;
+  spentCredit: number;
 }
 
 const floor10 = (n: number) => Math.max(0, Math.floor(n / 10) * 10);
@@ -65,7 +76,9 @@ export function dayBudget(expenses: Expense[], debts: Debt[], overrides: WeeklyO
   const monday = weekStart(now), sunday = addDays(monday, 6);
   const counted = expenses.filter(e => e.date >= monday && e.date <= now && countsWeekly(e));
   const before = counted.filter(e => e.date < now).reduce((s, e) => s + e.amount, 0);
-  const spentToday = counted.filter(e => e.date === now).reduce((s, e) => s + e.amount, 0);
+  const todays = counted.filter(e => e.date === now);
+  const spentToday = todays.reduce((s, e) => s + e.amount, 0);
+  const spentCredit = todays.filter(e => e.source === 'credit').reduce((s, e) => s + e.amount, 0);
   const morning = weeklyLimit(debts, now, overrides) - before;
   const daysLeft = daysBetween(now, sunday) + 1;
   const day = morning > 0 ? floor10(morning / daysLeft) : 0;
@@ -73,7 +86,14 @@ export function dayBudget(expenses: Expense[], debts: Debt[], overrides: WeeklyO
   const tomorrow = nextWeek
     ? floor10(weeklyLimit(debts, addDays(sunday, 1), overrides) / 7)
     : floor10((morning - spentToday) / (daysLeft - 1));
-  return { day, spentToday, left: day - spentToday, tomorrow, nextWeek, exhausted: morning <= 0, morning, daysLeft };
+  // день — часть недели: если неделя ушла в минус, дневная норма теряет смысл — сегодня можно 0, а не «минус сверх нормы»
+  const weekLeft = morning - spentToday;
+  const mode = weekLeft < 0 || morning <= 0 ? 'week' : spentToday > day ? 'day' : 'ok';
+  return {
+    day, spentToday, left: day - spentToday, tomorrow, nextWeek, exhausted: morning <= 0, morning, daysLeft,
+    weekLeft, mode, canSpend: mode === 'ok' ? day - spentToday : 0, overDay: mode === 'day' ? spentToday - day : 0,
+    spentLife: spentToday - spentCredit, spentCredit,
+  };
 }
 
 export interface CategoryRow {

@@ -9,7 +9,7 @@ import { rub, parseAmount } from './money';
 import { categoryLimit, currentPhase, DEFAULT_PLAN, setPlanSource, splitBonus, targetDebt, weeklyLimit, type PlanConfig } from './plan';
 import { fromAi, fromDrafts } from './proposals';
 import { PROTOCOL_VERSION } from './sync';
-import { accruedOnCard, checkupPlan, ledger, type Checkup, type LedgerInput } from './ledger';
+import { accruedOnCard, cardOn, checkupPlan, ledger, type Checkup, type LedgerInput } from './ledger';
 import { mergeSeed, type PlanState } from './planUpdate';
 import { applyExchange, buildExchange, dropChatTwins, exchangeDigest, normalize, parseExchange, previewExchange, type ExchangeState } from './exchange';
 import { parseStatementText, isIncomeLine } from './pdf';
@@ -635,10 +635,39 @@ describe('мост на кредитке', () => {
     expect(after.expenses.filter(e => e.amount === 95)).toHaveLength(2);
     const out = buildExchange(after, '2026-11-03');
     expect(out.bridge).toMatchObject({ cap: 7782, used: 200, left: 7582 });
-    expect((out.status as { week: Record<string, number> }).week).toMatchObject({ limit: 8000, spentLife: 190, spentCredit: 200, cardLeft: 7228, creditLeft: 382, left: 7610 });
+    expect((out.status as { week: Record<string, number> }).week).toMatchObject({ limit: 8000, spentLife: 190, spentCredit: 200, cardLeft: null, creditLeft: 382, left: 7610 });
     expect(previewExchange(normalize(parseExchange(JSON.stringify(out))!, after), after, '2026-11-03')).toEqual([]);
     const closed = applyExchange(normalize(parseExchange(JSON.stringify({ app: 'kurs-exchange', version: 2, bridge: { closed: true } }))!, after), after, '2026-11-03', new Set(['bridge' as const]), () => 'z');
     expect(closed.bridge!.closed).toBe(true);
+  });
+
+  it('неделя ушла в минус: кольцо 0 без второго «минуса»; cardLeft — карта по учёту; status.today; проценты моста', () => {
+    // пятница: до сегодня 5 800 (с кредитки 800), сегодня 3 000 (с кредитки 2 400) — неделя −800
+    const expenses = [exp('l1', '2026-11-03', 5000), exp('c1', '2026-11-04', 800, 'credit'), exp('l2', '2026-11-06', 600), exp('c2', '2026-11-06', 2400, 'credit')];
+    const fri = dayBudget(expenses, DEBTS, ov, '2026-11-06');
+    expect(fri).toMatchObject({ day: 730, spentToday: 3000, weekLeft: -800, mode: 'week', canSpend: 0, overDay: 0, spentLife: 600, spentCredit: 2400 });
+    // вторник: сверх нормы дня, но неделя в плюсе — кольцо 0 и «сверх нормы на 400»
+    const tue = dayBudget([exp('a', '2026-11-02', 2000), exp('b', '2026-11-03', 900)], DEBTS, ov, '2026-11-03');
+    expect(tue).toMatchObject({ day: 1000, mode: 'ok', canSpend: 100 });
+    expect(dayBudget([exp('a', '2026-11-02', 2000), exp('b', '2026-11-03', 1400)], DEBTS, ov, '2026-11-03')).toMatchObject({ mode: 'day', overDay: 400, canSpend: 0, weekLeft: 4600 });
+    // сверка в понедельник: на карте 6 500, долили 500 — дальше карта по учёту, а не «лимит минус траты»
+    const sber: Debt = { ...DEBTS[1], id: 'sber-card', kind: 'card', balance: 300_000, rate: 0.365, updatedAt: '2026-11-02T10:00:00.000' };
+    const checkup: Checkup = {
+      id: 'k', at: '2026-11-02T10:00:00.000', date: '2026-11-02', monday: '2026-10-26', expected: { card: 6500, reserve: 60_000, credit: 300_000 },
+      actual: { card: 6500, reserve: 60_000, credit: 300_000 }, topUp: 500, toReserve: 0, after: { card: 7000, reserve: 59_500 },
+    };
+    const st: ExchangeState = {
+      ...base, debts: [...DEBTS.filter(d => d.id !== 'sber-card'), sber], bridge, expenses, checkups: [checkup],
+      closures: { '2026-10-26': { monday: '2026-10-26', limit: 8400, spent: 17_930, left: -9530, transferred: 0 } },
+    };
+    const out = buildExchange(st, '2026-11-06');
+    const status = out.status as { week: Record<string, number>; today: Record<string, unknown>; ledger: Record<string, number> };
+    expect(status.week).toMatchObject({ left: -800, cardLeft: 1400 });
+    expect(status.today).toEqual({ date: '2026-11-06', allowance: 730, spent: 3000, spentLife: 600, spentCredit: 2400, canSpend: 0 });
+    // долг моста: сверка + траты с кредитки + проценты по дням (4 дня × 36,5% годовых от 300 000 = 1 200)
+    expect(status.ledger).toMatchObject({ card: 1400, credit: 304_400, creditInterest: 1200 });
+    // прошедшая неделя со сверкой — карта из сверки (до перевода)
+    expect((out.weeks as { monday: string; cardLeft: number }[]).find(w => w.monday === '2026-10-26')!.cardLeft).toBe(6500);
   });
 });
 
@@ -701,6 +730,19 @@ describe('учёт по счетам для воскресной сверки', 
     cardBalance: { amount: 3000, date: '2026-11-01', source: 'manual' as const, at: '2026-11-01T18:00:00.000Z' },
   };
   const spend = (date: string, amount: number, source: Expense['source'] = 'life'): Expense => ({ id: date + amount, date, amount, category: 'groceries', source, origin: 'manual', createdAt: `${date}T12:00:00.000Z` });
+
+  it('карта на вечер воскресенья: вперёд от точки отсчёта и назад от неё, без пополнения к следующей неделе', () => {
+    const s = {
+      ...base, cardBalance: { amount: 4000, date: '2026-11-04', at: '2026-11-04T12:00:00.000Z' },
+      marks: { 'wk:2026-11-02': { done: true, amount: 3000, at: '2026-11-01T19:00:00.000Z' } } as Record<string, EventMark>,
+      expenses: [spend('2026-10-31', 500), spend('2026-11-03', 200)],
+    };
+    // назад от остатка 04.11: трата 03.11 возвращается (+200), пополнение к неделе 02.11 — уже после вечера 01.11 (−3000)
+    expect(cardOn(s, '2026-11-01')).toBe(1200);
+    // вперёд от остатка — то же, что учёт на этот день
+    expect(cardOn({ ...s, expenses: [...s.expenses, spend('2026-11-05', 300)] }, '2026-11-05')).toBe(3700);
+    expect(cardOn({ ...s, cardBalance: null }, '2026-11-01')).toBeNull();
+  });
 
   it('карта: + пополнение и зарплата, − траты и платежи с карты; резерв: − платежи из резерва', () => {
     const l = ledger({

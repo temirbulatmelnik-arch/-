@@ -23,6 +23,7 @@ import { useStore } from '../store/store';
 import { toast, useCal, useToday, useUi } from '../store/ui';
 import { checkInbox, checkPlan } from './Sync';
 import { TodayDetails } from './TodaySheet';
+import { useLedger } from './Checkup';
 
 /* вход в приложение: запуск или возвращение из фона — тогда плашка о перерасходе показывается снова */
 let entry = 0;
@@ -137,6 +138,7 @@ export function Week() {
   const week = useMemo(() => weekSummary(expenses, debts, overrides, now), [expenses, debts, overrides, now]);
   const today = useMemo(() => dayBudget(expenses, debts, overrides, now), [expenses, debts, overrides, now]);
   const money = useMemo(() => weekMoney(expenses, debts, overrides, bridge, weekStart(now)), [expenses, debts, overrides, bridge, now]);
+  const led = useLedger();
   const bridgeCardName = `${debts.find(d => d.id === bridge?.card)?.short ?? 'кредитка'}-кредитка`.replace('кредитка-кредитка', 'кредитка');
   const phase = currentPhase(debts, now);
   const planPhase = phaseByDate(now);
@@ -145,7 +147,7 @@ export function Week() {
   const pending = wishes.filter(w => !w.resolved);
   const debt = totalDebt(debts);
   const over = week.left < 0;
-  const dayAlert = today.left < 0 || today.exhausted;
+  const dayAlert = today.mode !== 'ok';
   const pill = useOverPill(today.left, dayAlert);
   const { need, next } = reserveNeed(now, debts);
   // воскресное пополнение карты жизни: лимит следующей недели минус то, что на ней осталось
@@ -188,8 +190,8 @@ export function Week() {
   const cards: StackCard[] = [
     {
       id: 'today', tone: 'today', kicker: 'Сегодня', alert: dayAlert,
-      title: <>Потрачено <Money value={today.spentToday} /> из <Money value={today.day} /></>,
-      amount: today.left < 0 ? <>−<Money value={-today.left} /></> : <Money value={today.left} />,
+      title: today.mode === 'week' ? <>Потрачено сегодня <Money value={today.spentToday} /></> : <>Потрачено <Money value={today.spentToday} /> из <Money value={today.day} /></>,
+      amount: <Money value={today.canSpend} />,
       body: (
         <>
           <TodayDetails />
@@ -306,6 +308,14 @@ export function Week() {
             <div className="mt-1.5 text-[14px] leading-snug" style={{ color: over ? 'var(--neg)' : 'var(--scene-muted)' }}>
               {over ? <>перерасход<br />за неделю</> : <>на неделю,<br />до воскресенья</>}
             </div>
+            {/* сколько на самом деле на карте (по учёту): остаток не сгорает, а уменьшает воскресное пополнение. При перерасходе
+                через кредитку моста на карте может остаться плюс — это нормально */}
+            {/* пока виден расклад моста «на карте / кредитка», второй «на карте» не показываем — два разных числа путают */}
+            {led.card != null && !(money.creditCap > 0 && !over) && (
+              <div className="mt-1.5 max-w-[200px] text-[12.5px] leading-snug" style={{ color: 'var(--scene-muted)' }}>
+                На карте <Money value={Math.max(0, led.card)} />{led.card > 0 && <> — уменьшат пополнение {today.nextWeek ? 'сегодня вечером' : 'в воскресенье'}</>}
+              </div>
+            )}
             {/* неделя моста: сколько из этого на карте, а сколько — кредитка */}
             {money.creditCap > 0 && !over && (
               <div className="mt-2.5 w-[168px] text-[12px] leading-snug" style={{ color: 'var(--scene-muted)' }}>
@@ -318,7 +328,7 @@ export function Week() {
               </div>
             )}
           </div>
-          <DayRing day={today.day} left={today.left} onClick={() => ui.set({ today: true })} />
+          <DayRing day={today.day} canSpend={today.canSpend} mode={today.mode} overDay={today.overDay} nextWeek={today.nextWeek} onClick={() => ui.set({ today: true })} />
         </div>
         {money.creditCap > 0 && !over && money.cardLeft <= 0 && money.creditLeft > 0 && !pill.phase && (
           <p className="sc-pop mx-5 mt-3 rounded-2xl border px-3.5 py-2.5 text-[13.5px] leading-snug backdrop-blur-md"
@@ -330,12 +340,13 @@ export function Week() {
           <button key={pill.key} type="button" onClick={pill.hide} aria-label="Скрыть"
             className={`pointer-events-auto relative mx-5 mt-3 block w-[calc(100%-2.5rem)] overflow-hidden rounded-2xl border px-3.5 pt-2.5 pb-3.5 text-left text-[14px] leading-snug shadow-lg backdrop-blur-md ${pill.phase === 'out' ? 'sc-pill-out' : 'sc-pill-in'}`}
             style={{ background: 'var(--pill)', borderColor: 'var(--pill-border)', color: 'var(--scene-ink)' }}>
-            {today.exhausted ? (
-              <><span className="font-medium" style={{ color: 'var(--ring-neg)' }}>Недельный лимит исчерпан,</span> до понедельника только необходимое</>
+            {today.mode === 'week' ? (
+              <><span className="font-medium" style={{ color: 'var(--ring-neg)' }}>Лимит недели исчерпан{today.weekLeft < 0 && <>, перерасход <Money value={-today.weekLeft} /></>}.</span>{' '}
+                {today.nextWeek ? 'Сегодня тратить больше нельзя, с понедельника новая неделя' : 'До воскресенья тратить нельзя'}</>
             ) : today.nextWeek ? (
-              <><span className="font-medium" style={{ color: 'var(--ring-neg)' }}>Сегодня перерасход <Money value={-today.left} />.</span> С понедельника новая неделя: <Money value={today.tomorrow} /> в день</>
+              <><span className="font-medium" style={{ color: 'var(--ring-neg)' }}>Сегодня сверх нормы <Money value={today.overDay} />.</span> С понедельника новая неделя: <Money value={today.tomorrow} /> в день</>
             ) : (
-              <><span className="font-medium" style={{ color: 'var(--ring-neg)' }}>Сегодня перерасход <Money value={-today.left} />,</span> поэтому с завтра лимит <Money value={today.tomorrow} /> в день</>
+              <><span className="font-medium" style={{ color: 'var(--ring-neg)' }}>Сегодня сверх нормы <Money value={today.overDay} />,</span> поэтому с завтра лимит <Money value={today.tomorrow} /> в день</>
             )}
             {pill.phase === 'in' && <span className="sc-pill-timer absolute inset-x-3.5 bottom-1.5 h-[2px] rounded-full opacity-70" style={{ background: 'var(--ring-neg)' }} />}
           </button>

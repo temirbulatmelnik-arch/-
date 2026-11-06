@@ -39,8 +39,9 @@ export function Island({ show }: { show: boolean }) {
   const b = useMemo(() => dayBudget(expenses, debts, overrides, now), [expenses, debts, overrides, now]);
   const w = useMemo(() => weekSummary(expenses, debts, overrides, now), [expenses, debts, overrides, now]);
   const next = useMemo(() => eventsBetween(cal, addDays(now, -20), addDays(now, 10)).find(e => e.kind === 'payment' && !marks[e.key]?.done), [cal, now, marks]);
-  const over = b.left < 0;
-  const frac = b.day > 0 ? b.left / b.day : 0;
+  // как кольцо на «Сегодня»: сколько ещё можно сегодня, без «минуса»; сверх нормы или лимит недели исчерпан — красным
+  const over = b.mode !== 'ok';
+  const frac = b.day > 0 ? b.canSpend / b.day : 0;
   const act = (fn: () => void) => { setOpen(false); window.setTimeout(fn, 160); };
 
   // в документе — пока виден и пока уходит; ушёл — снимаем, чтобы стекло не размывало фон впустую.
@@ -118,7 +119,7 @@ export function Island({ show }: { show: boolean }) {
       <div aria-hidden="true" onClick={() => setOpen(false)}
         className={`fixed inset-0 z-[44] bg-[rgba(4,14,22,.22)] transition-opacity duration-300 ${open ? 'opacity-100' : 'pointer-events-none opacity-0'}`} />
       <div ref={el} role="button" tabIndex={0} aria-expanded={open}
-        aria-label={open ? 'Свернуть' : `Сегодня ${over ? 'перерасход' : 'можно'} ${Math.round(Math.abs(b.left))} ₽. Раскрыть`}
+        aria-label={open ? 'Свернуть' : `${b.mode === 'week' ? 'Лимит недели исчерпан' : b.mode === 'day' ? 'Сегодня сверх нормы' : `Сегодня можно ${Math.round(b.canSpend)} ₽`}. Раскрыть`}
         onClick={() => { if (!open) { setOpen(true); haptic(); } }}
         onKeyDown={e => { if (e.key === 'Enter' && e.target === e.currentTarget) setOpen(!open); }}
         onPointerDown={e => { light(e); pan.onPointerDown(e); }} onPointerMove={pan.onPointerMove}
@@ -135,20 +136,22 @@ export function Island({ show }: { show: boolean }) {
         <div className="lg-layer lg-fade pointer-events-auto overflow-hidden">
           <div ref={pill} className="lg-pill absolute top-0 left-0 flex h-11 items-center gap-2.5 pr-4 pl-2 whitespace-nowrap">
             <MiniRing frac={frac} over={over} size={30} />
-            <span className={`font-display text-[16px] font-medium ${over ? 'text-neg' : ''}`}>{over && '−'}<Roll value={Math.abs(b.left)} /></span>
-            <span className="text-[12.5px] text-muted">{over ? 'сверх дня' : 'сегодня'}</span>
+            <span className={`font-display text-[16px] font-medium ${over ? 'text-neg' : ''}`}><Roll value={b.canSpend} /></span>
+            <span className="text-[12.5px] text-muted">{b.mode === 'week' ? (b.nextWeek ? 'до понедельника' : 'до воскресенья') : b.mode === 'day' ? 'сверх нормы' : 'сегодня'}</span>
           </div>
           <div ref={panel} className="lg-panel absolute top-0 left-0 px-[18px] pt-3 pb-[18px]" style={{ width: wide }}>
             <div className="mx-auto mb-3 h-1 w-9 rounded-full" style={{ background: 'var(--lg-track)' }} />
             <div className="flex items-center gap-4">
               <div className="relative grid size-16 shrink-0 place-items-center">
                 <div className="absolute inset-0"><MiniRing frac={frac} over={over} size={64} stroke={4} /></div>
-                <span className="text-[11px] text-muted">{over ? 100 : pct}%</span>
+                <span className="text-[11px] text-muted">{over ? 0 : pct}%</span>
               </div>
               <div className="min-w-0">
-                <div className="text-[12.5px] text-muted">{over ? 'Сегодня перерасход' : 'Сегодня можно ещё'}</div>
-                <div className={`font-display text-[30px] leading-tight font-medium ${over ? 'text-neg' : ''}`}>{over && '−'}<Roll value={Math.abs(b.left)} /></div>
-                <div className="text-[12.5px] text-muted">потрачено <Money value={b.spentToday} /> из <Money value={b.day} /></div>
+                <div className="text-[12.5px] text-muted">{b.mode === 'week' ? 'Лимит недели исчерпан' : b.mode === 'day' ? <>Сегодня сверх нормы на <Money value={b.overDay} /></> : 'Сегодня можно ещё'}</div>
+                <div className={`font-display text-[30px] leading-tight font-medium ${over ? 'text-neg' : ''}`}><Roll value={b.canSpend} /></div>
+                <div className="text-[12.5px] text-muted">
+                  {b.mode === 'week' ? <>потрачено сегодня <Money value={b.spentToday} />{b.weekLeft < 0 && <>, перерасход недели <Money value={-b.weekLeft} /></>}</> : <>потрачено <Money value={b.spentToday} /> из <Money value={b.day} /></>}
+                </div>
               </div>
             </div>
             <div className="mt-2.5 rounded-[18px] px-3.5 py-3" style={chip}>

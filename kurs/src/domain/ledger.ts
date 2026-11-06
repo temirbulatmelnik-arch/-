@@ -76,6 +76,9 @@ export interface Ledger {
   cards: CardLedger[];
   /** обычные поступления, пришедшие на карту после сверки и ещё не переведённые в резерв */
   incomeOnCard: number;
+  /** из долга на кредитке моста — проценты по дням с последнего обновления остатка (сверки): банк начисляет их каждый
+   *  день, поэтому credit больше, чем «сверка + траты с кредитки» */
+  creditInterest: number;
 }
 
 const endOfDay = (date: string) => `${date}T23:59:59.999`;
@@ -156,7 +159,47 @@ export function ledger(s: LedgerInput): Ledger {
     .sort((x, y) => Number(y.id === creditCard?.id) - Number(x.id === creditCard?.id) || x.order - y.order)
     .map(d => ({ debt: d, expected: owed(d), accrued: accruedOnCard(d, now), bridge: d.id === creditCard?.id }));
 
-  return { card, cardFrom: ref ? { at: ref.at, date: ref.date } : null, reserve, credit, creditCard, cards, incomeOnCard: Math.max(0, Math.round(incomeOnCard * 100) / 100) };
+  return {
+    card, cardFrom: ref ? { at: ref.at, date: ref.date } : null, reserve, credit, creditCard, cards,
+    incomeOnCard: Math.max(0, Math.round(incomeOnCard * 100) / 100), creditInterest: creditCard ? accruedOnCard(creditCard, now) : 0,
+  };
+}
+
+/**
+ * Остаток карты по учёту на вечер дня date — до воскресного пополнения следующей недели (для итогов прошедших недель).
+ * Точка отсчёта — сверка (после перевода) или остаток из банка: ближайшая не позже date — считаем вперёд, иначе
+ * ближайшая после — назад от неё. null — точек отсчёта нет.
+ */
+export function cardOn(s: LedgerInput, date: string): number | null {
+  const end = endOfDay(date);
+  const topUp = `wk:${addDays(date, 1)}`;
+  const refs = [
+    ...s.checkups.map(c => ({ at: c.at, date: c.date, amount: c.after.card })),
+    ...(s.cardBalance ? [{ at: s.cardBalance.at ?? endOfDay(s.cardBalance.date), date: s.cardBalance.date, amount: s.cardBalance.amount }] : []),
+  ].sort((a, b) => a.at.localeCompare(b.at));
+  const before = refs.filter(r => r.at <= end).at(-1);
+  const ref = before ?? refs.find(r => r.at > end);
+  if (!ref) return null;
+  const fwd = ref === before;
+  // движение карты от отметки: пополнение и поступление — плюс, платёж с карты — минус; пополнение к следующей неделе
+  // считается после вечера date, даже если отмечено в тот же вечер
+  const markMove = (key: string, m: EventMark) => {
+    const kind = kindOf(key, s.oneOff), amount = m.amount ?? 0;
+    return kind === 'weekly' || kind === 'income' ? amount : kind === 'payment' && m.paidFrom === 'card' ? -amount : 0;
+  };
+  const inRange = (t: string, key = '') => {
+    const late = key === topUp ? '\uffff' : t;
+    return fwd ? t > ref.at && late <= end : late > end && t <= ref.at;
+  };
+  let delta = 0;
+  for (const [key, m] of Object.entries(s.marks)) if (m.done && inRange(m.at, key)) delta += markMove(key, m);
+  for (const r of s.reserveLog) if (r.card && r.at && inRange(r.at)) delta += r.card;
+  for (const e of s.expenses) {
+    if (e.source !== 'life') continue;
+    const afterRef = after(e, ref.at, ref.date);
+    if (fwd ? afterRef && e.date <= date : !afterRef && e.date > date) delta -= e.amount;
+  }
+  return Math.round((fwd ? ref.amount + delta : ref.amount - delta) * 100) / 100;
 }
 
 export interface CheckupPlan {

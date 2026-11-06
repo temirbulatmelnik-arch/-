@@ -3,7 +3,7 @@
 // но только с изменениями. Списки с id/key — «добавить или изменить», удаление — только явное "delete": true.
 // Перед применением приложение показывает разницу по разделам; присланное без изменений ничего не трогает.
 import { bridgeState, weekMoney, type Bridge } from './bridge';
-import { ledger, type Checkup } from './ledger';
+import { cardOn, ledger, type Checkup, type LedgerInput } from './ledger';
 import { coverage, coverageInput } from './coverage';
 import { PROTOCOL_VERSION } from './sync';
 import { eventsBetween, paidOn, type CalendarInput } from './calendar';
@@ -11,7 +11,7 @@ import { categorize } from './categorize';
 import { addDays, daysBetween, ddmm, plural } from './dates';
 import { rub } from './money';
 import { CATEGORIES, CATEGORY, currentPhase, DEFAULT_PLAN, reserveNeed, totalDebt, type BonusRule, type PlanConfig } from './plan';
-import { weekSummary } from './summary';
+import { dayBudget, weekSummary } from './summary';
 import type {
   CalEvent, CardBalance, CategoryId, ChecklistItem, Debt, DebtKind, EventMark, Expense, FixedItem, IncomeTemplate, Phase, ReserveMove, Source,
   StrategySection, WeekClosure, WeeklyOverride,
@@ -100,13 +100,20 @@ const hash = (s: string) => {
 
 /* ---------- Выгрузка ---------- */
 
-/** Неделя по источникам: всё в лимите, с карты, с кредитки; left меньше нуля — перерасход */
-function weekFields(s: ExchangeState, monday: string) {
+/** Неделя по источникам: всё в лимите, с карты, с кредитки; left меньше нуля — перерасход (лимит минус все траты).
+ *  cardLeft — остаток карты по учёту (а не лимит минус траты): у текущей недели — ledger.card, у прошедших — на вечер
+ *  воскресенья до пополнения, по сверке этой недели (actual.card), если она была */
+function weekFields(s: ExchangeState, monday: string, cardLeft: number | null) {
   const m = weekMoney(s.expenses, s.debts, s.weeklyOverrides, s.bridge, monday);
   return {
     limit: r0(m.limit), spent: r0(m.spent), left: r0(m.left), spentLife: r0(m.spentLife), spentCredit: r0(m.spentCredit),
-    cardLeft: r0(m.cardLeft), creditLeft: r0(m.creditLeft),
+    cardLeft: cardLeft == null ? null : r0(cardLeft), creditLeft: r0(m.creditLeft),
   };
+}
+
+function cardAfterWeek(s: ExchangeState, input: LedgerInput, monday: string): number | null {
+  const c = (s.checkups ?? []).find(x => x.monday === monday);
+  return c ? c.actual.card : cardOn(input, addDays(monday, 6));
 }
 
 function bridgeOut(s: ExchangeState) {
@@ -123,7 +130,9 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
   const phase = currentPhase(s.debts, now);
   const need = reserveNeed(now, s.debts);
   const from = addDays(now, short ? -14 : -EXPENSE_DAYS);
-  const led = ledger({ checkups: s.checkups ?? [], cardBalance: s.cardBalance, reserve: s.reserve, reserveLog: s.reserveLog ?? [], marks: s.marks, expenses: s.expenses, oneOff: s.oneOff, debts: s.debts, bridge: s.bridge ?? null });
+  const ledIn: LedgerInput = { checkups: s.checkups ?? [], cardBalance: s.cardBalance, reserve: s.reserve, reserveLog: s.reserveLog ?? [], marks: s.marks, expenses: s.expenses, oneOff: s.oneOff, debts: s.debts, bridge: s.bridge ?? null, now };
+  const led = ledger(ledIn);
+  const day = dayBudget(s.expenses, s.debts, s.weeklyOverrides, now);
   // тот же вход прогноза, что у календаря и «Хватит ли» в приложении: остаток дня в календаре = status.coverage
   const cov = coverage(coverageInput(s, led), now);
   // окно −45…+75 дней и, дальше него, всё, что поправлено в приложении вручную: точные суммы и даты будущих платежей;
@@ -138,7 +147,12 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
     status: {
       totalDebt: r0(totalDebt(s.debts)),
       phase: { id: phase.id, title: phase.title, weekly: phase.weekly, monthly: phase.monthly },
-      week: { from: week.monday, to: week.sunday, ...weekFields(s, week.monday) },
+      week: { from: week.monday, to: week.sunday, ...weekFields(s, week.monday, led.card) },
+      // сегодняшний день: норма, траты по источникам и сколько ещё можно — то же число, что в кольце на «Сегодня»
+      today: {
+        date: now, allowance: r0(day.day), spent: r0(day.spentToday), spentLife: r0(day.spentLife), spentCredit: r0(day.spentCredit),
+        canSpend: r0(day.canSpend),
+      },
       reserveNeed: { amount: r0(need.need), untilBonus: need.next },
       coverage: {
         to: cov.to, ...(cov.min ? { min: r0(cov.min.balance), minDate: cov.min.date, minTitle: cov.min.title } : {}),
@@ -147,7 +161,8 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
       },
       ledger: {
         card: led.card == null ? null : r0(led.card), reserve: r0(led.reserve), credit: led.credit == null ? null : r0(led.credit),
-        incomeOnCard: r0(led.incomeOnCard), ...(led.cardFrom ? { since: led.cardFrom.date } : {}),
+        incomeOnCard: r0(led.incomeOnCard), ...(led.creditInterest ? { creditInterest: r0(led.creditInterest) } : {}),
+        ...(led.cardFrom ? { since: led.cardFrom.date } : {}),
       },
     },
     limits: { weekly: s.weeklyOverrides, phases: plan.phases, categories: plan.categories, bonusRules: plan.bonusRules ?? {}, shortfall: plan.shortfallOverrides ?? {} },
@@ -179,7 +194,7 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
     ...(short ? {} : { savings: r0(s.savings) }),
     card: s.cardBalance ? { amount: r0(s.cardBalance.amount), date: s.cardBalance.date } : null,
     weeks: Object.values(s.closures).sort((a, b) => b.monday.localeCompare(a.monday)).slice(0, short ? 4 : 8)
-      .map(w => ({ monday: w.monday, ...weekFields(s, w.monday), ...(w.topUp ? { topUp: r0(w.topUp) } : {}), ...(w.transferred ? { transferred: r0(w.transferred) } : {}) })),
+      .map(w => ({ monday: w.monday, ...weekFields(s, w.monday, w.monday === week.monday ? led.card : cardAfterWeek(s, ledIn, w.monday)), ...(w.topUp ? { topUp: r0(w.topUp) } : {}), ...(w.transferred ? { transferred: r0(w.transferred) } : {}) })),
     bridge: bridgeOut(s),
     ...((s.checkups ?? []).length ? { checkups: s.checkups!.slice(-4).map(c => ({ date: c.date, monday: c.monday, expected: c.expected, actual: c.actual, topUp: c.topUp, toReserve: c.toReserve })) } : {}),
     checklist: s.checklist.map(c => ({ ...c, done: s.checks[c.id]?.done ?? !!c.done })),

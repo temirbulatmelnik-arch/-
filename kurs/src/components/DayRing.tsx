@@ -23,14 +23,20 @@ function Arc({ frac, reverse, stroke }: { frac: number; reverse?: boolean; strok
   );
 }
 
-export function DayRing({ day, left, onClick }: { day: number; left: number; onClick: () => void }) {
-  const shown = useCountUp(left, 1100, day);
-  const over = shown < -0.5;
-  const frac = day > 0 ? Math.min(1, Math.max(0, shown / day)) : 0;
-  const overFrac = !over ? 0 : day > 0 ? Math.min(1, -shown / day) : 1;
+/** Кольцо показывает, сколько ещё можно сегодня, и никогда не уходит в минус: сверх нормы дня — красная дуга в обратную
+ *  сторону и подпись «сверх нормы на …»; лимит недели исчерпан — 0 и «до воскресенья» (итог недели — в заголовке) */
+export function DayRing({ day, canSpend, mode, overDay, nextWeek, onClick }: {
+  day: number; canSpend: number; mode: 'ok' | 'day' | 'week'; overDay: number; nextWeek: boolean; onClick: () => void;
+}) {
+  const shown = useCountUp(canSpend, 1100, day);
+  const over = mode !== 'ok';
+  const frac = day > 0 && !over ? Math.min(1, Math.max(0, shown / day)) : 0;
+  const overFrac = mode === 'day' ? (day > 0 ? Math.min(1, overDay / day) : 1) : 0;
   const ink = over ? 'var(--ring-neg)' : 'var(--ring-ink)';
+  const label = mode === 'week' ? (nextWeek ? 'до понедельника' : 'до воскресенья') : mode === 'day' ? 'сверх нормы' : 'на сегодня';
+  const aria = mode === 'week' ? 'Лимит недели исчерпан, сегодня можно 0 ₽' : mode === 'day' ? `Сегодня сверх нормы на ${rub(overDay)}` : `На сегодня осталось ${rub(canSpend)} из ${rub(day)}`;
   return (
-    <button type="button" onClick={onClick} aria-label={`${left < 0 ? `Сегодня перерасход ${rub(-left)}` : `На сегодня осталось ${rub(left)} из ${rub(day)}`}. Траты за сегодня`}
+    <button type="button" onClick={onClick} aria-label={`${aria}. Траты за сегодня`}
       className="pointer-events-auto relative grid size-[140px] shrink-0 place-items-center rounded-full border backdrop-blur-md backdrop-saturate-150 transition-[background-color,transform] duration-700 active:scale-[.97]"
       style={{ background: over ? 'var(--glass-over)' : 'var(--glass)', borderColor: 'var(--glass-border)', boxShadow: 'var(--glass-shadow)' }}>
       <svg viewBox="0 0 140 140" className="absolute -inset-px size-[140px]" aria-hidden="true">
@@ -59,8 +65,10 @@ export function DayRing({ day, left, onClick }: { day: number; left: number; onC
         <Arc frac={overFrac} reverse stroke="var(--ring-over)" />
       </svg>
       <span className="relative flex flex-col items-center gap-[3px]" aria-hidden="true">
-        <span className="figure text-[25px] leading-none" style={{ color: ink }}>{over && '−'}<Money value={Math.abs(shown)} /></span>
-        <span className="text-[11.5px]" style={{ color: over ? 'var(--ring-neg)' : 'var(--ring-label)' }}>{over ? 'сверх лимита' : 'на сегодня'}</span>
+        <span className="figure text-[25px] leading-none" style={{ color: ink }}><Money value={Math.max(0, shown)} /></span>
+        <span className="text-center text-[11.5px] leading-tight" style={{ color: over ? 'var(--ring-neg)' : 'var(--ring-label)' }}>
+          {label}{mode === 'day' && <><br />на <Money value={overDay} /></>}
+        </span>
       </span>
     </button>
   );

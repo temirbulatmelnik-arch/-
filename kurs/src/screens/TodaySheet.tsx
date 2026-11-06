@@ -27,10 +27,17 @@ export function useTodaySpends() {
 
 /** Что значит сегодняшняя цифра — одной фразой */
 export function dayNote(b: DayBudget): { text: string; over: boolean } {
-  if (b.exhausted) return { text: 'Недельный лимит исчерпан, до понедельника только необходимое.', over: true };
-  const r = (n: number) => `${Math.round(n).toLocaleString('ru-RU')} ₽`;
-  if (b.left < 0 && b.nextWeek) return { text: `Перерасход ${r(-b.left)}. С понедельника новая неделя: ${r(b.tomorrow)} в день.`, over: true };
-  if (b.left < 0) return { text: `Перерасход ${r(-b.left)}, поэтому с завтра лимит ${r(b.tomorrow)} в день.`, over: true };
+  const n = (x: number) => Math.round(x).toLocaleString('ru-RU');
+  const r = (x: number) => `${n(x)} ₽`;
+  if (b.mode === 'week') {
+    // лимит недели исчерпан: что ушло сегодня и откуда, итог недели — одним перерасходом, без дневного «минуса»
+    const split = b.spentCredit > 0 ? `: с карты ${n(b.spentLife)}, с кредитки ${n(b.spentCredit)}` : '';
+    const spent = b.spentToday > 0 ? `Потрачено сегодня ${r(b.spentToday)}${split}. ` : '';
+    const over = b.weekLeft < 0 ? `, перерасход ${r(-b.weekLeft)}` : '';
+    return { text: `${spent}Лимит недели исчерпан${over}. ${b.nextWeek ? 'Сегодня тратить больше нельзя, с понедельника новая неделя.' : 'До воскресенья тратить нельзя.'}`, over: true };
+  }
+  if (b.mode === 'day' && b.nextWeek) return { text: `Сегодня сверх нормы ${r(b.overDay)}. С понедельника новая неделя: ${r(b.tomorrow)} в день.`, over: true };
+  if (b.mode === 'day') return { text: `Сегодня сверх нормы ${r(b.overDay)}, поэтому с завтра лимит ${r(b.tomorrow)} в день.`, over: true };
   return {
     text: `Осталось ${r(b.left)}. Лимит дня — остаток недели на утро (${r(b.morning)}), разделённый на ${b.daysLeft} ${plural(b.daysLeft, 'день', 'дня', 'дней')} до воскресенья.`,
     over: false,
