@@ -266,7 +266,8 @@ describe('обязательные платежи по датам и прогн�
   };
 
   it('остаток дня в календаре — резерв к вечеру по прогнозу покрытия: самопроверка по каждому дню', () => {
-    const paid = { 'fix:sub:2026-10': { done: true, amount: 2400, at: '' } };
+    // пополнение карты в воскресенье 01.11 уже сделано — иначе оно стоит в прогнозе сегодняшним днём (тест ниже)
+    const paid = { 'fix:sub:2026-10': { done: true, amount: 2400, at: '' }, 'wk:2026-11-02': { done: true, amount: 0, at: '' } };
     const { cov, days } = nov(cal, paid);
     // самопроверка: остаток каждого дня = остаток прогноза после последнего события в этот день или раньше
     let expected = cov.start;
@@ -282,7 +283,7 @@ describe('обязательные платежи по датам и прогн�
     const oct = monthDays(eventsBetween(cal, '2026-10-01', '2026-10-31'), paid, cov, '2026-10', '2026-11-01');
     expect(oct.every(d => d.total === null)).toBe(true);
     // неоплаченная подписка прошлого месяца — к оплате сегодня
-    expect(nov(cal, {}).cov.steps[0]).toMatchObject({ date: '2026-11-01', delta: -2400 });
+    expect(nov(cal, {}).cov.steps.find(st => st.key === 'fix:sub:2026-10')).toMatchObject({ date: '2026-11-01', delta: -2400 });
   });
 
   it('оплаченное заранее не уменьшает ни сумму будущего дня, ни остаток; день оплаты — день отметки', () => {
@@ -297,9 +298,32 @@ describe('обязательные платежи по датам и прогн�
     expect(paidOn({ date: '2026-10-20' }, { at: '2026-10-27T10:00:00.000Z' })).toBe('2026-10-20');
   });
 
+  it('сегодняшнее и прошедшее неотмеченное — в прогнозе сегодняшним днём; отмеченное — в резерве, остатки те же', () => {
+    const pay = (key: string, date: string, amount: number) => ({ key, date, dateMode: 'exact' as const, kind: 'payment' as const, title: key, amount });
+    const base = { 'fix:sub:2026-10': { done: true, amount: 2400, at: '' }, 'wk:2026-11-02': { done: true, amount: 0, at: '' } };
+    const run = (c: typeof cal, marks: Record<string, EventMark>, reserve: number, now: string) => {
+      const cov = coverage({ cal: c, marks, reserve, debts: [], expenses: [], bridge: null }, now);
+      return monthDays(eventsBetween(c, '2026-11-01', '2026-11-30'), marks, cov, '2026-11', now).filter(d => d.date >= now).map(d => d.total);
+    };
+    // 1. платёж на сегодня 1 000, не отмечен: сегодня и дальше на 1 000 меньше
+    const without = run(cal, base, 20_000, '2026-11-05');
+    const today = { ...cal, oneOff: [pay('p', '2026-11-05', 1000)] };
+    expect(run(today, base, 20_000, '2026-11-05')).toEqual(without.map(t => t! - 1000));
+    // 2. отметили (оплачен из резерва): резерв −1 000, событие ушло из прогноза — остатки те же
+    expect(run(today, { ...base, p: { done: true, amount: 1000, paidFrom: 'reserve', at: '' } }, 19_000, '2026-11-05')).toEqual(without.map(t => t! - 1000));
+    // 3. воскресенье до сверки: сегодняшнее пополнение карты в прогнозе; после отметки и сверки — те же остатки
+    const top = eventsBetween(cal, '2026-11-08', '2026-11-08').find(e => e.key === 'wk:2026-11-09')!.amount;
+    const sun = run(cal, base, 20_000, '2026-11-08');
+    expect(sun[0]).toBe(20_000 - 1000 - top);
+    expect(run(cal, { ...base, 'wk:2026-11-09': { done: true, amount: top, at: '' } }, 20_000 - top, '2026-11-08')).toEqual(sun);
+    // 4. вчерашний платёж не отмечен — входит сегодняшним днём
+    const cov = coverage({ cal: { ...cal, oneOff: [pay('y', '2026-11-04', 500)] }, marks: base, reserve: 20_000, debts: [], expenses: [], bridge: null }, '2026-11-05');
+    expect(cov.steps.find(st => st.key === 'y')).toMatchObject({ date: '2026-11-05', delta: -500 });
+  });
+
   it('неделя моста: из резерва уходит только воскресное пополнение fromReserve, траты с кредитки — нет', () => {
     const bridge: Bridge = { card: 'card-x', cap: 30_000, weeks: [{ monday: '2026-11-09', fromReserve: 4000, fromCredit: 4000 }] };
-    const { cov, days } = nov({ ...cal, bridge } as typeof cal, { 'fix:sub:2026-10': { done: true, amount: 2400, at: '' } });
+    const { cov, days } = nov({ ...cal, bridge } as typeof cal, { 'fix:sub:2026-10': { done: true, amount: 2400, at: '' }, 'wk:2026-11-02': { done: true, amount: 0, at: '' } });
     expect(cov.steps.find(s => s.key === 'wk:2026-11-09')!.delta).toBe(-4000);
     expect(days[7].total).toBe(20_000 - 1000 - 4000);
   });

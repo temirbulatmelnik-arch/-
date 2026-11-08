@@ -100,18 +100,18 @@ function bridgeEvents(input: CoverageInput, from: string, to: string): { extra: 
 
 function run(input: CoverageInput, from: string, to: string, shift?: { key: string; date: string }): Omit<Coverage, 'narrow' | 'months' | 'shortage'> {
   const { marks } = input;
-  // неоплаченные просроченные платежи — сразу; всё, что отмечено, уже отражено в остатке резерва
-  const overdue = eventsBetween(input.cal, addDays(from, -45), from).filter(e => e.kind === 'payment' && !marks[e.key]?.done);
+  // всё неотмеченное до сегодня включительно — платежи, поступления, воскресное пополнение карты — входит сегодняшним
+  // днём: в учёте резерва этих денег ещё нет (не ушли и не пришли). В день платежа, пока он не отмечен, прогноз
+  // не показывает деньги, которых уже нет. Отмеченное уже отражено в резерве и в прогноз не входит
+  const due = eventsBetween(input.cal, addDays(from, -45), from).filter(e => !marks[e.key]?.done);
   const ahead = eventsBetween(input.cal, addDays(from, 1), to).filter(e => !marks[e.key]?.done);
   const { extra, minUp } = bridgeEvents(input, from, to);
-  const list: CoverageStep[] = [
-    ...overdue.map(e => ({ date: from, title: e.title, delta: -e.amount, balance: 0, kind: e.kind, approx: e.approx, key: e.key })),
-    ...ahead.map(e => ({
-      date: shift && e.key === shift.key ? shift.date : e.date, title: e.title, kind: e.kind, approx: e.approx, key: e.key, balance: 0,
-      delta: e.kind === 'income' ? e.amount : -(e.amount + (minUp[e.key] ?? 0)),
-    })),
-    ...extra,
-  ].sort((a, b) => a.date.localeCompare(b.date) || b.delta - a.delta);
+  const step = (e: CalEvent, date: string): CoverageStep => ({
+    date: shift && e.key === shift.key ? shift.date : date, title: e.title, kind: e.kind, approx: e.approx, key: e.key, balance: 0,
+    delta: e.kind === 'income' ? e.amount : -(e.amount + (minUp[e.key] ?? 0)),
+  });
+  const list: CoverageStep[] = [...due.map(e => step(e, from)), ...ahead.map(e => step(e, e.date)), ...extra]
+    .sort((a, b) => a.date.localeCompare(b.date) || b.delta - a.delta);
   let balance = input.reserve;
   const byDay: Record<string, number> = {};
   for (const s of list) { balance += s.delta; s.balance = balance; byDay[s.date] = balance; }
