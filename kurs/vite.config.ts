@@ -31,7 +31,7 @@ const RESCUE = `(async () => {
   document.body.innerHTML = '<p style="font:17px system-ui;padding:32px;color:#5d6b66">Открываем «Курс»…</p>';
   try {
     const regs = await navigator.serviceWorker.getRegistrations();
-    await Promise.all(regs.filter(r => !new URL(r.scope).pathname.includes('/kurs/') && !new URL(r.scope).pathname.includes('/linia/')).map(r => r.unregister()));
+    await Promise.all(regs.filter(r => !new URL(r.scope).pathname.includes('/kurs/') && !new URL(r.scope).pathname.includes('/linia/') && !new URL(r.scope).pathname.includes('/astro/')).map(r => r.unregister()));
   } catch {}
   location.reload();
 })();

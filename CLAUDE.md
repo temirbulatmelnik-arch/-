@@ -7,6 +7,7 @@
 | `tonus/` | «Тонус» — тренер мышц тазового дна (корень сайта) |
 | `linia/` | «Линия» — осанка и фейс-лифтинг (`/linia/`) |
 | `kurs/` | «Курс» — личный план выхода из долгов (`/kurs/`) |
+| `astro/` | «Мой астропрогноз» — ежедневный прогноз по двум картам (`/astro/`), всё считается в браузере |
 | `konverty/` | отдельный инструмент, к сайту не относится |
 
 Каждое приложение — Vite + React + TypeScript + Tailwind 4 + zustand, PWA. Ставится на iPhone профилем Web Clip
@@ -22,8 +23,9 @@ npm run build                          # сборка; превью: npx vite pr
 
 ## Публикация
 
-Пуш в ветку `claude/plugin-marketplace-ecc-add-7184im` → `.github/workflows/tonus-pages.yml` собирает все три приложения
-и выкладывает в `gh-pages`: https://temirbulatmelnik-arch.github.io/-/ (`…/linia/`, `…/kurs/`).
+Пуш в ветку `claude/plugin-marketplace-ecc-add-7184im` (или `claude/happy-fermi-jyrgw4` — ветка «Астропрогноза», содержит
+всё из основной) → `.github/workflows/tonus-pages.yml` собирает все четыре приложения и выкладывает в `gh-pages`:
+https://temirbulatmelnik-arch.github.io/-/ (`…/linia/`, `…/kurs/`, `…/astro/`).
 Из облачной сессии github.io не открывается — статус публикации смотреть по запуску Actions.
 PR не нужен.
 

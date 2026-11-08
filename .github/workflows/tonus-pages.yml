@@ -1,11 +1,13 @@
-# Публикует «Тонус», «Линию» и «Курс» на GitHub Pages: https://<владелец>.github.io/<репозиторий>/, …/linia/ и …/kurs/
+# Публикует «Тонус», «Линию», «Курс» и «Мой астропрогноз» на GitHub Pages: https://<владелец>.github.io/<репозиторий>/,
+# …/linia/, …/kurs/ и …/astro/
 # Собранный сайт кладётся в ветку gh-pages, GitHub Pages раздаёт её как сайт.
-name: Тонус, Линия и Курс — публикация на GitHub Pages
+name: Тонус, Линия, Курс и Астропрогноз — публикация на GitHub Pages
 
 on:
   push:
-    branches: [claude/plugin-marketplace-ecc-add-7184im]
-    paths: ['tonus/**', 'linia/**', 'kurs/**', '.github/workflows/tonus-pages.yml']
+    # вторая ветка — ветка «Астропрогноза»; она содержит всё из основной, поэтому публикует тот же сайт + /astro/
+    branches: [claude/plugin-marketplace-ecc-add-7184im, claude/happy-fermi-jyrgw4]
+    paths: ['tonus/**', 'linia/**', 'kurs/**', 'astro/**', '.github/workflows/tonus-pages.yml']
   workflow_dispatch:
 
 permissions:
@@ -31,6 +33,7 @@ jobs:
             tonus/package-lock.json
             linia/package-lock.json
             kurs/package-lock.json
+            astro/package-lock.json
       - name: Тонус
         working-directory: tonus
         run: npm ci && npm test && SITE_URL="$SITE" npm run build
@@ -40,17 +43,21 @@ jobs:
       - name: Курс
         working-directory: kurs
         run: npm ci && npm test && SITE_URL="${SITE}kurs/" npm run build
+      - name: Мой астропрогноз
+        working-directory: astro
+        run: npm ci && npm test && npm run build
       - name: Выложить сайт в ветку gh-pages
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cp -r linia/dist tonus/dist/linia
           cp -r kurs/dist tonus/dist/kurs
+          cp -r astro/dist tonus/dist/astro
           cd tonus/dist
           touch .nojekyll
           git init -q -b gh-pages
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -q -m "Тонус, Линия и Курс: публикация ${GITHUB_SHA::7}"
+          git commit -q -m "Тонус, Линия, Курс и Астропрогноз: публикация ${GITHUB_SHA::7}"
           git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages

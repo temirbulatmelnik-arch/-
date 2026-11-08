@@ -58,8 +58,8 @@ export default defineConfig({
           { src: 'maskable-icon-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
-      // «Линия» и «Курс» лежат в подпапках того же сайта (/linia/, /kurs/) — офлайн-кеш «Тонуса» их не перехватывает
-      workbox: { globPatterns: ['**/*.{js,css,html,svg,png,jpg,woff2,bin,json}'], navigateFallbackDenylist: [/\/linia\//, /\/kurs\//] },
+      // «Линия», «Курс» и «Астропрогноз» лежат в подпапках того же сайта (/linia/, /kurs/, /astro/) — офлайн-кеш «Тонуса» их не перехватывает
+      workbox: { globPatterns: ['**/*.{js,css,html,svg,png,jpg,woff2,bin,json}'], navigateFallbackDenylist: [/\/linia\//, /\/kurs\//, /\/astro\//] },
     }),
   ],
   test: { environment: 'node' },
