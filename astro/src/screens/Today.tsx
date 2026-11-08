@@ -92,14 +92,46 @@ export function Today() {
           </div>
 
           <motion.section initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: 0.35 }} className="halo halo-live oracle mt-6 rounded-[28px] p-5">
-            <h2 className="serif text-[24px] font-semibold">Как складывается день</h2>
-            <div className="mt-2 space-y-2 text-[16.5px] leading-relaxed">{data.synth.overview.map((x, i) => <p key={i} className={i ? 'text-dim' : ''}>{x}</p>)}</div>
-            <div className="mt-4 grid gap-2">
-              <p className="rounded-[18px] bg-[color:var(--line)] p-3 text-[16px] leading-snug"><span className="font-semibold text-good">Совет · </span>{data.head.advice}</p>
-              <p className="rounded-[18px] bg-[color:var(--line)] p-3 text-[16px] leading-snug"><span className="font-semibold text-bad">Избегать · </span>{data.head.avoid}</p>
-              {data.head.extra && <p className="rounded-[18px] bg-[color:var(--line)] p-3 text-[15px] leading-snug text-dim">{data.head.extra}</p>}
+            <h2 className="serif text-[26px] font-semibold">Рецензия дня</h2>
+            <p className="serif mt-2 text-[22px] leading-snug">{data.review.headline}</p>
+            <div className="mt-3 space-y-2 text-[16.5px] leading-relaxed text-dim">{data.review.mood.map((x, i) => <p key={i}>{x}</p>)}</div>
+
+            <h3 className="mt-5 text-[17px] font-semibold text-brass">Главное сегодня</h3>
+            <div className="mt-2 space-y-3 text-[16.5px] leading-relaxed">{data.review.main.map((x, i) => <p key={i}>{x}</p>)}</div>
+
+            <h3 className="mt-5 text-[17px] font-semibold text-brass">Как пройдёт день</h3>
+            <div className="relative mt-3 space-y-3 pl-5">
+              <span className="absolute top-1 bottom-1 left-[5px] w-px" style={{ background: 'linear-gradient(var(--aura3), var(--aura1))' }} />
+              {data.review.flow.map(f => (
+                <div key={f.slot} className="relative">
+                  <span className="absolute top-[7px] -left-5 size-[11px] rounded-full" style={{ background: f.score >= 0.4 ? 'var(--good)' : f.score <= -0.4 ? 'var(--bad)' : 'var(--brass)', boxShadow: '0 0 10px currentColor' }} />
+                  <p className="text-[16px] leading-relaxed"><span className="font-semibold">{f.slot}. </span><span className="text-dim">{f.text}</span></p>
+                </div>
+              ))}
             </div>
+
+            <div className="mt-5 grid gap-2.5">
+              <p className="rounded-[18px] bg-[color:var(--line)] p-3.5 text-[15.5px] leading-relaxed"><span className="font-semibold text-good">Легко. </span>{data.review.easy}</p>
+              <p className="rounded-[18px] bg-[color:var(--line)] p-3.5 text-[15.5px] leading-relaxed"><span className="font-semibold text-bad">Трудно. </span>{data.review.hard}</p>
+            </div>
+
+            <h3 className="mt-5 text-[17px] font-semibold text-brass">План на день</h3>
+            <ul className="mt-2 space-y-1.5 text-[16px] leading-snug">
+              {data.review.plan.do.map(x => <li key={x} className="flex gap-2"><span className="text-good">✓</span><span>{x}</span></li>)}
+              {data.review.plan.avoid.map(x => <li key={x} className="flex gap-2"><span className="text-bad">✕</span><span>{x}</span></li>)}
+            </ul>
+            {(data.review.plan.best || data.review.plan.tricky) && (
+              <div className="mt-3 grid gap-2 text-[15px]">
+                {data.review.plan.best && <p className="rounded-[16px] border p-3 hair"><span className="font-semibold text-good">Лучшее время: </span><span className="text-dim">{data.review.plan.best}</span></p>}
+                {data.review.plan.tricky && <p className="rounded-[16px] border p-3 hair"><span className="font-semibold text-bad">Осторожно: </span><span className="text-dim">{data.review.plan.tricky}</span></p>}
+              </div>
+            )}
           </motion.section>
+
+          <details className="oracle mt-3 rounded-[22px] p-4">
+            <summary className="cursor-pointer text-[15.5px] font-semibold text-brass">Как это посчитано</summary>
+            <div className="mt-2 space-y-2 text-[15px] leading-relaxed text-dim">{data.synth.overview.map((x, i) => <p key={i}>{x}</p>)}</div>
+          </details>
 
           <Head sub="Как сегодняшние влияния ложатся на каждую сферу">Сферы жизни</Head>
           <SphereOrbs notes={data.synth.spheres} slots={data.slots} />

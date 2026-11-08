@@ -13,6 +13,7 @@ import { synthesizeDay, synthesizePair, type DaySynthesis, type PairSynthesis } 
 import { MOON_SIGN } from '../content/interpretations';
 import { SPHERES as SPH } from './scores';
 import { applyNuance, makeCtx, type NuanceNote } from './nuance';
+import { moonEvents, reviewDay, type DayReview } from './review';
 
 export interface TransitCard extends Transit { score: number; strength: number; text: string[]; houseT: number }
 
@@ -48,6 +49,7 @@ export interface TodayData {
   context: { md: string; ad: string; adEnd: Date; prof: ReturnType<typeof profection>; progMoon: number };
   synth: DaySynthesis;
   nuance: NuanceNote[];
+  review: DayReview;
   /** шкалы утром, днём и вечером того же дня — как меняется день */
   slots: Record<Sphere, number>[];
   element: number; // стихия знака Луны: 0 огонь, 1 земля, 2 воздух, 3 вода
@@ -69,7 +71,9 @@ export function today(d: Date): TodayData {
   const dayStart = Date.UTC(p.getUTCFullYear(), p.getUTCMonth(), p.getUTCDate()) - 3 * 3600e3;
   const slots = [9, 14, 20].map(h => { const m = new Date(dayStart + h * 3600e3); return sphereScores(applyNuance(transitsAt(me, m), makeCtx('me', m), false).trs, me); });
   void SPH;
+  const review = reviewDay({ all, synth, slots, moon, events: moonEvents(me, dayStart), dayStart, who: 'me' });
   return {
+    review,
     date: d, transits, long, scores, moon, moonHouse: houseOf(moon.lon, me.houses.cusps),
     head: headline(all, moon.vocNow), retro, sky,
     context: { md: md.lord, ad: ad.lord, adEnd: ad.end, prof: profection(ME, me, d), progMoon: progressedLon(ME, 'moon', d) },
