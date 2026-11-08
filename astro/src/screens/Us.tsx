@@ -62,7 +62,7 @@ export function Us() {
       </section>
 
       {data && (
-        <motion.section initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={spring} className="halo oracle mt-4 rounded-[28px] p-5">
+        <motion.section initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={spring} className="halo halo-live oracle mt-4 rounded-[28px] p-5">
           <h2 className="serif text-[24px] font-semibold">Вывод дня для пары</h2>
           <div className="mt-2 space-y-2 text-[16.5px] leading-relaxed">{data.synth.summary.map((x, i) => <p key={i} className={i ? 'text-dim' : ''}>{x}</p>)}</div>
           <div className="mt-4 grid grid-cols-2 gap-2 text-[15px]">

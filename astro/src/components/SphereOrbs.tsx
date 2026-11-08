@@ -17,7 +17,7 @@ function Ring({ value, color, size = 74 }: { value: number; color: string; size?
         transform={`rotate(-90 ${size / 2} ${size / 2}) ${value < 0 ? `scale(-1 1) translate(${-size} 0)` : ''}`}
         initial={false} animate={{ strokeDasharray: `${c * frac} ${c}` }} transition={soft}
         style={{ filter: `drop-shadow(0 0 6px ${value >= 0 ? color : 'var(--bad)'})` }} />
-      <circle cx={size / 2} cy={size / 2} r={r - 9} fill={color} fillOpacity="0.14" className="pulse" style={{ transformOrigin: 'center' }} />
+      <circle cx={size / 2} cy={size / 2} r={r - 9} fill={color} fillOpacity="0.14" style={{ transformOrigin: 'center' }} />
     </svg>
   );
 }

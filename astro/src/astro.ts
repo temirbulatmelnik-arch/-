@@ -7,6 +7,7 @@ let worker: Worker | null = null;
 let seq = 0;
 const pending = new Map<number, (v: unknown) => void>();
 const cache = new Map<string, unknown>();
+const CACHE_MAX = 24; // сколько готовых дней держать в памяти
 
 function getWorker() {
   if (!worker) {
@@ -25,7 +26,7 @@ function ask<T>(key: string, msg: Record<string, unknown>): Promise<T> {
   if (cache.has(key)) return Promise.resolve(cache.get(key) as T);
   return new Promise<T>(resolve => {
     const id = ++seq;
-    pending.set(id, v => { cache.set(key, v); resolve(v as T); });
+    pending.set(id, v => { cache.set(key, v); if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value!); resolve(v as T); });
     getWorker().postMessage({ id, ...msg });
   });
 }
@@ -61,4 +62,4 @@ export function useAsync<T>(key: string, run: () => Promise<T>): { data: T | und
 }
 
 /** «прогрев»: соседние дни считаются заранее, чтобы листание было мгновенным */
-export function prefetchToday(ts: number[]) { for (const t of ts) void askToday(t); }
+export function prefetchToday(ts: number[]) { for (const t of ts.slice(0, 1)) void askToday(t); }

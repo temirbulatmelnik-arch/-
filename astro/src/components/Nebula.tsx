@@ -2,6 +2,7 @@
 // Рисуется в половинном разрешении, 30 кадров/с, пауза в фоне; при «Уменьшении движения» — один неподвижный кадр.
 // Без WebGL остаётся CSS-градиент под ней.
 import { useEffect, useRef } from 'react';
+import { isCalm, onCalmChange, reducedMotion, scrollingNow } from './frameGate';
 
 const VERT = `attribute vec2 p; void main(){ gl_Position = vec4(p, 0.0, 1.0); }`;
 const FRAG = `precision mediump float;
@@ -9,7 +10,7 @@ uniform vec2 r; uniform float t; uniform vec3 c1; uniform vec3 c2; uniform vec3 
 float h(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float n(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
   return mix(mix(h(i), h(i+vec2(1,0)), f.x), mix(h(i+vec2(0,1)), h(i+vec2(1,1)), f.x), f.y); }
-float fbm(vec2 p){ float v = 0.0, a = 0.5; for (int i = 0; i < 5; i++){ v += a*n(p); p = p*2.03 + vec2(1.7, 9.2); a *= 0.5; } return v; }
+float fbm(vec2 p){ float v = 0.0, a = 0.5; for (int i = 0; i < 4; i++){ v += a*n(p); p = p*2.03 + vec2(1.7, 9.2); a *= 0.5; } return v; }
 void main(){
   vec2 uv = gl_FragCoord.xy / r; vec2 p = uv * vec2(r.x/r.y, 1.0) * 2.2;
   float tt = t * 0.025;
@@ -42,30 +43,51 @@ export function Nebula() {
     const loc = gl.getAttribLocation(pr, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
     const U = (n: string) => gl.getUniformLocation(pr, n);
     const ur = U('r'), ut = U('t'), u1 = U('c1'), u2 = U('c2'), u3 = U('c3'), ul = U('light');
-    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    // цвета плавно догоняют CSS-переменные стихии
-    let cur = [hex('#3b2a8a'), hex('#1b5a9a'), hex('#b0508a')];
-    const resize = () => { const k = 0.5; cv.width = Math.round(innerWidth * k); cv.height = Math.round(innerHeight * k); gl.viewport(0, 0, cv.width, cv.height); };
-    resize(); addEventListener('resize', resize);
-    let raf = 0, last = 0;
-    const start = performance.now();
-    const frame = (now: number) => {
-      raf = requestAnimationFrame(frame);
-      if (now - last < 33) return; last = now;
+    let reduce = reducedMotion() || isCalm();
+    // цвета стихии читаются только при смене класса на <html>, а не каждый кадр (getComputedStyle — дорогой пересчёт стилей)
+    let target = [hex('#3b2a8a'), hex('#1b5a9a'), hex('#b0508a')];
+    let cur = target;
+    let light = 0;
+    const readColors = () => {
       const cs = getComputedStyle(document.documentElement);
-      const target = ['--aura1', '--aura2', '--aura3'].map(v => hex(cs.getPropertyValue(v) || '#444488'));
-      cur = cur.map((c, i) => c.map((x, j) => x + (target[i][j] - x) * 0.04));
+      target = ['--aura1', '--aura2', '--aura3'].map(v => hex(cs.getPropertyValue(v) || '#444488'));
+      light = document.documentElement.classList.contains('light') ? 1 : 0;
+      kick();
+    };
+    const mo = new MutationObserver(() => setTimeout(readColors, 50));
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    // разрешение — треть экрана: туманность мягкая, детали не нужны
+    const resize = () => { const k = 0.34; cv.width = Math.max(64, Math.round(innerWidth * k)); cv.height = Math.max(64, Math.round(innerHeight * k)); gl.viewport(0, 0, cv.width, cv.height); kick(); };
+    let raf = 0, settle = 0;
+    const start = performance.now();
+    const draw = (now: number) => {
       gl.uniform2f(ur, cv.width, cv.height);
       gl.uniform1f(ut, reduce ? 40 : (now - start) / 1000 + 40);
       gl.uniform3fv(u1, cur[0]); gl.uniform3fv(u2, cur[1]); gl.uniform3fv(u3, cur[2]);
-      gl.uniform1f(ul, document.documentElement.classList.contains('light') ? 1 : 0);
+      gl.uniform1f(ul, light);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
-      if (reduce && now - start > 2500) cancelAnimationFrame(raf);
     };
-    raf = requestAnimationFrame(frame);
-    const vis = () => { cancelAnimationFrame(raf); if (document.visibilityState === 'visible') raf = requestAnimationFrame(frame); };
+    // 10 кадров в секунду достаточно: туманность движется очень медленно. Между кадрами — setTimeout,
+    // чтобы экран мог «уснуть», а не крутить пустой цикл 60 раз в секунду
+    let timer = 0;
+    const frame = (now: number) => {
+      raf = 0;
+      schedule();
+      if (scrollingNow()) return;
+      const moving = cur.some((c, i) => c.some((x, j) => Math.abs(target[i][j] - x) > 0.002));
+      if (moving) cur = cur.map((c, i) => c.map((x, j) => x + (target[i][j] - x) * 0.12));
+      draw(now);
+      if (reduce && !moving && ++settle > 3) stop();
+    };
+    function schedule() { clearTimeout(timer); timer = window.setTimeout(() => { raf = requestAnimationFrame(frame); }, 100); }
+    function stop() { clearTimeout(timer); cancelAnimationFrame(raf); raf = 0; timer = 0; }
+    function kick() { if (!timer && !raf && document.visibilityState === 'visible') { settle = 0; schedule(); } }
+    resize(); addEventListener('resize', resize);
+    readColors();
+    const offCalm = onCalmChange(() => { reduce = reducedMotion() || isCalm(); stop(); kick(); });
+    const vis = () => { stop(); if (document.visibilityState === 'visible') kick(); };
     document.addEventListener('visibilitychange', vis);
-    return () => { cancelAnimationFrame(raf); removeEventListener('resize', resize); document.removeEventListener('visibilitychange', vis); };
+    return () => { stop(); offCalm(); mo.disconnect(); removeEventListener('resize', resize); document.removeEventListener('visibilitychange', vis); };
   }, []);
   return <canvas ref={ref} aria-hidden="true" className="pointer-events-none fixed inset-0 -z-20 h-full w-full" />;
 }

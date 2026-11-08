@@ -94,7 +94,7 @@ export function Calendar() {
             </div>
           )}
           {activeNow.length > 0 && (
-            <section className="halo oracle mt-5 rounded-[28px] p-5">
+            <section className="halo halo-live oracle mt-5 rounded-[28px] p-5">
               <h2 className="serif text-[24px] font-semibold">Что идёт сейчас</h2>
               <div className="mt-3 space-y-3">
                 {activeNow.slice(0, 4).map(p => {

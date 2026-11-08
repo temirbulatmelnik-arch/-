@@ -47,7 +47,16 @@ export function Astrolabe({ natal, sky, transits, moonPhase, dateKey }: { natal:
   const shownNat = spread(natPts, 8);
   const lines = transits.filter(t => t.t !== 'node' && natal.points[t.n]).slice(0, 7);
   return (
-    <svg viewBox={`0 0 ${S} ${S}`} className="mx-auto block w-full max-w-[380px] select-none overflow-visible" role="img" aria-label="Небо дня поверх натальной карты">
+    <div className="relative mx-auto w-full max-w-[380px]">
+    {/* «паутина» астролябии вращается отдельным слоем: трансформация на видеокарте, без перерисовки карты */}
+    <svg viewBox={`0 0 ${S} ${S}`} aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full overflow-visible opacity-35" style={{ animation: 'spin-slow 240s steps(1200) infinite', willChange: 'transform' }}>
+      {Array.from({ length: 24 }, (_, i) => {
+        const a = (i * 15 * Math.PI) / 180;
+        return <line key={i} x1={C + Math.cos(a) * R_IN} y1={C + Math.sin(a) * R_IN} x2={C + Math.cos(a) * (R_OUT + 6)} y2={C + Math.sin(a) * (R_OUT + 6)} stroke="var(--brass)" strokeWidth="0.3" />;
+      })}
+      <circle cx={C} cy={C} r={R_OUT + 6} fill="none" stroke="var(--brass)" strokeWidth="0.5" strokeDasharray="1 5" />
+    </svg>
+    <svg viewBox={`0 0 ${S} ${S}`} className="relative block w-full select-none overflow-visible" role="img" aria-label="Небо дня поверх натальной карты">
       <defs>
         <linearGradient id="brass" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="#f6dea6" /><stop offset="0.5" stopColor="var(--brass)" /><stop offset="1" stopColor="#9b7330" />
@@ -56,14 +65,6 @@ export function Astrolabe({ natal, sky, transits, moonPhase, dateKey }: { natal:
           <stop offset="0" stopColor="var(--dial-a)" /><stop offset="1" stopColor="var(--dial-b)" />
         </radialGradient>
       </defs>
-      {/* вращающаяся «паутина» астролябии — едва заметная, 4 минуты на оборот */}
-      <g style={{ transformOrigin: `${C}px ${C}px`, animation: 'spin-slow 240s linear infinite' }} opacity="0.35">
-        {Array.from({ length: 24 }, (_, i) => {
-          const a = (i * 15 * Math.PI) / 180;
-          return <line key={i} x1={C + Math.cos(a) * R_IN} y1={C + Math.sin(a) * R_IN} x2={C + Math.cos(a) * (R_OUT + 6)} y2={C + Math.sin(a) * (R_OUT + 6)} stroke="url(#brass)" strokeWidth="0.3" />;
-        })}
-        <circle cx={C} cy={C} r={R_OUT + 6} fill="none" stroke="url(#brass)" strokeWidth="0.5" strokeDasharray="1 5" />
-      </g>
       <circle cx={C} cy={C} r={R_OUT} fill="url(#dial)" stroke="url(#brass)" strokeWidth="2.2" />
       <circle cx={C} cy={C} r={R_SIGN - 12} fill="none" stroke="url(#brass)" strokeWidth="1" opacity="0.8" />
       {/* знаки и градусная шкала */}
@@ -112,5 +113,6 @@ export function Astrolabe({ natal, sky, transits, moonPhase, dateKey }: { natal:
       {sky.map(s => <Planet key={s.id} id={s.id} lon={s.lon} shown={shownSky[s.id]} asc={asc} retro={s.retro} />)}
       <MoonDisc phase={moonPhase} size={60} x={C - 30} y={C - 30} />
     </svg>
+    </div>
   );
 }

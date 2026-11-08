@@ -15,7 +15,7 @@ export function Tilt({ children, max = 10 }: { children: ReactNode; max?: number
   return (
     <div style={{ perspective: 900 }} onPointerMove={move} onPointerLeave={() => { rx.set(12); ry.set(0); }} onPointerUp={() => { rx.set(12); ry.set(0); }}>
       <motion.div style={{ rotateX: reduce ? 0 : sx, rotateY: reduce ? 0 : sy, transformStyle: 'preserve-3d' }}>
-        <div style={{ animation: reduce ? undefined : 'float-y 7s ease-in-out infinite' }}>{children}</div>
+        {children}
       </motion.div>
     </div>
   );

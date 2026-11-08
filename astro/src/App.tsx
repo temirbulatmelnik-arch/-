@@ -11,9 +11,11 @@ import { Us } from './screens/Us';
 import { Calendar } from './screens/Calendar';
 import { Charts } from './screens/Charts';
 import { spring } from './components/motion';
+import { setCalm } from './components/frameGate';
 
 export default function App() {
-  const { tab, setTab, theme, toggleTheme, element } = useApp();
+  const { tab, setTab, theme, toggleTheme, element, live, toggleLive } = useApp();
+  useEffect(() => { setCalm(!live); document.documentElement.classList.toggle('calm', !live); }, [live]);
   useEffect(() => {
     const el = document.documentElement;
     for (let i = 0; i < 4; i++) el.classList.toggle(`el-${i}`, i === element);
@@ -28,7 +30,11 @@ export default function App() {
       <StarField />
       <Intro />
       <div className="pt-safe relative mx-auto min-h-full max-w-[560px] px-4 pb-32">
-        <div className="mb-2 flex justify-end">
+        <div className="mb-2 flex justify-end gap-2">
+          <Tap onClick={toggleLive} aria-label={live ? 'Экономный режим: остановить живой фон' : 'Включить живой фон'} aria-pressed={!live}
+            className={`glass flex h-10 items-center gap-1.5 rounded-full px-3 text-[13.5px] font-semibold ${live ? 'text-brass' : 'text-faint'}`}>
+            <span className="glyph text-[16px]">{live ? '✦' : '✧'}</span>{live ? 'живой фон' : 'экономно'}
+          </Tap>
           <Tap onClick={toggleTheme} aria-label={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'} className="glass grid size-10 place-items-center rounded-full text-brass">
             <motion.svg key={theme} initial={{ rotate: -90, opacity: 0 }} animate={{ rotate: 0, opacity: 1 }} transition={spring} viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round">
               {theme === 'dark' ? <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" /> : <g><circle cx="12" cy="12" r="4" /><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4" /></g>}

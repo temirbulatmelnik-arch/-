@@ -27,7 +27,7 @@ export function LinkCard({ link, i }: { link: Link; i: number }) {
             </g>
           );
         })}
-        <circle cx={C} cy={C} r="15" fill={TONE[link.tone].c} fillOpacity=".22" className="pulse" style={{ transformOrigin: `${C}px ${C}px` }} />
+        <circle cx={C} cy={C} r="15" fill={TONE[link.tone].c} fillOpacity=".22" style={{ transformOrigin: `${C}px ${C}px` }} />
         <circle cx={C} cy={C} r="5" fill={TONE[link.tone].c} />
       </svg>
       <div className="min-w-0 flex-1">

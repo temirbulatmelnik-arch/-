@@ -46,7 +46,8 @@ export function Today() {
   const { data, busy } = useAsync('t' + t, () => askToday(t));
   useEffect(() => { if (data) setElement(data.element); }, [data, setElement]);
   useEffect(() => {
-    const id = setTimeout(() => prefetchToday([mskDay(base, offset + 1, SLOT_HOUR[slot]).getTime(), mskDay(base, offset - 1, SLOT_HOUR[slot]).getTime()]), 700);
+    // заранее считается только следующий день и только когда пользователь задержался на экране
+    const id = setTimeout(() => prefetchToday([mskDay(base, offset + 1, SLOT_HOUR[slot]).getTime()]), 2500);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [offset, slot]);
@@ -90,7 +91,7 @@ export function Today() {
             <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }} className="mx-auto mt-2 max-w-[34ch] text-[15px] leading-snug text-dim">{data.synth.subtitle}</motion.p>
           </div>
 
-          <motion.section initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: 0.35 }} className="halo oracle mt-6 rounded-[28px] p-5">
+          <motion.section initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: 0.35 }} className="halo halo-live oracle mt-6 rounded-[28px] p-5">
             <h2 className="serif text-[24px] font-semibold">Как складывается день</h2>
             <div className="mt-2 space-y-2 text-[16.5px] leading-relaxed">{data.synth.overview.map((x, i) => <p key={i} className={i ? 'text-dim' : ''}>{x}</p>)}</div>
             <div className="mt-4 grid gap-2">
@@ -121,7 +122,7 @@ export function Today() {
 
           <Head>Луна</Head>
           <section className="oracle relative overflow-hidden rounded-[28px] p-5">
-            <div className="absolute -top-10 -right-10 opacity-60" style={{ animation: 'float-y 9s ease-in-out infinite' }}><MoonDisc phase={data.moon.phaseAngle} size={170} /></div>
+            <div className="absolute -top-10 -right-10 opacity-60"><MoonDisc phase={data.moon.phaseAngle} size={170} /></div>
             <div className="relative max-w-[62%]">
               <p className="serif text-[28px] leading-tight font-semibold">Луна в {SIGNS_PREP[data.moon.sign]}</p>
               <p className="mt-1 text-[15px] text-dim">{data.moon.phaseName}, {Math.round(data.moon.illum * 100)}%</p>
