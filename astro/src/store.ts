@@ -6,9 +6,10 @@ export type Slot = 'morning' | 'day' | 'evening';
 export const SLOT_HOUR: Record<Slot, number> = { morning: 9, day: 14, evening: 20 };
 export type DateFilter = 'important' | 'me' | 'dima' | 'pair';
 export type ChartView = 'me' | 'dima' | 'syn' | 'comp' | 'vedic';
+export type CalView = 'periods' | 'events';
 
 interface State {
-  tab: Tab; offset: number; slot: Slot; theme: 'dark' | 'light'; filter: DateFilter; chart: ChartView;
+  tab: Tab; offset: number; element: number; setElement: (e: number) => void; slot: Slot; theme: 'dark' | 'light'; filter: DateFilter; chart: ChartView; cal: CalView; setCal: (c: CalView) => void;
   setTab: (t: Tab) => void; setOffset: (n: number) => void; setSlot: (s: Slot) => void;
   toggleTheme: () => void; setFilter: (f: DateFilter) => void; setChart: (c: ChartView) => void;
 }
@@ -16,7 +17,7 @@ interface State {
 const nowSlot = (): Slot => { const h = new Date(Date.now() + 3 * 3600e3).getUTCHours(); return h < 12 ? 'morning' : h < 18 ? 'day' : 'evening'; };
 
 export const useApp = create<State>()(persist((set, get) => ({
-  tab: 'today', offset: 0, slot: nowSlot(), theme: document.documentElement.classList.contains('light') ? 'light' : 'dark', filter: 'important', chart: 'me',
+  tab: 'today', offset: 0, element: 2, setElement: element => set({ element }), slot: nowSlot(), theme: document.documentElement.classList.contains('light') ? 'light' : 'dark', filter: 'important', chart: 'me', cal: 'periods', setCal: cal => set({ cal }),
   setTab: tab => set({ tab }),
   setOffset: offset => set({ offset }),
   setSlot: slot => set({ slot }),

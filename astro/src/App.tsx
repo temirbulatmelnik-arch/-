@@ -2,23 +2,31 @@ import { AnimatePresence, motion, MotionConfig } from 'motion/react';
 import { useEffect } from 'react';
 import { useApp } from './store';
 import { StarField } from './components/StarField';
+import { Nebula } from './components/Nebula';
+import { Intro } from './components/Intro';
 import { TabBar } from './components/TabBar';
 import { Tap } from './components/ui';
 import { Today } from './screens/Today';
 import { Us } from './screens/Us';
-import { Dates } from './screens/Dates';
+import { Calendar } from './screens/Calendar';
 import { Charts } from './screens/Charts';
 import { spring } from './components/motion';
 
 export default function App() {
-  const { tab, setTab, theme, toggleTheme } = useApp();
+  const { tab, setTab, theme, toggleTheme, element } = useApp();
+  useEffect(() => {
+    const el = document.documentElement;
+    for (let i = 0; i < 4; i++) el.classList.toggle(`el-${i}`, i === element);
+  }, [element]);
   useEffect(() => { window.scrollTo({ top: 0 }); }, [tab]);
   useEffect(() => {
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'light' ? '#e9edfb' : '#0a0d2a');
   }, [theme]);
   return (
     <MotionConfig reducedMotion="user">
+      <Nebula />
       <StarField />
+      <Intro />
       <div className="pt-safe relative mx-auto min-h-full max-w-[560px] px-4 pb-32">
         <div className="mb-2 flex justify-end">
           <Tap onClick={toggleTheme} aria-label={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'} className="glass grid size-10 place-items-center rounded-full text-brass">
@@ -28,10 +36,10 @@ export default function App() {
           </Tap>
         </div>
         <AnimatePresence mode="wait" initial={false}>
-          <motion.main key={tab} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.28, ease: [0.23, 1, 0.32, 1] }}>
+          <motion.main key={tab} initial={{ opacity: 0, y: 14, filter: 'blur(8px)' }} animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }} exit={{ opacity: 0, y: -8, filter: 'blur(6px)' }} transition={{ duration: 0.34, ease: [0.23, 1, 0.32, 1] }}>
             {tab === 'today' && <Today />}
             {tab === 'us' && <Us />}
-            {tab === 'dates' && <Dates />}
+            {tab === 'dates' && <Calendar />}
             {tab === 'charts' && <Charts />}
           </motion.main>
         </AnimatePresence>

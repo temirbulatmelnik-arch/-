@@ -30,8 +30,9 @@ function Planet({ id, lon, shown, asc, retro }: { id: PointId; lon: number; show
     <g>
       <motion.circle initial={false} animate={{ cx: real.x, cy: real.y }} transition={celestial} r="2.4" fill={PCOLOR[id]} />
       <motion.g style={{ x, y }}>
-        <circle r="13" fill="var(--deep)" opacity="0.72" />
-        <circle r="13" fill="none" stroke={PCOLOR[id]} strokeOpacity="0.35" strokeWidth="0.8" />
+        <circle r="17" fill={PCOLOR[id]} opacity="0.16" />
+        <circle r="12.5" fill="var(--deep)" opacity="0.85" />
+        <circle r="12.5" fill="none" stroke={PCOLOR[id]} strokeOpacity="0.6" strokeWidth="0.9" />
         <text textAnchor="middle" dominantBaseline="central" className="glyph" fontSize="15" fill={PCOLOR[id]}>{GLYPH[id]}</text>
         {retro && <text x="9" y="9" fontSize="7.5" fill={PCOLOR[id]} fontFamily="var(--font-sans)">R</text>}
       </motion.g>

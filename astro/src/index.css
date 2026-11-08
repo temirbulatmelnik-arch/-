@@ -112,10 +112,21 @@
   color-scheme: light;
 }
 
+/* стихия дня: цвета неба и акцентов плавно перетекают при смене даты (Луна в огне, земле, воздухе или воде) */
+@property --aura1 { syntax: '<color>'; inherits: true; initial-value: #6f8cff; }
+@property --aura2 { syntax: '<color>'; inherits: true; initial-value: #b06ae8; }
+@property --aura3 { syntax: '<color>'; inherits: true; initial-value: #7fe6ff; }
+@property --ang { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+:root { transition: --aura1 1.4s var(--ease-out), --aura2 1.4s var(--ease-out), --aura3 1.4s var(--ease-out); }
+:root.el-0 { --aura1: #ff6a3d; --aura2: #b0306a; --aura3: #ffb547; }
+:root.el-1 { --aura1: #23a07a; --aura2: #5b3fa0; --aura3: #e6c06a; }
+:root.el-2 { --aura1: #6f8cff; --aura2: #b06ae8; --aura3: #7fe6ff; }
+:root.el-3 { --aura1: #1fb5c9; --aura2: #3a4fd0; --aura3: #a07cff; }
+
 html, body, #root { height: 100%; }
 body {
   margin: 0;
-  background: var(--night);
+  background: radial-gradient(120% 70% at 75% -10%, var(--sky-a) 0%, var(--sky-b) 45%, var(--sky-c) 100%) fixed, var(--night);
   color: var(--ink);
   font-family: var(--font-sans);
   font-size: 17px;
@@ -135,6 +146,7 @@ button { -webkit-touch-callout: none; user-select: none; -webkit-user-select: no
 .pt-safe { padding-top: max(env(safe-area-inset-top), 12px); }
 .pb-safe { padding-bottom: max(env(safe-area-inset-bottom), 8px); }
 
+@layer components {
 /* стеклянная панель: лёгкое матовое стекло поверх неба */
 .glass {
   background: var(--panel);
@@ -147,6 +159,7 @@ button { -webkit-touch-callout: none; user-select: none; -webkit-user-select: no
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; }
 
+}
 @keyframes twinkle { 0%, 100% { opacity: .35 } 50% { opacity: 1 } }
 @keyframes spin-slow { to { transform: rotate(360deg) } }
 @keyframes shimmer { 0% { background-position: -200% 0 } 100% { background-position: 200% 0 } }
@@ -160,3 +173,43 @@ button { -webkit-touch-callout: none; user-select: none; -webkit-user-select: no
   .shimmer-text { animation: none; }
   * { scroll-behavior: auto !important; }
 }
+
+@layer components {
+/* переливающаяся рамка: конический градиент цветов стихии медленно обходит карточку */
+.halo { position: relative; isolation: isolate; }
+.halo::before {
+  content: ''; position: absolute; inset: -1px; border-radius: inherit; padding: 1.2px; z-index: -1;
+  background: conic-gradient(from var(--ang), var(--aura1), var(--aura3), var(--aura2), var(--aura1));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: halo-spin 9s linear infinite; opacity: .9;
+}
+.halo::after {
+  content: ''; position: absolute; inset: -18px; border-radius: inherit; z-index: -2; filter: blur(26px); opacity: .28;
+  background: conic-gradient(from var(--ang), var(--aura1), transparent 30%, var(--aura3) 55%, transparent 75%, var(--aura2));
+  animation: halo-spin 9s linear infinite;
+}
+}
+@keyframes halo-spin { to { --ang: 360deg; } }
+.light .halo::after { opacity: .18; }
+
+/* «оракульная» карта: глубокая панель с мягким внутренним свечением стихии */
+.oracle {
+  background:
+    radial-gradient(120% 80% at 0% 0%, color-mix(in oklab, var(--aura1) 22%, transparent), transparent 60%),
+    radial-gradient(100% 70% at 100% 100%, color-mix(in oklab, var(--aura2) 20%, transparent), transparent 60%),
+    var(--panel-strong);
+  border: 1px solid var(--line);
+}
+:root { --panel-strong: rgba(16, 18, 52, 0.78); }
+:root.light { --panel-strong: rgba(255, 255, 255, 0.86); }
+@layer components {
+.aura-text { background: linear-gradient(100deg, var(--aura3), #fff 45%, var(--aura1)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.light .aura-text { background: linear-gradient(100deg, color-mix(in oklab, var(--aura2) 80%, #000), var(--brass) 50%, color-mix(in oklab, var(--aura1) 80%, #000)); -webkit-background-clip: text; background-clip: text; }
+.aura-dot { background: var(--aura3); box-shadow: 0 0 12px var(--aura3); }
+.ornament { display: flex; align-items: center; gap: .6rem; color: var(--brass); }
+.ornament::before, .ornament::after { content: ''; height: 1px; flex: 1; background: linear-gradient(90deg, transparent, var(--brass), transparent); opacity: .55; }
+}
+@keyframes float-y { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-6px) } }
+@keyframes pulse-glow { 0%, 100% { opacity: .55; transform: scale(1) } 50% { opacity: 1; transform: scale(1.12) } }
+.pulse { animation: pulse-glow 3.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .halo::before, .halo::after, .pulse { animation: none; } }

@@ -2,7 +2,7 @@
 // учитываются дома натальных точек и личные заметки (какая точка за что отвечает).
 import type { PointId } from './core';
 import { transitOrb, ASPECT } from './aspects';
-import type { Chart } from './chart';
+import { natal, ME, DIMA, type Chart } from './chart';
 import type { Transit } from './transits';
 import { valence } from '../content/compose';
 
@@ -52,6 +52,20 @@ export function transitStrength(tr: Transit): number {
   const close = Math.max(0, 1 - tr.orb / max);
   const minor = ASPECT[tr.aspect].major && tr.aspect !== 'quincunx' ? 1 : 0.5;
   return (PW[tr.t] ?? 1) * (0.35 + 0.65 * Math.pow(close, 0.7)) * minor * (tr.exactNow ? 1.15 : 1);
+}
+
+const REL_DIMA: Partial<Record<PointId, Partial<Record<Sphere, number>>>> = {
+  sun: { health: 0.9, work: 0.4 }, moon: { love: 1, health: 0.6 }, mercury: { work: 0.5, love: 0.4 }, venus: { love: 1, sex: 0.9, money: 0.5 },
+  mars: { sex: 0.9, health: 0.7, work: 0.4 }, jupiter: { money: 0.6 }, saturn: { work: 1, love: 0.5 }, uranus: { love: 0.6 }, chiron: { health: 0.5 },
+  lilith: { sex: 0.8 }, asc: { health: 1, love: 0.3 }, mc: { work: 1 }, dsc: { love: 1 }, node: { money: 0.6 }, vertex: { love: 0.4 }, fortune: { money: 0.8 },
+};
+let _houses: { me: Chart; dima: Chart } | null = null;
+/** за какую сферу отвечает транзит: натальная точка, её дом и сама транзитная планета */
+export function relevanceOf(tr: Transit, s: Sphere, who: 'me' | 'dima'): number {
+  if (!_houses) _houses = { me: natal(ME), dima: natal(DIMA) };
+  const rel = who === 'me' ? REL_ME : REL_DIMA;
+  const house = _houses[who].points[tr.n]?.house ?? 0;
+  return Math.min(1.3, (rel[tr.n]?.[s] ?? 0) + (REL_HOUSE[house]?.[s] ?? 0) * 0.6 + (REL_TRANSIT[tr.t]?.[s] ?? 0));
 }
 
 export function sphereScores(trs: Transit[], natal: Chart, rel = REL_ME): Record<Sphere, number> {

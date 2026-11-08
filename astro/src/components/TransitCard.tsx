@@ -20,7 +20,7 @@ export function TransitCardView({ tr, who = 'me', now }: { tr: T; who?: 'me' | '
   const fast = tr.t === 'moon';
   const exactLabel = tr.exactNow ? 'точный' : tr.nearest ? (fast || Math.abs(tr.nearest - now) < 2 * 864e5 ? `точно ${fmtDay(tr.nearest)} в ${fmtTime(tr.nearest)}` : `точно ${fmtDay(tr.nearest, true)}`) : '';
   return (
-    <motion.article aria-label={`${PL_NOM[tr.t]}, ${ACC[tr.aspect]}, ${pointRu(tr.n, who)}`} layout transition={spring} onClick={() => setOpen(o => !o)} className="glass relative cursor-pointer overflow-hidden rounded-[22px] py-4 pr-4 pl-5">
+    <motion.article aria-label={`${PL_NOM[tr.t]}, ${ACC[tr.aspect]}, ${pointRu(tr.n, who)}`} layout transition={spring} onClick={() => setOpen(o => !o)} className="oracle relative cursor-pointer overflow-hidden rounded-[22px] py-4 pr-4 pl-5">
       <span className="absolute top-3 bottom-3 left-0 w-[5px] rounded-r-full" style={{ background: col, opacity: 0.35 + Math.min(1, tr.strength / 1.6) * 0.65, boxShadow: `0 0 14px ${col}` }} />
       <div className="flex items-center gap-3">
         <div className="flex shrink-0 items-center gap-1 text-[24px]">

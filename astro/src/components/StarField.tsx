@@ -85,8 +85,6 @@ export function StarField() {
   }, []);
   return (
     <div aria-hidden="true" className="pointer-events-none fixed inset-0 -z-10">
-      <div className="absolute inset-0" style={{ background: 'radial-gradient(120% 70% at 75% -10%, var(--sky-a) 0%, var(--sky-b) 45%, var(--sky-c) 100%)' }} />
-      <div className="absolute inset-0 opacity-60" style={{ background: 'radial-gradient(40% 30% at 15% 55%, rgba(140, 90, 220, .16), transparent 70%), radial-gradient(35% 25% at 85% 80%, rgba(60, 150, 210, .12), transparent 70%)' }} />
       <canvas ref={ref} className="absolute inset-0" />
     </div>
   );

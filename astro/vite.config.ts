@@ -1,8 +1,25 @@
+import { readFileSync } from 'node:fs';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import pkg from './package.json' with { type: 'json' };
+import { buildWebClip } from './src/install/webclip.ts';
+
+// Готовый профиль Web Clip рядом с сайтом — запасной путь, если загрузка со страницы установки не сработала.
+// Нужен адрес сайта: SITE_URL=https://user.github.io/repo/astro/ npm run build
+function webClipProfile(): Plugin {
+  return {
+    name: 'astro-webclip-profile',
+    apply: 'build',
+    async generateBundle() {
+      const url = process.env.SITE_URL;
+      if (!url) return;
+      const icon = readFileSync('public/apple-touch-icon-180x180.png').toString('base64');
+      this.emitFile({ type: 'asset', fileName: 'astro.mobileconfig', source: await buildWebClip({ url, label: 'Астропрогноз', iconBase64: icon }) });
+    },
+  };
+}
 
 // «Астропрогноз» лежит в подпапке сайта «Тонуса». Офлайн-кеш «Тонуса» старых версий отдаёт на любой адрес сайта
 // свою страницу, а она грузит скрипт по относительному пути — внутри /astro/ это astro/assets/main-….js.
@@ -33,9 +50,10 @@ function tonusRescue(): Plugin {
 export default defineConfig({
   base: './',
   define: { __APP_VERSION__: JSON.stringify(pkg.version) },
-  build: { chunkSizeWarningLimit: 900 },
+  build: { chunkSizeWarningLimit: 900, rollupOptions: { input: { main: 'index.html', install: 'install.html' } } },
   worker: { format: 'es' },
   plugins: [
+    webClipProfile(),
     tonusRescue(),
     react(),
     tailwindcss(),

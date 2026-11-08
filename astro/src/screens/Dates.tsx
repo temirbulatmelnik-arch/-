@@ -22,7 +22,7 @@ function EventRow({ e }: { e: AstroEvent }) {
   const p = mskParts(e.t);
   const text = useMemo(() => (open ? eventText(e, new Composer()) : []), [open, e]);
   return (
-    <motion.article layout transition={spring} onClick={() => setOpen(o => !o)} className="glass relative flex cursor-pointer gap-3 overflow-hidden rounded-[22px] p-4">
+    <motion.article layout transition={spring} onClick={() => setOpen(o => !o)} className="oracle relative flex cursor-pointer gap-3 overflow-hidden rounded-[22px] p-4">
       <span className="absolute top-3 bottom-3 left-0 w-[4px] rounded-r-full" style={{ background: k.color, opacity: 0.4 + Math.min(1, e.weight / 3) * 0.6 }} />
       <div className="w-12 shrink-0 text-center">
         <p className="num text-[30px] leading-none font-semibold">{p.d}</p>
@@ -57,7 +57,7 @@ function EventRow({ e }: { e: AstroEvent }) {
 
 const FILTERS: { id: DateFilter; label: string }[] = [{ id: 'important', label: 'Важное' }, { id: 'me', label: 'Я' }, { id: 'dima', label: 'Дима' }, { id: 'pair', label: 'Пара' }];
 
-export function Dates() {
+export function EventList() {
   const { filter, setFilter } = useApp();
   const from = useMemo(() => { const d = new Date(); d.setUTCHours(0, 0, 0, 0); return d.getTime(); }, []);
   const { data, busy } = useAsync('ev' + from, () => askEvents(from));
@@ -76,13 +76,7 @@ export function Dates() {
   }, [list]);
   return (
     <div>
-      <header className="px-1">
-        <p className="text-[15px] text-dim">36 месяцев вперёд, расчёт на телефоне</p>
-        <h1 className="serif text-[40px] leading-[1.05] font-semibold">Даты</h1>
-      </header>
-      <div className="sticky top-0 z-20 -mx-4 mt-3 px-4 pt-safe pb-2" style={{ background: 'linear-gradient(var(--night) 70%, transparent)' }}>
-        <Segmented id="dfilter" value={filter} options={FILTERS} onChange={setFilter} />
-      </div>
+      <div className="mt-3"><Segmented id="dfilter" value={filter} options={FILTERS} onChange={setFilter} small /></div>
       {!data && busy && (
         <div className="mt-16 flex flex-col items-center gap-4 text-dim">
           <motion.div className="relative size-24" animate={{ rotate: 360 }} transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}>

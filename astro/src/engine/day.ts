@@ -9,6 +9,9 @@ import { dashaAt, vimshottari, type Dasha } from './vedic';
 import { profection, progressedLon } from './progress';
 import { Composer, headline } from '../content/compose';
 import { SHARED_POINTS } from '../content/pair';
+import { synthesizeDay, synthesizePair, type DaySynthesis, type PairSynthesis } from './synthesis';
+import { MOON_SIGN } from '../content/interpretations';
+import { SPHERES as SPH } from './scores';
 
 export interface TransitCard extends Transit { score: number; strength: number; text: string[]; houseT: number }
 
@@ -39,6 +42,10 @@ export interface TodayData {
   long: TransitCard[]; retro: { id: PointId; lon: number; station: boolean }[];
   sky: { id: PointId; lon: number; retro: boolean }[];
   context: { md: string; ad: string; adEnd: Date; prof: ReturnType<typeof profection>; progMoon: number };
+  synth: DaySynthesis;
+  /** шкалы утром, днём и вечером того же дня — как меняется день */
+  slots: Record<Sphere, number>[];
+  element: number; // стихия знака Луны: 0 огонь, 1 земля, 2 воздух, 3 вода
 }
 
 export function today(d: Date): TodayData {
@@ -52,10 +59,16 @@ export function today(d: Date): TodayData {
   const sky = MOVING.filter(id => id !== 'lilith' && id !== 'node').map(id => { const b = bodyPos(id, d); return { id, lon: b.lon, retro: b.retro }; });
   const retro = PLANETS.concat(['chiron']).map(id => bodyPos(id, d)).filter(b => b.retro || (b.station && b.id !== 'sun' && b.id !== 'moon')).map(b => ({ id: b.id, lon: b.lon, station: b.station }));
   const { md, ad } = dashaAt(dashMe, d);
+  const synth = synthesizeDay(all, sky, MOON_SIGN[moon.sign], 'me');
+  const p = new Date(d.getTime() + 3 * 3600e3);
+  const dayStart = Date.UTC(p.getUTCFullYear(), p.getUTCMonth(), p.getUTCDate()) - 3 * 3600e3;
+  const slots = [9, 14, 20].map(h => sphereScores(transitsAt(me, new Date(dayStart + h * 3600e3)).map(t => t), me));
+  void SPH;
   return {
     date: d, transits, long, scores, moon, moonHouse: houseOf(moon.lon, me.houses.cusps),
     head: headline(all, moon.vocNow), retro, sky,
     context: { md: md.lord, ad: ad.lord, adEnd: ad.end, prof: profection(ME, me, d), progMoon: progressedLon(ME, 'moon', d) },
+    synth, slots, element: moon.sign % 4,
   };
 }
 
@@ -65,6 +78,7 @@ export interface PairData {
   scores: Record<PairScale, number>; evening: Record<PairScale, number>;
   dashMe: { md: string; ad: string; adEnd: Date }; dashDima: { md: string; ad: string; adEnd: Date };
   advice: string;
+  synth: PairSynthesis;
 }
 
 export function pair(d: Date, evening: Date): PairData {
@@ -78,7 +92,9 @@ export function pair(d: Date, evening: Date): PairData {
   const eMine = transitsAt(me, evening), eHis = transitsAt(dima, evening), eComp = transitsAt(comp, evening);
   const ev = pairScores(eMine, eHis, eComp);
   const a = dashaAt(dashMe, d), b = dashaAt(dashDima, d);
+  const synth = synthesizePair(mine, his, scores, ev, shared);
   return {
+    synth,
     mine, his, comp: compT, shared, scores, evening: ev,
     dashMe: { md: a.md.lord, ad: a.ad.lord, adEnd: a.ad.end }, dashDima: { md: b.md.lord, ad: b.ad.lord, adEnd: b.ad.end },
     advice: pairAdvice(scores),

@@ -21,7 +21,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     env:
-      # адрес сайта нужен для готовых профилей iPhone (tonus.mobileconfig, linia/linia.mobileconfig, kurs/kurs.mobileconfig)
+      # адрес сайта нужен для готовых профилей iPhone (tonus.mobileconfig, linia/linia.mobileconfig, kurs/kurs.mobileconfig, astro/astro.mobileconfig)
       SITE: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
     steps:
       - uses: actions/checkout@v5
@@ -45,7 +45,7 @@ jobs:
         run: npm ci && npm test && SITE_URL="${SITE}kurs/" npm run build
       - name: Мой астропрогноз
         working-directory: astro
-        run: npm ci && npm test && npm run build
+        run: npm ci && npm test && SITE_URL="${SITE}astro/" npm run build
       - name: Выложить сайт в ветку gh-pages
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
