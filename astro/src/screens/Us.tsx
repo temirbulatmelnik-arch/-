@@ -13,6 +13,7 @@ import { GRAHA_RU } from '../engine/vedic';
 import { vedicCompat } from '../engine/compat';
 import { COMPOSITE_NOTES, OVERLAY_HIS_IN_MY, OVERLAY_MY_IN_HIS, PAIR_CORE, PAIR_PORTRAIT, GROUP_SUMMARY, synGroup } from '../content/pair';
 import { RevealTitle } from '../components/Reveal';
+import { NuanceList } from '../components/NuanceList';
 import { Composer, natureOf } from '../content/compose';
 import { DASHA_LORD } from '../content/interpretations';
 import { BinaryOrbit } from '../components/BinaryOrbit';
@@ -91,6 +92,7 @@ export function Us() {
             {data.synth.dima.map(x => <p key={x} className="text-dim">{x}</p>)}
             <p className="mt-2 font-semibold" style={{ color: 'var(--aura3)' }}>{data.synth.need}</p>
           </div>
+          {data.nuanceDima.length > 0 && <div className="mb-3"><NuanceList notes={data.nuanceDima} max={3} /></div>}
           <div className="space-y-3">
             {data.his.filter(t => t.t !== 'moon' || t.strength > 0.3).slice(0, 4).map(tr => <TransitCardView key={tr.t + tr.aspect + tr.n} tr={tr} who="dima" now={day} />)}
           </div>

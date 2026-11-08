@@ -12,6 +12,7 @@ import { SHARED_POINTS } from '../content/pair';
 import { synthesizeDay, synthesizePair, type DaySynthesis, type PairSynthesis } from './synthesis';
 import { MOON_SIGN } from '../content/interpretations';
 import { SPHERES as SPH } from './scores';
+import { applyNuance, makeCtx, type NuanceNote } from './nuance';
 
 export interface TransitCard extends Transit { score: number; strength: number; text: string[]; houseT: number }
 
@@ -24,9 +25,11 @@ export function charts() {
   return _charts;
 }
 
-function cards(natalChart: Chart, d: Date, who: 'me' | 'dima', composer: Composer, bodies?: PointId[]): TransitCard[] {
-  const trs = transitsAt(natalChart, d, { bodies });
-  return trs
+function cards(natalChart: Chart, d: Date, who: 'me' | 'dima', composer: Composer, bodies?: PointId[]): { list: TransitCard[]; notes: NuanceNote[] } {
+  const raw = transitsAt(natalChart, d, { bodies }).map(t => ({ ...t, strength: transitStrength(t) }));
+  // тонкости: хозяева времени, секта, состояние планет, рецепции, фигуры, смягчение и усиление
+  const { trs, notes } = applyNuance(raw, makeCtx(who, d));
+  const list = trs
     .map(t => ({ ...t, score: transitScore(t), strength: transitStrength(t) }))
     .sort((a, b) => b.strength - a.strength)
     .map(t => {
@@ -34,6 +37,7 @@ function cards(natalChart: Chart, d: Date, who: 'me' | 'dima', composer: Compose
       const houseT = houseOf(bodyPos(t.t, d).lon, natalChart.houses.cusps);
       return { ...e, score: t.score, strength: t.strength, houseT, text: composer.transit(e, who, houseT) };
     });
+  return { list, notes };
 }
 
 export interface TodayData {
@@ -43,6 +47,7 @@ export interface TodayData {
   sky: { id: PointId; lon: number; retro: boolean }[];
   context: { md: string; ad: string; adEnd: Date; prof: ReturnType<typeof profection>; progMoon: number };
   synth: DaySynthesis;
+  nuance: NuanceNote[];
   /** шкалы утром, днём и вечером того же дня — как меняется день */
   slots: Record<Sphere, number>[];
   element: number; // стихия знака Луны: 0 огонь, 1 земля, 2 воздух, 3 вода
@@ -51,7 +56,7 @@ export interface TodayData {
 export function today(d: Date): TodayData {
   const { me, dashMe } = charts();
   const composer = new Composer();
-  const all = cards(me, d, 'me', composer);
+  const { list: all, notes: nuance } = cards(me, d, 'me', composer);
   const long = all.filter(t => ['saturn', 'uranus', 'neptune', 'pluto'].includes(t.t));
   const transits = all.filter(t => !long.includes(t));
   const scores = sphereScores(all, me);
@@ -62,13 +67,13 @@ export function today(d: Date): TodayData {
   const synth = synthesizeDay(all, sky, MOON_SIGN[moon.sign], 'me');
   const p = new Date(d.getTime() + 3 * 3600e3);
   const dayStart = Date.UTC(p.getUTCFullYear(), p.getUTCMonth(), p.getUTCDate()) - 3 * 3600e3;
-  const slots = [9, 14, 20].map(h => sphereScores(transitsAt(me, new Date(dayStart + h * 3600e3)).map(t => t), me));
+  const slots = [9, 14, 20].map(h => { const m = new Date(dayStart + h * 3600e3); return sphereScores(applyNuance(transitsAt(me, m), makeCtx('me', m), false).trs, me); });
   void SPH;
   return {
     date: d, transits, long, scores, moon, moonHouse: houseOf(moon.lon, me.houses.cusps),
     head: headline(all, moon.vocNow), retro, sky,
     context: { md: md.lord, ad: ad.lord, adEnd: ad.end, prof: profection(ME, me, d), progMoon: progressedLon(ME, 'moon', d) },
-    synth, slots, element: moon.sign % 4,
+    synth, slots, element: moon.sign % 4, nuance,
   };
 }
 
@@ -79,22 +84,23 @@ export interface PairData {
   dashMe: { md: string; ad: string; adEnd: Date }; dashDima: { md: string; ad: string; adEnd: Date };
   advice: string;
   synth: PairSynthesis;
+  nuanceDima: NuanceNote[];
 }
 
 export function pair(d: Date, evening: Date): PairData {
   const { me, dima, comp, dashMe, dashDima } = charts();
   const composer = new Composer();
-  const mine = cards(me, d, 'me', composer);
-  const his = cards(dima, d, 'dima', composer);
+  const { list: mine } = cards(me, d, 'me', composer);
+  const { list: his, notes: nuanceDima } = cards(dima, d, 'dima', composer);
   const compT = transitsAt(comp, d).map(t => ({ ...t, score: transitScore(t), strength: transitStrength(t), houseT: 0, text: [] as string[] })).sort((a, b) => b.strength - a.strength);
   const shared = SHARED_POINTS.map(sp => ({ name: sp.name, note: sp.note, hits: mine.filter(t => t.n === sp.me).filter(t => his.some(h => h.t === t.t && h.n === sp.dima)) }));
   const scores = pairScores(mine, his, compT);
-  const eMine = transitsAt(me, evening), eHis = transitsAt(dima, evening), eComp = transitsAt(comp, evening);
+  const eMine = applyNuance(transitsAt(me, evening), makeCtx('me', evening), false).trs, eHis = applyNuance(transitsAt(dima, evening), makeCtx('dima', evening), false).trs, eComp = transitsAt(comp, evening);
   const ev = pairScores(eMine, eHis, eComp);
   const a = dashaAt(dashMe, d), b = dashaAt(dashDima, d);
   const synth = synthesizePair(mine, his, scores, ev, shared);
   return {
-    synth,
+    synth, nuanceDima,
     mine, his, comp: compT, shared, scores, evening: ev,
     dashMe: { md: a.md.lord, ad: a.ad.lord, adEnd: a.ad.end }, dashDima: { md: b.md.lord, ad: b.ad.lord, adEnd: b.ad.end },
     advice: pairAdvice(scores),

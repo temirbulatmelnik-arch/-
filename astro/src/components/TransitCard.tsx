@@ -34,6 +34,7 @@ export function TransitCardView({ tr, who = 'me', now }: { tr: T; who?: 'me' | '
             <Chip tone={tr.applying ? 'brass' : 'plain'}>{tr.exactNow ? 'точный' : tr.applying ? 'сходится' : 'расходится'}</Chip>
             <Chip>орб {fmtOrb(tr.orb)}</Chip>
             {exactLabel && !tr.exactNow && <Chip>{exactLabel}</Chip>}
+            {(tr.tags ?? []).slice(0, 3).map(tag => <Chip key={tag} tone="brass">{tag}</Chip>)}
           </div>
         </div>
       </div>

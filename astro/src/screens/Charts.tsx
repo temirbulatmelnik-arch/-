@@ -12,6 +12,7 @@ import { natalControls, transitControls, pinControls, type ControlRow } from '..
 import type { Chart } from '../engine/chart';
 import { natureOf } from '../content/compose';
 import { PORTRAIT_DIMA, PORTRAIT_ME, placementLine } from '../content/natalText';
+import { rulershipPortrait } from '../engine/nuance';
 import { ChartWheel } from '../components/ChartWheel';
 import { SouthIndian } from '../components/SouthIndian';
 import { Section, Segmented } from '../components/ui';
@@ -81,6 +82,11 @@ function Portrait({ c, who }: { c: Chart; who: 'me' | 'dima' }) {
               <div className="mt-2 space-y-2 text-[15.5px] leading-relaxed text-dim">{sct.text.map((x, k) => <p key={k} className={k === 0 ? 'text-ink' : ''}>{x}</p>)}</div>
             </motion.div>
           ))}
+        </div>
+      </Section>
+      <Section title="Управители и диспозиторы">
+        <div className="oracle rounded-[24px] p-4">
+          <ul className="space-y-2 text-[15.5px] leading-relaxed">{rulershipPortrait(c, who).map((x, i) => <li key={i} className={i < 2 ? '' : 'text-dim'}>{x}</li>)}</ul>
         </div>
       </Section>
       <Section title="Стихии и кресты">

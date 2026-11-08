@@ -19,6 +19,7 @@ import { LinkCard } from '../components/LinkCard';
 import { RevealTitle } from '../components/Reveal';
 import { Tilt } from '../components/Tilt';
 import { InstallBanner } from '../components/InstallBanner';
+import { NuanceList } from '../components/NuanceList';
 import { Segmented, Tap } from '../components/ui';
 import { GLYPH, PCOLOR } from '../components/glyphs';
 import { spring } from '../components/motion';
@@ -112,6 +113,11 @@ export function Today() {
               <ul className="mt-2 space-y-2 text-[15.5px] leading-relaxed text-dim">{data.synth.triggers.map(x => <li key={x}>{x}</li>)}</ul>
             </div>
           )}
+
+          {data.nuance.length > 0 && (<>
+            <Head sub="Что учтено сверх списка аспектов: хозяева времени, секта, состояние планет, рецепции, фигуры, смягчение и усиление">Тонкости дня</Head>
+            <NuanceList notes={data.nuance} />
+          </>)}
 
           <Head>Луна</Head>
           <section className="oracle relative overflow-hidden rounded-[28px] p-5">

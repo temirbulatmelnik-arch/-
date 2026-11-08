@@ -10,6 +10,9 @@ import { vedicChart, vimshottari, NAKSHATRAS } from './vedic';
 import { solarReturn, profection, progressedLon } from './progress';
 import { fromMsk } from './time';
 import { signOf } from './core';
+import { dispositors, dignity, makeCtx, applyNuance } from './nuance';
+import { ruledHouses } from './scores';
+import { transitsAt } from './transits';
 
 const all: ControlRow[] = [];
 const has = (hits: { a: string; b: string; aspect: string; orb: number }[], a: string, asp: string, b: string, orbMin: number, tol = 0.1) =>
@@ -95,4 +98,28 @@ describe('транзиты и даты', () => {
     writeFileSync(process.env.CONTROL_OUT ?? '/dev/null', JSON.stringify(all, null, 1));
     expect(rows.filter(r => r.status === 'fail')).toEqual([]);
   }, 60000);
+});
+
+describe('тонкости', () => {
+  test('управители, диспозиторы, секта, достоинства, хозяева времени', () => {
+    const m = natal(ME), d = natal(DIMA);
+    expect(dispositors(m).final).toBe('venus');
+    expect(dispositors(d).final).toBe('jupiter');
+    expect(ruledHouses(m, 'venus')).toEqual([5, 10]);
+    expect(ruledHouses(m, 'mercury')).toEqual(expect.arrayContaining([7, 9]));
+    expect(ruledHouses(m, 'sun')).toEqual([8]);
+    expect(m.day).toBe(false); expect(d.day).toBe(false);
+    expect(dignity('saturn', 0)).toBe('fall'); expect(dignity('venus', 6)).toBe('domicile'); expect(dignity('jupiter', 5)).toBe('detriment');
+    const ctx = makeCtx('me', fromMsk(2026, 11, 8, 14));
+    expect(ctx.lords.year).toBe('venus'); expect(ctx.lords.md).toBe('mercury'); expect(ctx.lords.ad).toBe('jupiter');
+  });
+  test('поправки силы и заметки', () => {
+    const t = fromMsk(2027, 7, 6, 14);
+    const r = applyNuance(transitsAt(natal(ME), t), makeCtx('me', t));
+    const sat = r.trs.find(x => x.t === 'saturn' && x.aspect === 'opp' && x.n === 'mc')!;
+    expect(sat.tags).toEqual(expect.arrayContaining(['в падении', 'вредитель вне секты']));
+    expect(r.notes.some(n => n.kind === 'soften' && n.title.includes('Юпитер'))).toBe(true);
+    expect(r.notes.some(n => n.kind === 'lords')).toBe(true);
+    expect(r.trs.every(x => x.mult! >= 0.5 && x.mult! <= 2.1)).toBe(true);
+  });
 });

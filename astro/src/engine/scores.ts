@@ -51,7 +51,7 @@ export function transitStrength(tr: Transit): number {
   const max = transitOrb(tr.aspect, tr.t);
   const close = Math.max(0, 1 - tr.orb / max);
   const minor = ASPECT[tr.aspect].major && tr.aspect !== 'quincunx' ? 1 : 0.5;
-  return (PW[tr.t] ?? 1) * (0.35 + 0.65 * Math.pow(close, 0.7)) * minor * (tr.exactNow ? 1.15 : 1);
+  return (PW[tr.t] ?? 1) * (0.35 + 0.65 * Math.pow(close, 0.7)) * minor * (tr.exactNow ? 1.15 : 1) * (tr.mult ?? 1);
 }
 
 const REL_DIMA: Partial<Record<PointId, Partial<Record<Sphere, number>>>> = {
@@ -64,19 +64,36 @@ let _houses: { me: Chart; dima: Chart } | null = null;
 export function relevanceOf(tr: Transit, s: Sphere, who: 'me' | 'dima'): number {
   if (!_houses) _houses = { me: natal(ME), dima: natal(DIMA) };
   const rel = who === 'me' ? REL_ME : REL_DIMA;
-  const house = _houses[who].points[tr.n]?.house ?? 0;
-  return Math.min(1.3, (rel[tr.n]?.[s] ?? 0) + (REL_HOUSE[house]?.[s] ?? 0) * 0.6 + (REL_TRANSIT[tr.t]?.[s] ?? 0));
+  return relevanceIn(tr, s, _houses[who], rel);
 }
 
-export function sphereScores(trs: Transit[], natal: Chart, rel = REL_ME): Record<Sphere, number> {
+/** управления: планета отвечает и за дома, которыми управляет (по знакам на куспидах) */
+const TRAD = ['mars', 'venus', 'mercury', 'moon', 'sun', 'mercury', 'venus', 'mars', 'jupiter', 'saturn', 'saturn', 'jupiter'];
+const MODERN: Record<number, string> = { 7: 'pluto', 10: 'uranus', 11: 'neptune' };
+const _ruled = new WeakMap<Chart, Record<string, number[]>>();
+export function ruledHouses(c: Chart, planet: string): number[] {
+  let m = _ruled.get(c);
+  if (!m) {
+    m = {};
+    c.houses.cusps.forEach((cusp, i) => {
+      const sg = Math.floor((((cusp % 360) + 360) % 360) / 30);
+      for (const r of [TRAD[sg], MODERN[sg]].filter(Boolean)) (m![r] ??= []).push(i + 1);
+    });
+    _ruled.set(c, m);
+  }
+  return m[planet] ?? [];
+}
+function relevanceIn(tr: Transit, s: Sphere, c: Chart, rel: Partial<Record<PointId, Partial<Record<Sphere, number>>>>): number {
+  const house = c.points[tr.n]?.house ?? 0;
+  const ruled = ruledHouses(c, tr.n).reduce((a, h) => a + (REL_HOUSE[h]?.[s] ?? 0), 0);
+  return Math.min(1.4, (rel[tr.n]?.[s] ?? 0) + (REL_HOUSE[house]?.[s] ?? 0) * 0.6 + Math.min(0.5, ruled * 0.35) + (REL_TRANSIT[tr.t]?.[s] ?? 0));
+}
+
+export function sphereScores(trs: Transit[], natal: Chart, rel: Partial<Record<PointId, Partial<Record<Sphere, number>>>> = natal.person?.id === 'dima' ? REL_DIMA : REL_ME): Record<Sphere, number> {
   const acc: Record<Sphere, number> = { work: 0, money: 0, love: 0, sex: 0, health: 0 };
   for (const tr of trs) {
     const v = valence(tr.aspect, tr.t) * transitStrength(tr);
-    const house = natal.points[tr.n]?.house ?? 0;
-    for (const s of Object.keys(acc) as Sphere[]) {
-      const r = Math.min(1.3, (rel[tr.n]?.[s] ?? 0) + (REL_HOUSE[house]?.[s] ?? 0) * 0.6 + (REL_TRANSIT[tr.t]?.[s] ?? 0));
-      acc[s] += v * r;
-    }
+    for (const s of Object.keys(acc) as Sphere[]) acc[s] += v * relevanceIn(tr, s, natal, rel);
   }
   for (const s of Object.keys(acc) as Sphere[]) acc[s] = Math.round(2 * Math.tanh(acc[s] / 2.2) * 10) / 10;
   return acc;

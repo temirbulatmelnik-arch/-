@@ -8,6 +8,14 @@ import { CONFIGS_DIMA, CONFIGS_ME, type Config } from '../content/synthText';
 import { ASPECT_TONE, PERIOD_KIND, PERIOD_SOFT, PERIOD_SPECIAL, PROFECTION_YEAR, YEAR_SIGN } from '../content/periodText';
 import type { Sphere } from './scores';
 import { fmtDay } from './time';
+import { natal, ME, DIMA } from './chart';
+import { profection } from './progress';
+import { dashaAt, vimshottari } from './vedic';
+
+const _nat = { me: natal(ME), dima: natal(DIMA) };
+const _ds = { me: vimshottari(_nat.me), dima: vimshottari(_nat.dima) };
+const GRAHA_PT: Record<string, string> = { rahu: 'node', ketu: 'snode' };
+const FEM = new Set(['moon', 'venus']);
 
 export interface Period {
   id: string; who: 'me' | 'dima' | 'pair'; tp: string; start: number; end: number; title: string; kind: string;
@@ -94,7 +102,21 @@ function makePeriod(who: 'me' | 'dima', tp: string, cfg: string, items: Story[])
     ASPECT_TONE[items[0].a] ?? '',
   ].filter(Boolean);
   if (peaks.length > 1) text.push(`Пики: ${peaks.map(p => fmtDay(p, true)).join(', ')} — ${peaks.length > 2 ? 'ретроградные петли делают это одной историей' : 'два прохода одной истории'}.`);
-  const intensity = items.reduce((s, i) => s + i.weight, 0) * (items.length > 1 ? 1.15 : 1);
+  let intensity = items.reduce((s, i) => s + i.weight, 0) * (items.length > 1 ? 1.15 : 1);
+  // хозяева времени: профекция и даши в середине периода усиливают тему
+  const mid = new Date((start + end) / 2);
+  const prof = profection(who === 'me' ? ME : DIMA, _nat[who], mid);
+  const { ad } = dashaAt(_ds[who], mid);
+  const adPt = GRAHA_PT[ad.lord] ?? ad.lord;
+  const pts = new Set(items.map(i => i.n));
+  if (pts.has(prof.lord) || tp === prof.lord) {
+    intensity *= 1.25;
+    text.push(`В середине периода ${PL_NOM[prof.lord]} — ${FEM.has(prof.lord) ? 'хозяйка' : 'хозяин'} года по профекции (${prof.age}-й год): тема звучит сильнее обычного.`);
+  }
+  if (pts.has(adPt as PointId) || tp === adPt) {
+    intensity *= 1.15;
+    text.push(`Это совпадает с ведическим подпериодом ${PL_NOM[adPt] ?? adPt} — событие с большой вероятностью проявится в жизни, а не только внутри.`);
+  }
   return {
     id: `${who}:${tp}:${cfg}:${start}`, who, tp, start, end, title: sp?.title ?? `${kind.name}: ${c?.name ?? cap(pointRu(items[0].n, who))}`, kind: kind.name, tone, intensity,
     spheres: c?.spheres ?? [], aspects, peaks, text, do: sp?.do ?? kind.do, avoid: sp?.avoid ?? kind.avoid,
