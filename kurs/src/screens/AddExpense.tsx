@@ -192,7 +192,8 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
           );
         })}
       </div>
-      {value > 0 && !!category && !drag && !edit && <p className="-mt-1.5 text-center text-[11.5px] text-faint">Потяните сумму в «Свои», «В долг» или «Резерв» — запишется сразу</p>}
+      {/* подсказка не исчезает во время жеста: иначе сосуды съезжали бы из-под пальца */}
+      {value > 0 && !!category && !edit && <p className={`-mt-1.5 text-center text-[11.5px] text-faint ${drag ? 'invisible' : ''}`}>Потяните сумму в «Свои», «В долг» или «Резерв» — запишется сразу</p>}
       {drag && createPortal(
         <div className="pointer-events-none fixed z-[90] -translate-x-1/2 -translate-y-[130%] rounded-full bg-ink px-4 py-2 text-bg shadow-[0_14px_30px_-10px_rgba(4,14,22,.7)]" style={{ left: drag.x, top: drag.y }}>
           <span className="figure text-[20px]"><Money value={value} /></span>

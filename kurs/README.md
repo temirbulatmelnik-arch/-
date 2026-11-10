@@ -102,7 +102,18 @@
   резерв — `ReserveSheet`.
 - **Метки источника** — `ExpenseRow` в `components/rows.tsx` («в долг», «резерв»), раскладка месяца и цветные
   фильтры — `screens/Budget.tsx`.
-- Знакомство (`screens/Tour.tsx`, `TOUR_VERSION = 5`) один раз показывает слайд «Свои, в долг и резерв».
+- **Следующий шаг, быстрые траты, плитки-входы** — `components/Home.tsx` (`NextStep`, `QuickSpends`, `flyCoin`,
+  `EntryTiles`); шаги собираются в `screens/Week.tsx`; частые траты и «как вчера» — `domain/quick.ts` (тест «быстрые
+  траты»). «Отменить» — `withUndo` в `store/ui.ts`: снимок трат, отметок, долгов и резерва, сообщение держится 5 секунд.
+- **Навигация** — `components/TabBar.tsx`: две вкладки и «+» (`BAR`); `budget` и `plan` остаются вкладками по
+  устройству (собраны и скрыты), но открываются плитками с «Сегодня», подсвечено «Сегодня», в шапке — `back` у
+  `SkyHeader`. «Впереди» — `screens/Payments.tsx`: `Pager` «Лента / Месяц», ответ «хватит ли» — кнопка над ним, по
+  нажатию `CoverView` в листе; в ленте строка «Траты дня».
+- **Жесты** — кольцо «а если потрачу» (`DayRing`: `onScrub`, `onCommit`), сумма в сосуд (`AddExpense`: `dragHandlers`,
+  подсказка во время жеста не исчезает — иначе сосуды съезжают из-под пальца), круг по воде в сосуде (`Wallets`).
+- **Сверка по шагам** — `screens/Checkup.tsx` (`step`, `filled`); **«Вставить из банка»** — `screens/Import.tsx`
+  (`pasteBank`, `reviewFromText`); **обмен в два касания** — `screens/Sync.tsx` (`pasteAnswer`).
+- Знакомство (`screens/Tour.tsx`, `TOUR_VERSION = 5`) один раз показывает, что изменилось и куда что переехало.
 
 ## Скорость
 
