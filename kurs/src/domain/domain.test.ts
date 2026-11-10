@@ -16,6 +16,7 @@ import { parseStatementText, isIncomeLine } from './pdf';
 import { weekReport, weekToClose } from './weekly';
 import { dayBudget, weekSummary } from './summary';
 import { bridgeState, weekMoney, weekParts, type Bridge } from './bridge';
+import { bySource, spendEffect, suggestSource } from './sources';
 import { isWorkday, workdayOnOrBefore } from './workdays';
 import { draft } from './statements';
 import { parseCsv, parseText } from './statements';
@@ -663,6 +664,33 @@ describe('мост на кредитке', () => {
     expect(previewExchange(normalize(parseExchange(JSON.stringify(out))!, after), after, '2026-11-03')).toEqual([]);
     const closed = applyExchange(normalize(parseExchange(JSON.stringify({ app: 'kurs-exchange', version: 2, bridge: { closed: true } }))!, after), after, '2026-11-03', new Set(['bridge' as const]), () => 'z');
     expect(closed.bridge!.closed).toBe(true);
+  });
+
+  it('откуда деньги: что предложить и что будет после записи траты', () => {
+    // прошлые недели потрачены целиком — остатка на карте нет; неделя 09.11: лимит 8 000, мост до 4 000, на карте 4 000
+    const past = [exp('p1', '2026-10-27', 8400), exp('p2', '2026-11-03', 8000)];
+    const st = (more: Expense[] = []) => ({ expenses: [...past, ...more], debts: DEBTS, weeklyOverrides: ov, bridge });
+    const at = { date: '2026-11-11', now: '2026-11-11', reserve: 50_000 };
+    const eff = (...a: Parameters<typeof spendEffect>) => { const e = spendEffect(...a); return { tone: e.tone, text: e.text.replace(/\s/g, ' ') }; };
+    // пока на карте есть недельные деньги — свои; карта пуста, мост есть — кредитка моста; мост выбран — снова свои
+    expect(suggestSource(st(), '2026-11-11')).toBe('life');
+    expect(suggestSource(st([exp('a', '2026-11-10', 4000)]), '2026-11-11')).toBe('credit');
+    expect(suggestSource(st([exp('a', '2026-11-10', 4000), exp('b', '2026-11-10', 4000, 'credit')]), '2026-11-11')).toBe('life');
+    // без моста кредитку не предлагаем никогда
+    expect(suggestSource({ ...st([exp('a', '2026-11-10', 9000)]), bridge: null }, '2026-11-11')).toBe('life');
+    // свои: в пределах нормы дня; сверх нормы дня; сверх лимита недели
+    expect(eff(st(), { ...at, amount: 500, source: 'life' })).toEqual({ tone: 'ok', text: 'На сегодня останется 1 100 ₽' });
+    expect(eff(st(), { ...at, amount: 3000, source: 'life' })).toEqual({ tone: 'warn', text: 'Сегодня сверх нормы на 1 400 ₽, на неделю останется 5 000 ₽' });
+    expect(eff(st(), { ...at, amount: 9000, source: 'life' })).toEqual({ tone: 'neg', text: 'Сверх лимита недели на 1 000 ₽' });
+    // в долг: по мосту — сколько станет из общего лимита; сверх плана недели; сверх лимита — новый долг; без моста — нарушение
+    expect(eff(st(), { ...at, amount: 1500, source: 'credit' })).toEqual({ tone: 'loan', text: 'В долг по мосту: станет 1 500 ₽ из 7 782 ₽' });
+    expect(eff(st(), { ...at, amount: 4500, source: 'credit' })).toEqual({ tone: 'warn', text: 'В долг сверх плана моста на неделю на 500 ₽' });
+    expect(eff(st(), { ...at, amount: 8500, source: 'credit' })).toEqual({ tone: 'neg', text: 'Сверх лимита недели на 500 ₽ — это уже новый долг' });
+    expect(eff({ ...st(), bridge: null }, { ...at, amount: 100, source: 'credit' }).tone).toBe('neg');
+    // резерв: остаток резерва, в лимит не входит; правка траты не считает её прежнюю сумму
+    expect(eff(st(), { ...at, amount: 1000, source: 'reserve' })).toEqual({ tone: 'rsv', text: 'Из резерва: останется 49 000 ₽. В лимит недели не входит' });
+    expect(spendEffect(st([exp('e', '2026-11-11', 700)]), { ...at, amount: 700, source: 'life', skipId: 'e' })).toEqual(spendEffect(st(), { ...at, amount: 700, source: 'life' }));
+    expect(bySource([exp('a', '2026-11-10', 100), exp('b', '2026-11-10', 40, 'credit'), exp('c', '2026-11-10', 7, 'reserve')])).toEqual({ life: 100, credit: 40, reserve: 7 });
   });
 
   it('строка «Неделя»: свои + в долг по мосту + сверх лимита = потрачено; перерасход сначала на кредитку', () => {

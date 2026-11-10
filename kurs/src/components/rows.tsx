@@ -1,7 +1,7 @@
 // Общие строки списков: трата, событие календаря, предупреждение.
 import { AlertTriangle, ArrowDownLeft, Check, ChevronRight, CreditCard, Info, PiggyBank, Receipt, Repeat, Sparkles, Wallet } from 'lucide-react';
 import { motion } from 'motion/react';
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { eventGroup, urgency, type EventGroup } from '../domain/calendar';
 import { ddmm, relDays, weekday } from '../domain/dates';
 import { CATEGORY } from '../domain/plan';
@@ -16,18 +16,23 @@ export function ExpenseRow({ e, onClick }: { e: Expense; onClick?: () => void })
       <CatIcon id={e.category} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[14.5px] font-medium">{e.note || c.short}</span>
-        <span className="flex items-center gap-1.5 text-[12px] text-muted">
+        <span className="block truncate text-[12px] text-muted">
           {weekday(e.date)}, {ddmm(e.date)}, {c.short.toLowerCase()}
-          {e.source === 'credit' && <span className="inline-flex items-center gap-0.5 font-medium text-neg"><CreditCard size={11} /> кредитка</span>}
-          {e.source === 'reserve' && <span className="inline-flex items-center gap-0.5 text-info"><PiggyBank size={11} /> резерв</span>}
         </span>
       </span>
-      <Money value={e.amount} className={`shrink-0 text-[15px] ${e.source === 'credit' ? 'text-neg' : ''}`} />
+      {/* откуда деньги: свои — без метки, в долг — сирень, из резерва — сумерки (как на полосе недели) */}
+      <span className="flex shrink-0 flex-col items-end gap-0.5">
+        <Money value={e.amount} className="text-[15px]" />
+        {e.source === 'credit' && <span className="src-loan inline-flex items-center gap-1 rounded-full px-1.5 py-px text-[10.5px] font-medium"><CreditCard size={10} strokeWidth={2} />в долг</span>}
+        {e.source === 'reserve' && <span className="src-rsv inline-flex items-center gap-1 rounded-full px-1.5 py-px text-[10.5px] font-medium"><PiggyBank size={10} strokeWidth={2} />резерв</span>}
+      </span>
     </button>
   );
 }
 
 export const GROUP_ICON: Record<EventGroup, typeof Wallet> = { debt: CreditCard, fixed: Repeat, income: ArrowDownLeft, weekly: Wallet, other: Receipt };
+/** цвет события по смыслу: кредит — закат, обязательный — сумерки, поступление — отмель, пополнение — Нева */
+export const GROUP_COLOR: Record<EventGroup, string> = { debt: 'var(--mark-out)', fixed: 'var(--rsv)', income: 'var(--mark-in)', weekly: 'var(--own)', other: '#d99a1c' };
 export const GROUP_LABEL: Record<EventGroup, string> = { debt: 'кредит', fixed: 'обязательный', income: 'поступление', weekly: 'пополнение карты', other: 'разовый' };
 
 export function whenText(e: CalEvent) {
@@ -45,10 +50,11 @@ export function EventRow({ e, mark, now, onClick, onToggle, showDate = true }: {
   return (
     <div className={`flex items-center gap-3 px-4 py-3 ${u === 'done' ? 'opacity-55' : ''}`}>
       <button type="button" onClick={onToggle ?? onClick} aria-label={mark?.done ? 'Снять отметку' : g === 'income' ? 'Отметить: пришло' : g === 'weekly' ? 'Отметить: долито' : 'Отметить: оплачено'}
-        className={`grid size-10 shrink-0 place-items-center rounded-full border transition ${mark?.done ? 'border-transparent bg-pos/15 text-pos' : hot ? 'border-neg/50 text-neg' : 'border-line text-muted'}`}>
+        className={`dot-tile size-10 transition ${mark?.done ? '!bg-pos !text-white' : hot ? 'ring-[1.5px] ring-neg/60' : ''}`}
+        style={{ '--c': hot && !mark?.done ? 'var(--neg)' : GROUP_COLOR[g] } as CSSProperties}>
         {mark?.done
-          ? <motion.span initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: 'spring', bounce: 0.4, duration: 0.35 }}><Check size={17} strokeWidth={2} /></motion.span>
-          : <Icon size={17} strokeWidth={1.5} />}
+          ? <motion.span initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: 'spring', bounce: 0.4, duration: 0.35 }}><Check size={18} strokeWidth={2.4} /></motion.span>
+          : <Icon size={18} strokeWidth={1.7} />}
       </button>
       <button type="button" onClick={onClick} className="flex min-w-0 flex-1 items-center gap-3 text-left">
         <span className="min-w-0 flex-1">

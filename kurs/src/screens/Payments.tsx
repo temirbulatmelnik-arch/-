@@ -333,7 +333,7 @@ function ListView({ month, events, total, incomes }: { month: string; events: Ca
 
   return (
     <>
-      <section className="deep-card mx-4 mt-4 px-5 py-4">
+      <section className="deep-card deep-sunset mx-4 mt-4 px-5 py-4">
         <div className="flex items-baseline justify-between text-[12.5px] text-card-muted">
           <span>Платежей в месяце</span>
           <span>оплачено <Money value={paid} className="text-card" /></span>

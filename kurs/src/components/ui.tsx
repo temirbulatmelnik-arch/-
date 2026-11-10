@@ -1,6 +1,6 @@
 import { animate, AnimatePresence, motion, useMotionValue } from 'motion/react';
 import { CarTaxiFront, Cigarette, Coffee, Pill, Repeat, Sandwich, Scissors, ShoppingBag, ShoppingBasket, TramFront, X, type LucideIcon } from 'lucide-react';
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 import { num } from '../domain/money';
 import type { CategoryId } from '../domain/types';
 import { usePan } from './motion';
@@ -26,16 +26,21 @@ export const CATEGORY_ICON: Record<CategoryId, LucideIcon> = {
   shopping: ShoppingBag, beauty: Scissors, tobacco: Cigarette, fun: Coffee, fixed: Repeat,
 };
 
-/** Цвета категорий: вода, закат, отмель и сумерки Петербурга — различимы и в светлой, и в тёмной теме */
+/** Цвета категорий (версия 0.3): у каждой свой яркий цвет — список трат читается по цвету, не по подписи.
+ *  Различимы и в светлой, и в тёмной теме; на плитке значок белый */
 export const CAT_COLOR: Record<CategoryId, string> = {
-  groceries: '#2f86a8', work: '#58b4c9', taxi: '#d6a33a', transport: '#23a383', health: '#5fb898',
-  shopping: '#7c8fc0', beauty: '#c77a9e', tobacco: '#9a7b62', fun: '#ee6125', fixed: '#8a9ba5',
+  groceries: '#2ba36a', work: '#f08a3c', taxi: '#e9aa1c', transport: '#2f86d6', health: '#e5527a',
+  shopping: '#8b63e0', beauty: '#e069b0', tobacco: '#8c7a6b', fun: '#f0603a', fixed: '#5b6fb8',
 };
 
-export function CatIcon({ id, className = '' }: { id: CategoryId; className?: string }) {
+/** Цветная плитка со значком: c — цвет (hex или var) */
+export function Tile({ c, children, className = 'size-10' }: { c: string; children: ReactNode; className?: string }) {
+  return <span className={`tile ${className}`} style={{ '--c': c } as CSSProperties}>{children}</span>;
+}
+
+export function CatIcon({ id, className = 'size-10' }: { id: CategoryId; className?: string }) {
   const Icon = CATEGORY_ICON[id];
-  const c = CAT_COLOR[id];
-  return <span className={`grid size-10 shrink-0 place-items-center rounded-full ${className}`} style={{ background: `${c}24`, color: c }}><Icon size={18} strokeWidth={1.6} /></span>;
+  return <Tile c={CAT_COLOR[id]} className={className}><Icon size={19} strokeWidth={1.9} /></Tile>;
 }
 
 /* ---------- Кнопки ---------- */
@@ -52,7 +57,7 @@ export function IconButton({ onClick, label, children, className = '' }: { onCli
 export function PrimaryButton({ onClick, children, className = '', disabled, tone = 'sea' }: {
   onClick: () => void; children: ReactNode; className?: string; disabled?: boolean; tone?: 'sea' | 'ink' | 'neg';
 }) {
-  const tones = { sea: 'bg-sea text-on-sea', ink: 'bg-ink text-bg', neg: 'bg-neg text-white' };
+  const tones = { sea: 'btn-sea', ink: 'bg-ink text-bg', neg: 'bg-neg text-white' };
   return (
     <motion.button type="button" whileTap={{ scale: 0.97 }} transition={{ duration: 0.12, ease: [0.23, 1, 0.32, 1] }} onClick={onClick} disabled={disabled}
       className={`flex h-[52px] w-full items-center justify-center gap-2 rounded-[18px] text-[15.5px] font-medium disabled:opacity-35 ${tones[tone]} ${className}`}>

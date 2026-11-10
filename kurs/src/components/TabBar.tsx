@@ -2,7 +2,7 @@
 // Удержание «плюса» раскрывает веер: из банка, сверка, чат «Финансы», премия.
 import { AnimatePresence, motion } from 'motion/react';
 import { Anchor, CalendarDays, Gift, MessagesSquare, Plus, ReceiptText, Scale, ScanText } from 'lucide-react';
-import { useRef, useState, type ComponentType } from 'react';
+import { useRef, useState, type ComponentType, type CSSProperties } from 'react';
 import { today } from '../domain/dates';
 import { weekToClose } from '../domain/weekly';
 import { useStore } from '../store/store';
@@ -32,11 +32,13 @@ const COL: Record<Tab, number> = { week: 0, payments: 1, budget: 3, plan: 4 };
 const HOLD_MS = 420;
 const RING = 2 * Math.PI * 34;
 
-const FAN: { id: string; label: string; icon: Icon; angle: number }[] = [
-  { id: 'scan', label: 'Из банка', icon: ScanText, angle: 160 },
-  { id: 'checkup', label: 'Сверка', icon: Scale, angle: 122 },
-  { id: 'sync', label: 'Чат', icon: MessagesSquare, angle: 58 },
-  { id: 'bonus', label: 'Премия', icon: Gift, angle: 20 },
+/** Быстрые действия с данными — одни и те же цвета в веере «плюса» и на «Сегодня» */
+export const QUICK_COLOR: Record<string, string> = { scan: '#1f8fb0', checkup: '#5b6fb8', sync: '#8b63e0', bonus: '#e9a01c' };
+const FAN: { id: string; label: string; icon: Icon; angle: number; color: string }[] = [
+  { id: 'scan', label: 'Из банка', icon: ScanText, angle: 160, color: QUICK_COLOR.scan },
+  { id: 'checkup', label: 'Сверка', icon: Scale, angle: 122, color: QUICK_COLOR.checkup },
+  { id: 'sync', label: 'Чат', icon: MessagesSquare, angle: 58, color: QUICK_COLOR.sync },
+  { id: 'bonus', label: 'Премия', icon: Gift, angle: 20, color: QUICK_COLOR.bonus },
 ];
 
 export function runQuick(id: string) {
@@ -104,7 +106,7 @@ export function TabBar() {
                       exit={{ x: 0, y: 0, scale: 0.6, opacity: 0, transition: { duration: 0.14, ease: ease.out } }}
                       transition={{ ...fling, delay: i * 0.03 }}
                       className="absolute bottom-[38px] left-1/2 -ml-[34px] flex w-[68px] flex-col items-center gap-1.5">
-                      <span className="grid size-[58px] place-items-center rounded-full border border-white/40 bg-surface text-sea shadow-[0_12px_28px_-10px_rgba(4,14,22,.6)]"><f.icon size={23} strokeWidth={1.6} /></span>
+                      <span className="tile size-[58px] !rounded-full" style={{ '--c': f.color } as CSSProperties}><f.icon size={24} strokeWidth={1.8} /></span>
                       <span className="rounded-full bg-black/40 px-2 py-0.5 text-[12px] font-medium whitespace-nowrap text-white backdrop-blur">{f.label}</span>
                     </motion.button>
                   );
@@ -117,12 +119,12 @@ export function TabBar() {
 
       <nav className="pb-safe pointer-events-none fixed inset-x-0 bottom-0 z-40" aria-label="Разделы">
         <div className="pointer-events-auto relative mx-auto mb-2.5 w-[min(94%,404px)]">
-          <div className="glass relative grid grid-cols-5 items-end rounded-[28px] border border-line bg-surface/85 p-1.5 shadow-[0_16px_40px_-14px_rgba(4,14,22,.45)] backdrop-blur-xl backdrop-saturate-150">
+          <div className="bar-glass relative grid grid-cols-5 items-end rounded-[28px] p-1.5">
             {/* подложка активной вкладки едет за пальцем обычным CSS-переходом: только transform, на видеокарте.
                 Раньше это была общая layout-анимация motion — она пересчитывала положение сотен элементов страницы
                 при каждом переключении и давала заметную задержку */}
-            <span aria-hidden="true" className="pointer-events-none absolute inset-y-1.5 left-1.5 w-[calc((100%-12px)/5)] rounded-[22px] bg-surface-2 transition-transform duration-[380ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none"
-              style={{ transform: `translateX(${COL[tab] * 100}%)` }} />
+            <span aria-hidden="true" className="pointer-events-none absolute inset-y-1.5 left-1.5 w-[calc((100%-12px)/5)] rounded-[22px] transition-transform duration-[380ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none"
+              style={{ transform: `translateX(${COL[tab] * 100}%)`, background: 'var(--bar-pill)' }} />
             {TABS.slice(0, 2).map(tabButton)}
             <span aria-hidden="true" />
             {TABS.slice(2).map(tabButton)}
@@ -130,10 +132,10 @@ export function TabBar() {
           <motion.button type="button" aria-label={fan ? 'Закрыть' : 'Записать трату. Удерживайте — ещё действия'}
             onPointerDown={down} onPointerUp={up} onPointerLeave={cancel} onPointerCancel={cancel} onContextMenu={e => e.preventDefault()}
             whileTap={{ scale: 0.94 }} transition={snappy}
-            className="absolute -top-[22px] left-1/2 grid size-[62px] -translate-x-1/2 place-items-center rounded-full bg-sea text-on-sea shadow-[0_14px_30px_-10px_rgba(31,111,143,.75),inset_0_1px_0_rgba(255,255,255,.35)] ring-[5px] ring-bg select-none [-webkit-touch-callout:none]">
+            className="sun absolute -top-[22px] left-1/2 grid size-[62px] -translate-x-1/2 place-items-center rounded-full select-none [-webkit-touch-callout:none]">
             {/* кольцо удержания: линейно, пока держат (это прогресс), назад — быстро */}
             <svg viewBox="0 0 72 72" className="pointer-events-none absolute -inset-[5px] size-[72px] -rotate-90" aria-hidden="true">
-              <circle cx="36" cy="36" r="34" fill="none" strokeWidth="3" strokeLinecap="round" stroke="var(--card-sea)"
+              <circle cx="36" cy="36" r="34" fill="none" strokeWidth="3" strokeLinecap="round" stroke="#fff"
                 strokeDasharray={RING} style={{ strokeDashoffset: holding ? 0 : RING, transition: holding ? `stroke-dashoffset ${HOLD_MS}ms linear` : 'stroke-dashoffset 160ms var(--ease-out)' }} />
             </svg>
             <motion.span animate={{ rotate: fan ? 135 : 0 }} transition={{ type: 'spring', bounce: 0.25, duration: 0.4 }}><Plus size={28} strokeWidth={2.2} /></motion.span>

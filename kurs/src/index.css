@@ -75,6 +75,24 @@
   --pill: rgba(255, 248, 242, .42); --pill-border: rgba(255, 255, 255, .6);
   /* заёмные деньги (мост на кредитке) — фиолетовым, как штриховка кредитки на полосе недели */
   --loan-ink: #6b3fa0;
+  /* версия 0.3: деньги по источнику. Свои — Нева (сплошная вода), в долг — сирень (штриховка: чужие деньги),
+     резерв — сумерки. Списания — закат, поступления — отмель */
+  --own: #1f6f8f; --own-2: #46a6c9; --own-soft: rgba(31, 111, 143, .12);
+  --loan: #7347c9; --loan-2: #b06ef3; --loan-soft: rgba(123, 79, 208, .12);
+  --rsv: #4b57a0; --rsv-2: #8493dc; --rsv-soft: rgba(75, 87, 160, .13);
+  --loan-hatch: repeating-linear-gradient(135deg, #c77dff 0 5px, #9b5de5 5px 10px);
+  --over-hatch: repeating-linear-gradient(135deg, #f0733d 0 5px, #c9471a 5px 10px);
+  /* «солнце» — кнопка «+»: главное действие, запись траты */
+  --sun: radial-gradient(120% 120% at 30% 18%, #ffd08a 0%, #ff9a4c 38%, #ec5f2c 78%, #d44a1f 100%);
+  --sun-shadow: 0 14px 30px -10px rgba(236, 95, 44, .75), 0 2px 6px rgba(236, 95, 44, .3), inset 0 1px 0 rgba(255, 255, 255, .55);
+  /* главные блоки вкладок: вода — траты и прогноз, закат — платежи, сумерки — долги */
+  --deep-sea: radial-gradient(110% 70% at 88% -8%, rgba(255, 200, 150, .34) 0%, rgba(255, 200, 150, 0) 58%), linear-gradient(172deg, #2e95ba 0%, #1c6f90 46%, #0f4560 100%);
+  --deep-sunset: radial-gradient(90% 70% at 86% -6%, rgba(255, 226, 160, .55) 0%, rgba(255, 226, 160, 0) 60%), linear-gradient(168deg, #f2804c 0%, #cf5568 50%, #6c4089 100%);
+  --deep-dusk: radial-gradient(70% 60% at 84% 4%, rgba(255, 236, 200, .3) 0%, rgba(255, 236, 200, 0) 60%), linear-gradient(172deg, #4c5cb8 0%, #333a8a 50%, #1c1f55 100%);
+  --btn-sea: linear-gradient(180deg, #3391b6 0%, #1f6f8f 100%);
+  --btn-sea-shadow: 0 12px 22px -14px rgba(31, 111, 143, .9), inset 0 1px 0 rgba(255, 255, 255, .28);
+  /* стекло нижней панели */
+  --bar-glass: rgba(246, 250, 252, .66); --bar-edge: rgba(255, 255, 255, .7); --bar-pill: rgba(31, 111, 143, .12);
   /* стопка карточек «Недели»: сегодня — Нева, платежи — закат, дела — золото, резерв — сумерки */
   --stack-today: linear-gradient(155deg, #dcedf4, #c9e2ec 70%); --stack-today-line: #b5d3df; --stack-today-kicker: #1f6f8f;
   --stack-ahead: linear-gradient(155deg, #f6e2db, #eed0c7 70%); --stack-ahead-line: #e2b9ad; --stack-ahead-kicker: #b8401a;
@@ -127,6 +145,17 @@
   --ring-ink: #f2f6f8; --ring-label: #b9c6d6; --ring-neg: #ff9a70;
   --pill: rgba(14, 26, 48, .55); --pill-border: rgba(255, 255, 255, .18);
   --loan-ink: #c9a7f5;
+  --own: #45a9cb; --own-2: #7fd0ea; --own-soft: rgba(69, 169, 203, .16);
+  --loan: #b997f5; --loan-2: #c77dff; --loan-soft: rgba(176, 110, 243, .18);
+  --rsv: #a9b8ea; --rsv-2: #8493dc; --rsv-soft: rgba(132, 147, 220, .18);
+  --sun: radial-gradient(120% 120% at 30% 18%, #ffd79a 0%, #ffa257 38%, #f06a35 78%, #cf4c22 100%);
+  --sun-shadow: 0 14px 34px -10px rgba(255, 123, 66, .7), 0 0 0 1px rgba(255, 255, 255, .08), inset 0 1px 0 rgba(255, 255, 255, .5);
+  --deep-sea: radial-gradient(110% 70% at 88% -8%, rgba(255, 170, 120, .22) 0%, rgba(255, 170, 120, 0) 58%), linear-gradient(172deg, #1a6585 0%, #0f445c 50%, #0a2c3d 100%);
+  --deep-sunset: radial-gradient(90% 70% at 86% -6%, rgba(255, 200, 140, .34) 0%, rgba(255, 200, 140, 0) 60%), linear-gradient(168deg, #b85a3c 0%, #8a3f5a 50%, #3f2a5c 100%);
+  --deep-dusk: radial-gradient(70% 60% at 84% 4%, rgba(240, 236, 255, .2) 0%, rgba(240, 236, 255, 0) 60%), linear-gradient(172deg, #333f8c 0%, #232963 50%, #12143a 100%);
+  --btn-sea: linear-gradient(180deg, #58bbdc 0%, #3d9fc2 100%);
+  --btn-sea-shadow: 0 12px 24px -14px rgba(69, 169, 203, .8), inset 0 1px 0 rgba(255, 255, 255, .4);
+  --bar-glass: rgba(13, 30, 42, .62); --bar-edge: rgba(255, 255, 255, .14); --bar-pill: rgba(69, 169, 203, .2);
   --stack-today: linear-gradient(155deg, #1e4c66, #0f2c3d 70%); --stack-today-line: #2a5a75; --stack-today-kicker: #9ed7ea;
   --stack-ahead: linear-gradient(155deg, #4a2a33, #23192a 70%); --stack-ahead-line: #5a3540; --stack-ahead-kicker: #ff9a70;
   --stack-todo: linear-gradient(155deg, #41361f, #1e1d20 70%); --stack-todo-line: #54462a; --stack-todo-kicker: #f0b24a;
@@ -247,7 +276,7 @@ button:disabled { cursor: default; }
 
 /* «глубокая вода» — главный блок экрана вне сцены */
 .deep-card {
-  background: var(--card-bg);
+  background: var(--deep-sea);
   color: var(--card-ink);
   border-radius: 26px;
   position: relative;
@@ -259,7 +288,41 @@ button:disabled { cursor: default; }
   background: linear-gradient(90deg, transparent, rgba(255, 210, 175, 0.6), transparent);
 }
 
-.bg-sea-grad { background: var(--sea); }
+.deep-card.deep-sunset { background: var(--deep-sunset); --card-muted: rgba(255, 255, 255, .84); --card-sea: #ffe1a8; box-shadow: 0 22px 44px -28px rgba(120, 40, 60, .7); }
+.deep-card.deep-dusk { background: var(--deep-dusk); --card-muted: #c9d0f2; --card-sea: #ffd9a0; box-shadow: 0 22px 44px -28px rgba(20, 22, 70, .75); }
+/* блик по верхнему краю — стеклянная кромка у всех главных блоков */
+.deep-card::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28), inset 0 0 0 1px rgba(255, 255, 255, .06);
+}
+
+.bg-sea-grad { background: var(--btn-sea); box-shadow: var(--btn-sea-shadow); }
+.btn-sea { background: var(--btn-sea); box-shadow: var(--btn-sea-shadow); color: #fff; }
+.dark .btn-sea { color: #04161f; }
+
+/* цветная плитка значка: категории трат — яркий скруглённый квадрат с белым значком */
+.tile { display: grid; place-items: center; flex-shrink: 0; color: #fff; border-radius: 13px;
+  background: linear-gradient(150deg, color-mix(in oklab, var(--c) 72%, white), var(--c) 70%);
+  box-shadow: 0 8px 14px -10px var(--c), inset 0 1px 0 rgba(255, 255, 255, .35); }
+/* мягкий круг — действие или отметка: платёж, поступление, быстрые кнопки */
+.dot-tile { display: grid; place-items: center; flex-shrink: 0; border-radius: 9999px; color: var(--c);
+  background: color-mix(in oklab, var(--c) 15%, transparent); }
+
+/* метки источника денег: свои — без метки; в долг — сиреневая штриховка; резерв — сумерки */
+.src-loan { color: var(--loan); background: var(--loan-soft); }
+.src-rsv { color: var(--rsv); background: var(--rsv-soft); }
+
+/* нижняя панель и «солнце» */
+.bar-glass {
+  background: var(--bar-glass);
+  -webkit-backdrop-filter: blur(22px) saturate(1.8); backdrop-filter: blur(22px) saturate(1.8);
+  box-shadow: 0 0 0 .5px rgba(10, 36, 51, .14), 0 18px 40px -16px rgba(4, 14, 22, .5), inset 0 1px 0 var(--bar-edge), inset 0 -1px 0 rgba(255, 255, 255, .1);
+}
+.dark .bar-glass { box-shadow: 0 0 0 .5px rgba(0, 0, 0, .5), 0 18px 40px -16px rgba(0, 0, 0, .7), inset 0 1px 0 var(--bar-edge); }
+.sun { background: var(--sun); box-shadow: var(--sun-shadow); color: #fff; }
+@media (prefers-reduced-transparency: reduce) {
+  .bar-glass { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
 .divide-hair > * + * { border-top: 1px solid var(--line); }
 
 .no-scrollbar::-webkit-scrollbar { display: none; }
