@@ -18,6 +18,7 @@ import { dayBudget, weekSummary } from './summary';
 import { bridgeState, weekMoney, weekParts, type Bridge } from './bridge';
 import { bySource, spendEffect, suggestSource } from './sources';
 import { quickSpends, yesterdaySet } from './quick';
+import { guessCategory, parseSpoken } from './spoken';
 import { isWorkday, workdayOnOrBefore } from './workdays';
 import { draft } from './statements';
 import { parseCsv, parseText } from './statements';
@@ -873,5 +874,38 @@ describe('учёт по счетам для воскресной сверки', 
     const p = checkupPlan({ expenses: [], debts: [], overrides: [], bridge: null, marks: { 'wk:2026-11-02': { done: true, amount: 7000, at: 'x' } }, monday: '2026-10-26', leftover: 0, incomeOnCard: 0 });
     expect(p.topUp).toBe(0);
     expect(p.toppedBefore).toBe(7000);
+  });
+});
+
+describe('трата одной фразой', () => {
+  it('сумма цифрами: с рублями, с пробелом в тысячах, с копейками', () => {
+    expect(parseSpoken('обед 340')).toEqual({ amount: 340, words: 'обед' });
+    expect(parseSpoken('Метро 95 рублей')).toEqual({ amount: 95, words: 'Метро' });
+    expect(parseSpoken('продукты 1 500')).toEqual({ amount: 1500, words: 'продукты' });
+    expect(parseSpoken('аптека 412,50 ₽')).toEqual({ amount: 412.5, words: 'аптека' });
+    expect(parseSpoken('340р кофе')).toEqual({ amount: 340, words: 'кофе' });
+  });
+
+  it('сумма словами — как её отдаёт диктовка', () => {
+    expect(parseSpoken('обед триста сорок')).toEqual({ amount: 340, words: 'обед' });
+    expect(parseSpoken('такси тысяча двести')).toEqual({ amount: 1200, words: 'такси' });
+    expect(parseSpoken('Продукты две тысячи пятьсот рублей.')).toEqual({ amount: 2500, words: 'Продукты' });
+    expect(parseSpoken('подарок полторы тысячи')).toEqual({ amount: 1500, words: 'подарок' });
+    expect(parseSpoken('кофе 2 тысячи')).toEqual({ amount: 2000, words: 'кофе' });
+  });
+
+  it('чисел несколько — сумма последняя; числа нет — фраза остаётся примечанием', () => {
+    expect(parseSpoken('2 кофе 300')).toEqual({ amount: 300, words: '2 кофе' });
+    expect(parseSpoken('кофе с собой')).toEqual({ amount: null, words: 'кофе с собой' });
+    expect(parseSpoken('')).toEqual({ amount: null, words: '' });
+  });
+
+  it('категория: сначала по своим прошлым тратам, потом по словарю', () => {
+    expect(guessCategory('обед', [])).toBe('work');
+    expect(guessCategory('Метро', [])).toBe('transport');
+    expect(guessCategory('в аптеку', [])).toBe('health');
+    expect(guessCategory('что-то', [])).toBeNull();
+    const mine = [{ note: 'Кофе', category: 'fun' as const }, { note: 'кофе', category: 'fun' as const }, { note: 'кофе', category: 'work' as const }];
+    expect(guessCategory('кофе', mine)).toBe('fun');
   });
 });

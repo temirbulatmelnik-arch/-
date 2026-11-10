@@ -3,15 +3,16 @@
 import { AnimatePresence, motion, type PanInfo } from 'motion/react';
 import { Anchor, Gift, MessagesSquare, Plus, Scale, ScanText } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
+import { flyTabs } from '../components/Home';
 import { Roll, spring } from '../components/motion';
 import { useStore } from '../store/store';
 import { salute } from '../store/events';
-import { useUi } from '../store/ui';
+import { toast, useUi } from '../store/ui';
 
 export const TOUR_VERSION = 5;
 
 const SLIDES: { title: string; text: string; art: () => ReactNode }[] = [
-  { title: 'Приложение ведёт само', text: 'Под сценой — один следующий шаг: отметить платёж, сверить банк, вечером — проверить траты. Сделали — выезжает следующий, смахните влево — «позже». Частые траты — одной кнопкой, с «Отменить». Кольцо можно крутить пальцем: «а если потрачу?».', art: () => <ArtPlus /> },
+  { title: 'Приложение ведёт само', text: 'Под сценой — один следующий шаг: отметить платёж, сверить банк, вечером — проверить траты. Сделали — выезжает следующий, смахните влево — «позже». Частые траты — одной кнопкой, с «Отменить». Трату можно продиктовать: в поле «Что купили» скажите «обед триста сорок». Кольцо крутится пальцем: «а если потрачу?».', art: () => <ArtPlus /> },
   { title: 'Две вкладки: «Сегодня» и «Впереди»', text: '«Платежи» теперь «Впереди»: лента дней и месяц, сверху — ответ «хватит ли». «Траты» и «Долги» — две плитки на «Сегодня», внутри всё по-прежнему; назад — «‹ Сегодня» слева сверху.', art: () => <ArtDebts /> },
   { title: 'Свои, в долг и резерв', text: 'У денег теперь цвет. Синяя вода — свои, сиреневая штриховка — взятое в долг, сумерки — резерв. В трате выберите, откуда деньги, или потяните сумму прямо в сосуд: под суммой сразу видно, что останется. На «Сегодня» — три сосуда «Где деньги»: нажмите на любой.', art: () => <ArtMoney /> },
   { title: 'Сегодня — сколько можно', text: 'Сверху остаток недели и кольцо дня. Фонари — дни недели: ведите пальцем вдоль набережной, и подпись покажет траты каждого дня. Потяните сцену вниз — мост сведётся, а приложение проверит обновления. Прокрутите — сверху появится «Остров» с деньгами на сегодня, нажмите на него.', art: () => <ArtToday /> },
@@ -24,7 +25,16 @@ export function Tour() {
   const [i, setI] = useState(0);
   const [dir, setDir] = useState(1);
   useEffect(() => { if (open) setI(0); }, [open]);
-  const finish = () => { useStore.getState().setSettings({ tourSeen: TOUR_VERSION }); set({ tour: false }); };
+  // знакомство закрыто — на «Сегодня» показываем переезд: «Траты» и «Долги» перелетают из нижней панели в плитки
+  const finish = () => {
+    useStore.getState().setSettings({ tourSeen: TOUR_VERSION });
+    set({ tour: false });
+    window.setTimeout(() => {
+      if (useUi.getState().tab !== 'week') return;
+      flyTabs();
+      toast('«Траты» и «Долги» теперь здесь, на «Сегодня»');
+    }, 520);
+  };
   // дошли до конца — маленький салют: первое знакомство случается один раз
   const go = (n: number) => { if (n < 0) return; if (n >= SLIDES.length) { finish(); window.setTimeout(() => salute('small'), 350); return; } setDir(n > i ? 1 : -1); setI(n); };
   const end = (_: unknown, info: PanInfo) => {

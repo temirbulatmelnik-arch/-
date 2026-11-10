@@ -13,6 +13,7 @@ import { dayMonth, today, weekday } from '../domain/dates';
 import { parseAmount, rub } from '../domain/money';
 import { BIG_PURCHASE, CATEGORIES, CATEGORY } from '../domain/plan';
 import { SOURCE_LABEL, SOURCES, spendEffect, suggestSource, type SpendEffect } from '../domain/sources';
+import { guessCategory, parseSpoken } from '../domain/spoken';
 import type { CategoryId, Source } from '../domain/types';
 import { useStore } from '../store/store';
 import { toast, useUi, type AddPrefill } from '../store/ui';
@@ -80,6 +81,28 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
     return () => window.removeEventListener('keydown', on);
   }, []);
 
+  // трата одной фразой: в поле «Что купили» можно набрать или продиктовать «обед 340» — сумма и категория встанут сами.
+  // Текст поля при этом не трогаем (иначе диктовка iPhone обрывается); число уйдёт из примечания при записи.
+  // auto — что поставила фраза: набрали сумму или выбрали категорию руками — фраза их больше не меняет
+  const auto = useRef<{ amount: string | null; category: CategoryId | null }>({ amount: null, category: null });
+  const typeNote = (text: string) => {
+    setNote(text);
+    if (edit) return;
+    const said = parseSpoken(text);
+    const a = auto.current;
+    if (said.amount != null) {
+      if (amount === '' || amount === a.amount) { a.amount = String(said.amount).replace('.', ','); setAmount(a.amount); }
+    } else if (a.amount != null) {
+      // число из фразы стёрли — убираем и сумму, которую оно поставило
+      if (amount === a.amount) setAmount('');
+      a.amount = null;
+    }
+    const guess = guessCategory(said.words, store.expenses);
+    if (guess && (category == null || category === a.category)) { a.category = guess; setCategory(guess); }
+  };
+  /** примечание для записи: сумма пришла из фразы — остаются только слова */
+  const noteText = () => (auto.current.amount != null && auto.current.amount === amount ? parseSpoken(note).words : note.trim());
+
   const value = parseAmount(amount) ?? 0;
   const valid = value > 0 && !!category;
   // что будет после записи — одной строкой под суммой: остаток дня, долг по мосту или остаток резерва
@@ -90,7 +113,7 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   const save = (src: Source = source) => {
     if (!valid) return;
     if (!edit && !p.wishId && value > BIG_PURCHASE && src === 'life' && !askPause) { setAskPause(true); return; }
-    const item = { date, amount: value, category: category!, note: note.trim() || undefined, source: src, origin: 'manual' as const, ...(src === 'credit' && p.creditCard ? { creditCard: p.creditCard } : {}) };
+    const item = { date, amount: value, category: category!, note: noteText() || undefined, source: src, origin: 'manual' as const, ...(src === 'credit' && p.creditCard ? { creditCard: p.creditCard } : {}) };
     const done = src === source ? effect : spendEffect({ expenses, debts, weeklyOverrides, bridge }, { amount: value, source: src, date, now: today(), reserve: led.reserve, skipId: edit?.id });
     if (edit) store.updateExpense(edit.id, item);
     else store.addExpenses([item]);
@@ -132,7 +155,7 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   };
 
   const pause = () => {
-    store.addWish({ title: note.trim() || CATEGORY[category!].short, amount: value, category: category! });
+    store.addWish({ title: noteText() || CATEGORY[category!].short, amount: value, category: category! });
     toast('Отложено на 48 часов. Напомню на главном экране');
     onDone();
   };
@@ -206,7 +229,7 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
           <CalendarDays size={15} strokeWidth={1.6} className="text-sea" />{date === today() ? 'Сегодня' : `${weekday(date)}, ${dayMonth(date)}`}
           <input ref={dateInput} type="date" value={date} onChange={e => setDate(e.target.value || today())} className="absolute inset-0 opacity-0" aria-label="Дата" />
         </button>
-        <input value={note} onChange={e => setNote(e.target.value)} placeholder="Что купили" className="h-10 min-w-0 flex-1 rounded-full border border-line bg-surface px-3.5 text-[16px] outline-none placeholder:text-faint focus:border-sea" />
+        <input value={note} onChange={e => typeNote(e.target.value)} placeholder={edit ? 'Что купили' : 'Что купили — или «обед 340»'} enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }} className="h-10 min-w-0 flex-1 rounded-full border border-line bg-surface px-3.5 text-[16px] outline-none placeholder:text-faint focus:border-sea" />
       </div>
 
       <div className="grid grid-cols-5 gap-2">

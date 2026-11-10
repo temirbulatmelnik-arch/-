@@ -109,6 +109,59 @@ export function flyCoin(from: Element, color = '#f47a3a') {
   };
 }
 
+/* ---------- Переезд вкладок ---------- */
+
+const GHOST_ICON: Record<string, string> = {
+  // те же значки, что были у вкладок: чек и якорь (контуры lucide)
+  budget: '<path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M14 8H8"/><path d="M16 12H8"/><path d="M13 16H8"/>',
+  plan: '<path d="M12 22V8"/><path d="M5 12H2a10 10 0 0 0 20 0h-3"/><circle cx="12" cy="5" r="3"/>',
+};
+
+/** Первый запуск новой версии: «Траты» и «Долги» появляются внизу, там, где были их кнопки, и на глазах перелетают
+ *  в свои плитки на «Сегодня» — видно, куда они переехали. Страница сама прокручивается к плиткам. WAAPI, без React */
+export function flyTabs() {
+  const page = document.querySelector('main:not([hidden])');
+  const bar = document.querySelector('nav[aria-label="Разделы"] .bar-glass');
+  const first = page?.querySelector<HTMLElement>('[data-entry="budget"]');
+  if (!page || !bar || !first || document.querySelector('[role="dialog"]')) return;
+  const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // плитки — в верхнюю половину экрана, над панелью
+  const top = Math.max(0, first.getBoundingClientRect().top + window.scrollY - window.innerHeight * 0.4);
+  window.scrollTo({ top, behavior: calm ? 'auto' : 'smooth' });
+  let still = 0, last = -1, frames = 0;
+  const wait = () => {
+    still = Math.abs(window.scrollY - last) < 0.5 ? still + 1 : 0;
+    last = window.scrollY;
+    if (still < 4 && ++frames < 90) { requestAnimationFrame(wait); return; }
+    const b = bar.getBoundingClientRect();
+    // прежняя панель была в пять колонок: «Траты» — четвёртая, «Долги» — пятая
+    ([['budget', 'Траты', 0.7], ['plan', 'Долги', 0.9]] as const).forEach(([id, label, at], i) => {
+      const tile = page.querySelector<HTMLElement>(`[data-entry="${id}"]`);
+      if (!tile) return;
+      const land = () => tile.animate(
+        [{ transform: 'scale(1)', boxShadow: '0 0 0 0 rgba(255,255,255,0)' }, { transform: 'scale(1.06)', boxShadow: '0 0 0 4px rgba(255,255,255,.75)', offset: 0.35 }, { transform: 'scale(1)', boxShadow: '0 0 0 0 rgba(255,255,255,0)' }],
+        { duration: 620, easing: 'cubic-bezier(.3,1.4,.5,1)' });
+      if (calm) { land(); return; }
+      const r = tile.getBoundingClientRect();
+      const x0 = b.left + b.width * at, y0 = b.top + b.height / 2, x1 = r.left + r.width / 2, y1 = r.top + r.height / 2;
+      const ghost = document.createElement('div');
+      ghost.setAttribute('aria-hidden', 'true');
+      ghost.style.cssText = `position:fixed;left:${x0 - 34}px;top:${y0 - 27}px;width:68px;height:54px;border-radius:20px;z-index:55;pointer-events:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:#fff;font-size:11px;font-weight:500;background:${id === 'budget' ? 'var(--deep-sea)' : 'var(--deep-dusk)'};box-shadow:0 14px 28px -12px rgba(4,14,22,.7), inset 0 1px 0 rgba(255,255,255,.3)`;
+      ghost.innerHTML = `<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${GHOST_ICON[id]}</svg><span>${label}</span>`;
+      document.body.appendChild(ghost);
+      const dx = x1 - x0, dy = y1 - y0;
+      ghost.animate([
+        { transform: 'translate(0,0) scale(.5)', opacity: 0 },
+        { transform: 'translate(0,0) scale(1.08)', opacity: 1, offset: 0.16 },
+        { transform: 'translate(0,0) scale(1)', opacity: 1, offset: 0.4, easing: 'cubic-bezier(.5,0,.2,1)' },
+        { transform: `translate(${dx * 0.55}px, ${dy * 0.7 - 46}px) scale(1.25)`, opacity: 1, offset: 0.78 },
+        { transform: `translate(${dx}px, ${dy}px) scale(${Math.min(2.2, r.width / 68)})`, opacity: 0 },
+      ], { duration: 1500, delay: i * 220, fill: 'both', easing: 'ease-out' }).onfinish = () => { ghost.remove(); land(); haptic(); };
+    });
+  };
+  requestAnimationFrame(wait);
+}
+
 /** Частые траты одной кнопкой и «как вчера»; пусто — подсказка, откуда они возьмутся */
 export function QuickSpends({ items, yesterday, onSpend, onYesterday }: {
   items: QuickSpend[]; yesterday: { count: number; sum: number } | null;

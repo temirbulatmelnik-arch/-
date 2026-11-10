@@ -105,6 +105,10 @@
 - **Следующий шаг, быстрые траты, плитки-входы** — `components/Home.tsx` (`NextStep`, `QuickSpends`, `flyCoin`,
   `EntryTiles`); шаги собираются в `screens/Week.tsx`; частые траты и «как вчера» — `domain/quick.ts` (тест «быстрые
   траты»). «Отменить» — `withUndo` в `store/ui.ts`: снимок трат, отметок, долгов и резерва, сообщение держится 5 секунд.
+- **Переезд вкладок** — `flyTabs` в `components/Home.tsx`: запускается из `screens/Tour.tsx`, когда знакомство закрыто.
+- **Трата одной фразой** — `domain/spoken.ts` (`parseSpoken`, `guessCategory`; тест «трата одной фразой»), поле «Что
+  купили» в `screens/AddExpense.tsx`.
+- **Ответ чата по одной карточке** — `Review` и `ChangeCard` в `screens/Sync.tsx`.
 - **Навигация** — `components/TabBar.tsx`: две вкладки и «+» (`BAR`); `budget` и `plan` остаются вкладками по
   устройству (собраны и скрыты), но открываются плитками с «Сегодня», подсвечено «Сегодня», в шапке — `back` у
   `SkyHeader`. «Впереди» — `screens/Payments.tsx`: `Pager` «Лента / Месяц», ответ «хватит ли» — кнопка над ним, по

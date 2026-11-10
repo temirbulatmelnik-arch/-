@@ -1,9 +1,13 @@
 // Связь с чатом «Финансы»: один файл обмена в обе стороны (domain/exchange.ts).
-// Приложение отдаёт всё состояние; ответ чата с изменениями показывается по разделам и применяется выбранное.
+// Приложение отдаёт всё состояние; ответ чата показывается карточками по одной: принять или пропустить — и применяется
+// принятое.
 // А ещё — новая редакция зашифрованного плана с сайта: подтягивается по коду, данные на телефоне остаются.
-import { ArrowDownToLine, ArrowUpFromLine, ClipboardPaste, Copy, Download, FileUp, Share2 } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpFromLine, Check, ClipboardPaste, Copy, Download, FileUp, Share2, X } from 'lucide-react';
+import { AnimatePresence, motion, useMotionValue, useTransform } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
-import { Field, PrimaryButton, SecondaryButton, Segmented, Sheet, Switch, Tile } from '../components/ui';
+import { haptic } from '../components/haptics';
+import { usePan } from '../components/motion';
+import { Field, PrimaryButton, SecondaryButton, Segmented, Sheet, Tile } from '../components/ui';
 import { today } from '../domain/dates';
 import {
   applyExchange, buildExchange, exchangeDigest, exchangeFileName, normalize, parseExchange, previewExchange, type ExchangeFile, type ExchangeSection, type SectionId,
@@ -80,9 +84,9 @@ function Body() {
     setFile(null); setText('');
     useUi.getState().set({ sync: false });
   };
-  const toggle = (id: SectionId) => setOff(prev => {
+  const decide = (id: SectionId, accept: boolean) => setOff(prev => {
     const next = new Set(prev);
-    if (next.has(id)) next.delete(id); else next.add(id);
+    if (accept) next.delete(id); else next.add(id);
     return next;
   });
 
@@ -93,25 +97,28 @@ function Body() {
     if (raw.trim()) parse(raw); else toast('Буфер пуст или закрыт — вставьте ответ в поле ниже');
   };
 
+  // ответ чата разобран — на экране только его изменения, по одному
+  if (file) {
+    return <Review file={file} sections={sections} digest={digest} off={off} decide={decide} onBack={() => { seenInbox(); setFile(null); }} onApply={apply} />;
+  }
+
   return (
     <div className="space-y-5 pt-1">
       {/* обмен в два касания: скопировать файл для чата — и вставить его ответ. Подробности — ниже */}
-      {!file && (
-        <div className="grid grid-cols-2 gap-2">
-          <button type="button" onClick={() => void copy(exportText(true))} className="deep-card px-4 py-4 text-left transition-transform duration-100 active:scale-[.97]" style={{ background: 'linear-gradient(165deg, #8f58e2 0%, #6a3fc0 55%, #432a86 100%)' }}>
-            <span aria-hidden="true" className="deep-sheen" />
-            <ArrowUpFromLine size={22} strokeWidth={1.9} />
-            <span className="mt-2 block text-[15.5px] leading-tight font-medium">Скопировать для чата</span>
-            <span className="mt-1 block text-[12px] leading-snug text-white/75">короткий файл для сверки</span>
-          </button>
-          <button type="button" onClick={() => void pasteAnswer()} className="deep-card px-4 py-4 text-left transition-transform duration-100 active:scale-[.97]">
-            <span aria-hidden="true" className="deep-sheen" />
-            <ArrowDownToLine size={22} strokeWidth={1.9} />
-            <span className="mt-2 block text-[15.5px] leading-tight font-medium">Вставить ответ чата</span>
-            <span className="mt-1 block text-[12px] leading-snug text-card-muted">покажу, что изменится</span>
-          </button>
-        </div>
-      )}
+      <div className="grid grid-cols-2 gap-2">
+        <button type="button" onClick={() => void copy(exportText(true))} className="deep-card px-4 py-4 text-left transition-transform duration-100 active:scale-[.97]" style={{ background: 'linear-gradient(165deg, #8f58e2 0%, #6a3fc0 55%, #432a86 100%)' }}>
+          <span aria-hidden="true" className="deep-sheen" />
+          <ArrowUpFromLine size={22} strokeWidth={1.9} />
+          <span className="mt-2 block text-[15.5px] leading-tight font-medium">Скопировать для чата</span>
+          <span className="mt-1 block text-[12px] leading-snug text-white/75">короткий файл для сверки</span>
+        </button>
+        <button type="button" onClick={() => void pasteAnswer()} className="deep-card px-4 py-4 text-left transition-transform duration-100 active:scale-[.97]">
+          <span aria-hidden="true" className="deep-sheen" />
+          <ArrowDownToLine size={22} strokeWidth={1.9} />
+          <span className="mt-2 block text-[15.5px] leading-tight font-medium">Вставить ответ чата</span>
+          <span className="mt-1 block text-[12px] leading-snug text-card-muted">покажу, что изменится</span>
+        </button>
+      </div>
       <section className="card space-y-3 p-4">
         <h3 className="flex items-center gap-2.5 text-[15px] font-medium"><Tile c="#8b63e0" className="size-8 !rounded-[10px]"><ArrowUpFromLine size={16} strokeWidth={2} /></Tile>Из приложения в чат</h3>
         <p className="text-[13.5px] leading-snug">Файл со всем, что знает приложение. Добавьте его в <b className="font-medium">файлы проекта «Финансы»</b> вместо прошлого или приложите к сообщению.</p>
@@ -126,46 +133,18 @@ function Body() {
 
       <section className="card space-y-3 p-4">
         <h3 className="flex items-center gap-2.5 text-[15px] font-medium"><Tile c="#1f8fb0" className="size-8 !rounded-[10px]"><ArrowDownToLine size={16} strokeWidth={2} /></Tile>Из чата в приложение</h3>
-        {file ? (
-          <>
-            {file.summary && <p className="text-[14px] leading-snug font-medium">{file.summary}</p>}
-            {digest.length > 0 && (
-              <ul className="space-y-1 rounded-xl bg-surface-2 px-3 py-2.5 text-[13.5px] leading-snug">
-                {digest.map((d, i) => <li key={i} className={d.startsWith('⚠') ? 'text-neg' : ''}>{d}</li>)}
-              </ul>
-            )}
-            <div className="divide-hair">
-              {sections.map(sec => (
-                <div key={sec.id} className="py-2">
-                  <Switch checked={!off.has(sec.id)} onChange={() => toggle(sec.id)} label={sec.title} hint={`${sec.lines.length} ${sec.lines.length === 1 ? 'изменение' : sec.lines.length < 5 ? 'изменения' : 'изменений'}`} />
-                  <ul className={`space-y-1 pb-1 text-[13px] leading-snug ${off.has(sec.id) ? 'text-faint line-through' : 'text-muted'}`}>
-                    {sec.lines.map((l, i) => <li key={i}>{l}</li>)}
-                  </ul>
-                </div>
-              ))}
-            </div>
-            <p className="text-[12px] leading-snug text-muted">Применится только включённое. Чего нет в файле, не меняется.</p>
-            <div className="grid grid-cols-[auto_1fr] gap-2">
-              <SecondaryButton onClick={() => { seenInbox(); setFile(null); }}>Назад</SecondaryButton>
-              <PrimaryButton onClick={apply} disabled={sections.every(x => off.has(x.id))}>Применить</PrimaryButton>
-            </div>
-          </>
-        ) : (
-          <>
-            <p className="text-[13.5px] leading-snug">Попросите в чате: <i>«внеси изменения в приложение»</i>. Чат ответит файлом обмена — блоком кода или файлом. Вставьте ответ целиком или выберите файл.</p>
-            <textarea value={text} onChange={e => setText(e.target.value)} rows={5} placeholder='{ "app": "kurs-exchange", … }' className="field font-mono text-[13px]" />
-            <input ref={picker} type="file" accept="application/json,.json,.txt,text/plain" hidden onChange={async e => {
-              const f = e.target.files?.[0];
-              e.target.value = '';
-              if (f) parse(await f.text());
-            }} />
-            <div className="grid grid-cols-3 gap-2">
-              <SecondaryButton onClick={async () => { try { setText(await navigator.clipboard.readText()); } catch { toast('Вставьте вручную: удерживайте палец в поле'); } }} className="px-2"><ClipboardPaste size={15} strokeWidth={1.5} /> Из Claude</SecondaryButton>
-              <SecondaryButton onClick={() => picker.current?.click()} className="px-2"><FileUp size={15} strokeWidth={1.5} /> Файл</SecondaryButton>
-              <PrimaryButton tone="ink" onClick={() => parse(text)} disabled={!text.trim()} className="h-12">Разобрать</PrimaryButton>
-            </div>
-          </>
-        )}
+        <p className="text-[13.5px] leading-snug">Попросите в чате: <i>«внеси изменения в приложение»</i>. Чат ответит файлом обмена — блоком кода или файлом. Вставьте ответ целиком или выберите файл.</p>
+        <textarea value={text} onChange={e => setText(e.target.value)} rows={5} placeholder='{ "app": "kurs-exchange", … }' className="field font-mono text-[13px]" />
+        <input ref={picker} type="file" accept="application/json,.json,.txt,text/plain" hidden onChange={async e => {
+          const f = e.target.files?.[0];
+          e.target.value = '';
+          if (f) parse(await f.text());
+        }} />
+        <div className="grid grid-cols-3 gap-2">
+          <SecondaryButton onClick={async () => { try { setText(await navigator.clipboard.readText()); } catch { toast('Вставьте вручную: удерживайте палец в поле'); } }} className="px-2"><ClipboardPaste size={15} strokeWidth={1.5} /> Из Claude</SecondaryButton>
+          <SecondaryButton onClick={() => picker.current?.click()} className="px-2"><FileUp size={15} strokeWidth={1.5} /> Файл</SecondaryButton>
+          <PrimaryButton tone="ink" onClick={() => parse(text)} disabled={!text.trim()} className="h-12">Разобрать</PrimaryButton>
+        </div>
       </section>
 
       {imports.length > 0 && (
@@ -192,6 +171,115 @@ function Body() {
         {showInstr && <pre className="max-h-72 overflow-auto rounded-xl bg-surface-2 p-3 text-[11.5px] leading-snug whitespace-pre-wrap">{PROJECT_INSTRUCTIONS}</pre>}
       </section>
     </div>
+  );
+}
+
+/* ---------- Изменения из чата: по одному ---------- */
+
+const count = (n: number) => `${n} ${n % 10 === 1 && n % 100 !== 11 ? 'изменение' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? 'изменения' : 'изменений'}`;
+
+/** Ответ чата — стопкой карточек: одна карточка — один раздел изменений («Лимиты: 8 000 → 9 000»). Вправо или
+ *  «Принять» — берём, влево или «Пропустить» — нет. В конце — итог, где решение можно поменять, и «Применить» */
+function Review({ file, sections, digest, off, decide, onBack, onApply }: {
+  file: ExchangeFile; sections: ExchangeSection[]; digest: string[]; off: Set<SectionId>;
+  decide: (id: SectionId, accept: boolean) => void; onBack: () => void; onApply: () => void;
+}) {
+  const [i, setI] = useState(0);
+  const [dir, setDir] = useState(1);
+  const sec = sections[i];
+  const warn = digest.filter(d => d.startsWith('⚠'));
+  const answer = (accept: boolean) => {
+    if (!sec) return;
+    haptic();
+    setDir(accept ? 1 : -1);
+    decide(sec.id, accept);
+    setI(i + 1);
+  };
+  const taken = sections.filter(x => !off.has(x.id)).length;
+  return (
+    <div className="space-y-3 pt-1">
+      {file.summary && <p className="text-[14.5px] leading-snug font-medium">{file.summary}</p>}
+      {warn.length > 0 && (
+        <ul className="space-y-1 rounded-2xl bg-neg/10 px-3.5 py-2.5 text-[13px] leading-snug text-neg">{warn.map((d, k) => <li key={k}>{d}</li>)}</ul>
+      )}
+      <div className="flex items-center gap-1.5" aria-label={sec ? `Изменение ${i + 1} из ${sections.length}` : 'Итог'}>
+        {sections.map((x, k) => (
+          <span key={x.id} className={`h-1 flex-1 rounded-full transition-colors duration-300 ${k > i ? 'bg-ink/12' : k === i ? 'bg-ink/45' : off.has(x.id) ? 'bg-ink/25' : 'bg-pos'}`} />
+        ))}
+      </div>
+      <AnimatePresence mode="wait" custom={dir} initial={false}>
+        {sec ? (
+          <ChangeCard key={sec.id} sec={sec} n={i + 1} total={sections.length} dir={dir} onAnswer={answer} />
+        ) : (
+          <motion.div key="sum" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ type: 'spring', bounce: 0.15, duration: 0.4 }} className="space-y-3">
+            <section className="card p-4">
+              <h3 className="text-[16px] font-medium">{taken ? `Принято ${taken} из ${sections.length}` : 'Ничего не принято'}</h3>
+              <p className="mt-0.5 text-[12.5px] text-muted">Нажмите на строку, чтобы передумать. Чего нет в файле, не меняется.</p>
+              <div className="divide-hair mt-1.5">
+                {sections.map(x => {
+                  const on = !off.has(x.id);
+                  return (
+                    <button key={x.id} type="button" onClick={() => { haptic(); decide(x.id, !on); }} aria-pressed={on} className="flex w-full items-center gap-3 py-2.5 text-left">
+                      <span className={`grid size-7 shrink-0 place-items-center rounded-full transition-colors duration-200 ${on ? 'bg-pos text-white' : 'bg-surface-2 text-faint'}`}>{on ? <Check size={15} strokeWidth={2.4} /> : <X size={14} strokeWidth={2} />}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className={`block text-[14.5px] leading-tight font-medium ${on ? '' : 'text-faint line-through'}`}>{x.title}</span>
+                        <span className="block text-[12px] text-muted">{count(x.lines.length)}</span>
+                      </span>
+                      <span className={`text-[12.5px] font-medium ${on ? 'text-pos' : 'text-faint'}`}>{on ? 'принято' : 'пропущено'}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+            <div className="grid grid-cols-[auto_1fr] gap-2">
+              <SecondaryButton onClick={() => setI(0)}>Заново</SecondaryButton>
+              <PrimaryButton onClick={onApply} disabled={!taken}>{taken ? `Применить: ${count(sections.filter(x => !off.has(x.id)).reduce((t, x) => t + x.lines.length, 0))}` : 'Нечего применять'}</PrimaryButton>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <div className="flex items-center justify-between pt-0.5 text-[13px] font-medium">
+        <button type="button" onClick={onBack} className="py-2 text-muted">Отмена</button>
+        {sec && sections.length - i > 1 && (
+          <button type="button" onClick={() => { haptic(); sections.slice(i).forEach(x => decide(x.id, true)); setDir(1); setI(sections.length); }} className="py-2 text-sea">Принять всё оставшееся</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Одна карточка изменений: тянется пальцем, под пальцем проступает «Принять» или «Пропустить» */
+function ChangeCard({ sec, n, total, dir, onAnswer }: { sec: ExchangeSection; n: number; total: number; dir: number; onAnswer: (accept: boolean) => void }) {
+  const x = useMotionValue(0);
+  const rotate = useTransform(x, [-200, 0, 200], [-5, 0, 5]);
+  const yes = useTransform(x, [20, 100], [0, 1]);
+  const no = useTransform(x, [-100, -20], [1, 0]);
+  const pan = usePan({
+    axis: 'x',
+    onMove: d => x.set(d),
+    onEnd: (d, v) => { if (d > 90 || v > 500) onAnswer(true); else if (d < -90 || v < -500) onAnswer(false); else x.set(0); },
+  });
+  const fresh = sec.lines.filter(l => !l.startsWith('Уже есть'));
+  const have = sec.lines.length - fresh.length;
+  return (
+    <motion.section {...pan} custom={dir} style={{ x, rotate, touchAction: 'pan-y' }}
+      variants={{ enter: { opacity: 0, y: 18, scale: 0.97 }, center: { opacity: 1, y: 0, scale: 1 }, exit: (d: number) => ({ opacity: 0, x: d * 240, transition: { duration: 0.18 } }) }}
+      initial="enter" animate="center" exit="exit" transition={{ type: 'spring', bounce: 0.18, duration: 0.4 }}
+      className="card relative overflow-hidden p-4 shadow-[0_18px_36px_-24px_rgba(10,36,51,.55)]">
+      <motion.span aria-hidden="true" style={{ opacity: yes }} className="absolute top-3 right-3 rounded-full bg-pos px-3 py-1 text-[12.5px] font-medium text-white">Принять</motion.span>
+      <motion.span aria-hidden="true" style={{ opacity: no }} className="absolute top-3 right-3 rounded-full bg-ink/70 px-3 py-1 text-[12.5px] font-medium text-bg">Пропустить</motion.span>
+      <div className="text-[12.5px] font-medium text-sea">Изменение {n} из {total}</div>
+      <h3 className="mt-0.5 text-[17px] leading-snug font-medium">{sec.title}</h3>
+      <ul className={`mt-2 max-h-[34vh] space-y-1.5 overflow-y-auto overscroll-contain leading-snug ${fresh.length === 1 ? 'text-[16px]' : 'text-[14px]'}`}>
+        {fresh.map((l, k) => <li key={k} className={l.startsWith('⚠') ? 'text-neg' : ''}>{l}</li>)}
+      </ul>
+      {have > 0 && <p className="mt-2 text-[12px] text-faint">Ещё {have} уже есть в приложении — повторно не добавятся</p>}
+      <div className="mt-3.5 grid grid-cols-2 gap-2">
+        <SecondaryButton onClick={() => onAnswer(false)}>Пропустить</SecondaryButton>
+        <PrimaryButton onClick={() => onAnswer(true)} className="!h-12"><Check size={17} strokeWidth={2} /> Принять</PrimaryButton>
+      </div>
+      <p className="mt-2 text-center text-[11.5px] text-faint">Или смахните: вправо — принять, влево — пропустить</p>
+    </motion.section>
   );
 }
 
