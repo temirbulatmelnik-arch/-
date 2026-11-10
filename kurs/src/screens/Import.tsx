@@ -101,6 +101,15 @@ function Flow() {
     );
   }
   if (step.s === 'review') return <ReviewList review={step.review} onBack={() => setStep({ s: 'pick' })} />;
+  // одно касание: прочитать буфер (iPhone спросит «Вставить») и сразу показать, что нашлось
+  const pasteBank = async () => {
+    let text = '';
+    try { text = await navigator.clipboard.readText(); } catch { /* нет доступа к буферу — вставят вручную */ }
+    const r = text.trim() ? reviewFromText(text) : null;
+    if (r) setStep({ s: 'review', review: r });
+    else { toast(text.trim() ? 'В скопированном нет сумм вида «−350 ₽» — вставьте текст вручную' : 'Буфер пуст или закрыт — вставьте текст вручную'); setStep({ s: 'text' }); }
+  };
+
   if (step.s === 'text') return <TextPaste onDone={review => setStep({ s: 'review', review })} onBack={() => setStep({ s: 'pick' })} />;
 
   return (
@@ -110,6 +119,20 @@ function Flow() {
       <input ref={shots} type="file" accept="image/*" multiple hidden onChange={e => { const f = [...(e.target.files ?? [])]; e.target.value = ''; void runAi(f); }} />
       <input ref={csv} type="file" accept=".csv,text/csv,text/plain,.txt" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; void runCsv(f); }} />
 
+      {/* главный способ: скопировать текст со снимка банка в «Фото» и вставить одним касанием */}
+      <button type="button" onClick={pasteBank} className="deep-card flex w-full items-center gap-3.5 px-5 py-4 text-left transition-transform duration-100 active:scale-[.98]">
+        <span aria-hidden="true" className="deep-sheen" />
+        <span className="grid size-12 shrink-0 place-items-center rounded-[15px] bg-white/18"><ClipboardPaste size={23} strokeWidth={1.8} /></span>
+        <span className="relative min-w-0 flex-1">
+          <span className="block text-[17px] font-medium">Вставить из банка</span>
+          <span className="mt-0.5 block text-[13px] leading-snug text-card-muted">В «Фото» удержите палец на тексте снимка → «Скопировать» → нажмите здесь</span>
+        </span>
+      </button>
+      <button type="button" onClick={() => setStep({ s: 'text' })} className="h-11 w-full rounded-2xl border border-line bg-surface text-[14px] font-medium">Вставить или набрать текст вручную</button>
+
+      <details className="pt-1">
+        <summary className="cursor-pointer list-none px-1 py-2 text-[13.5px] font-medium text-sea [&::-webkit-details-marker]:hidden">Другие способы: выписка PDF, скриншоты, таблица</summary>
+        <div className="space-y-2.5 pt-1">
       <Option icon={<FileText size={19} strokeWidth={1.9} />} color="#f0603a" title="Выписка PDF" tag={apiKey ? 'Claude' : 'на телефоне'}
         lead="Файл выписки за неделю — самый точный способ"
         text="В приложении банка: карта → «Выписка» → период «неделя» → поделиться PDF → «Сохранить в Файлы». Затем выберите файл здесь."
@@ -135,15 +158,13 @@ function Flow() {
         )}
       </Option>
 
-      <Option icon={<ClipboardPaste size={19} strokeWidth={1.9} />} color="#1f8fb0" title="Текст со скриншота" tag="на телефоне"
-        lead="Скопируйте текст со снимка в «Фото» и вставьте"
-        text="ВТБ «История», Сбер, Т-Банк: в «Фото» удерживайте палец на тексте → «Выбрать всё» → «Скопировать» и вставьте сюда. Категории банка, переводы себе, погашения и повторы приложение разберёт само."
-        onClick={() => setStep({ s: 'text' })} />
-
       <Option icon={<FileSpreadsheet size={19} strokeWidth={1.9} />} color="#2ba36a" title="Файл CSV" tag="на телефоне"
         lead="Таблица операций из банка"
         text="Если банк выгружает таблицу: даты, суммы и описания найдутся по заголовкам."
         onClick={() => csv.current?.click()} />
+
+        </div>
+      </details>
 
       <p className="px-1 pt-2 text-[11.5px] leading-snug text-faint">Ничего не меняется без «Применить». Переводы между своими счетами и погашения кредитов не считаются тратами — погашения отмечаются в календаре платежей.</p>
     </div>
@@ -172,19 +193,25 @@ function Option({ icon, color, title, tag, lead, text, onClick, disabled, childr
   );
 }
 
+/** Текст, скопированный со снимка банка, → предложения. ВТБ, Сбер, Т-Банк: операции с категориями банка, сумма дня,
+ *  обязательный платёж, остатки; иначе — строки с суммами. null — сумм не нашлось */
+function reviewFromText(text: string): Review | null {
+  const c = ctx();
+  const bank = parseBankText(text, c.now);
+  if (bank.ops.length || bank.dues.length || bank.balances.card != null || bank.balances.reserve != null) return fromBank(bank, c);
+  const rows = parseText(text, c.now);
+  return rows.length ? fromDrafts(rows, c, `Из текста: ${rows.length} операций. Проверьте даты и категории.`) : null;
+}
+
 function TextPaste({ onDone, onBack }: { onDone: (r: Review) => void; onBack: () => void }) {
   const [text, setText] = useState('');
   const paste = async () => {
     try { setText(await navigator.clipboard.readText()); } catch { toast('Вставьте вручную: удерживайте палец в поле → «Вставить»'); }
   };
   const run = () => {
-    const c = ctx();
-    // ВТБ, Сбер, Т-Банк: операции с категориями банка, сумма дня, обязательный платёж, остатки
-    const bank = parseBankText(text, c.now);
-    if (bank.ops.length || bank.dues.length || bank.balances.card != null || bank.balances.reserve != null) { onDone(fromBank(bank, c)); return; }
-    const rows = parseText(text, c.now);
-    if (!rows.length) { toast('Не нашёл сумм вида «−350 ₽». Проверьте текст'); return; }
-    onDone(fromDrafts(rows, c, `Из текста: ${rows.length} операций. Проверьте даты и категории.`));
+    const r = reviewFromText(text);
+    if (!r) { toast('Не нашёл сумм вида «−350 ₽». Проверьте текст'); return; }
+    onDone(r);
   };
   return (
     <div className="space-y-3 pt-1">
@@ -339,7 +366,7 @@ function ProposalBody({ p, onPatch }: { p: AnyProposal; onPatch: (x: Partial<Any
       return <div className="flex items-start justify-between gap-2 text-[13px] leading-snug text-muted"><span className="min-w-0">{ddmm(p.date)} {p.text}</span><Money value={p.amount} className="shrink-0" /></div>;
     case 'tx':
       return (
-        <div>
+        <div className={p.tx.duplicate ? 'opacity-50' : ''}>
           <div className="flex items-start justify-between gap-2">
             <span className="min-w-0 truncate text-[14px] font-medium">{p.tx.merchant}</span>
             <Money value={p.tx.amount} className={`shrink-0 text-[14px] ${p.tx.source === 'credit' ? 'text-neg' : ''}`} />

@@ -7,7 +7,8 @@
 import { Check } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { AmountInput, Money, PrimaryButton, Sheet } from '../components/ui';
+import { motion } from 'motion/react';
+import { AmountInput, Money, PrimaryButton, SecondaryButton, Sheet } from '../components/ui';
 import { addDays, ddmm, today, weekStart } from '../domain/dates';
 import { checkupPlan, ledger, MATCH, weekLeftover, type CardLedger, type Ledger } from '../domain/ledger';
 import { num, parseAmount, round } from '../domain/money';
@@ -93,6 +94,13 @@ function Body({ monday }: { monday: string }) {
   const mirror = dCard != null && dReserve != null && Math.abs(dCard) > MATCH && Math.abs(dCard + dReserve) <= MATCH;
   const ready = cardV != null && reserveV != null && led.cards.every(c => debtOf(c, entryOf(c.debt.id)) != null);
 
+  // шаги: карта, резерв, каждая кредитка, итог с переводом
+  const [step, setStep] = useState(0);
+  const last = 2 + led.cards.length;
+  const filled = (k: number) => (k === 0 ? cardV != null : k === 1 ? reserveV != null : debtOf(led.cards[k - 2], entryOf(led.cards[k - 2].debt.id)) != null);
+  // траты с карты за три дня: банк проводит операции до трёх суток, остаток может их ещё не учитывать
+  const recent3 = useMemo(() => expenses.filter(e => e.source === 'life' && e.date >= addDays(today(), -3)).reduce((t, e) => t + e.amount, 0), [expenses]);
+
   const addSpend = (amount: number, source: 'life' | 'credit', creditCard?: string) =>
     set({ add: { amount: Math.round(amount * 100) / 100, source, date: addDays(monday, 6) > today() ? today() : addDays(monday, 6), creditCard: source === 'credit' ? creditCard : undefined } });
 
@@ -121,36 +129,56 @@ function Body({ monday }: { monday: string }) {
 
   return (
     <div className="space-y-4 pt-1">
-      <p className="text-[13.5px] leading-snug text-muted">Откройте банк и впишите, что видите сейчас, до перевода. Приложение сравнит с учётом и скажет, сколько перевести.</p>
-
+      {/* сверка по шагам: один вопрос на экран, после ответа сразу видно — сошлось или нет */}
+      <div className="flex items-center gap-1.5" aria-label={`Шаг ${step + 1} из ${last + 1}`}>
+        {Array.from({ length: last + 1 }, (_, k) => (
+          <button key={k} type="button" aria-label={`Шаг ${k + 1}`} onClick={() => setStep(k)}
+            className={`h-1.5 flex-1 rounded-full transition-colors duration-300 ${k < step ? 'bg-pos' : k === step ? 'bg-sea' : 'bg-line'}`} />
+        ))}
+      </div>
+      <motion.div key={step} initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} transition={{ type: 'spring', bounce: 0, duration: 0.3 }} className="space-y-4">
+      {step === 0 && (
+        <>
+          <p className="text-[13.5px] leading-snug text-muted">Откройте банк. Сколько сейчас на карте — до перевода?</p>
       <Account label="На карте ВТБ" hint="свои: мастер-счёт, карта жизни" dot="var(--own)" value={card} onChange={setCard}>
         {cardV != null && (led.card == null
           ? <Note>Первая сверка: с этой суммы начнётся учёт карты.</Note>
           : <Verdict d={dCard!} expected={led.card}
               less={x => <>Меньше, чем по учёту, на <Money value={x} />. Похоже, не все траты внесены.{' '}
                 <button type="button" onClick={() => addSpend(x, 'life')} className="font-medium text-sea">Добавить трату {num(x)} ₽</button></>}
-              more={x => <>Больше, чем по учёту, на <Money value={x} />: пришло, но не отмечено (возврат, перевод или доход).</>} />)}
+              more={x => (x <= recent3 + MATCH
+                ? <>Больше, чем по учёту, на <Money value={x} />. Похоже, банк ещё не списал недавние траты (за три дня записано <Money value={recent3} />) — так бывает до трёх суток, добавлять ничего не нужно.</>
+                : <>Больше, чем по учёту, на <Money value={x} />: пришло, но не отмечено (возврат, перевод или доход).</>)} />)}
       </Account>
 
+        </>
+      )}
+      {step === 1 && (
+        <>
+          <p className="text-[13.5px] leading-snug text-muted">Сколько на накопительном счёте?</p>
       <Account label="В резерве" hint="накопительный счёт" dot="var(--rsv)" value={reserve} onChange={setReserve}>
         {reserveV != null && <Verdict d={dReserve!} expected={led.reserve}
           less={x => <>Меньше, чем по учёту, на <Money value={x} />: платёж или трата из резерва не отмечены.</>}
           more={x => <>Больше, чем по учёту, на <Money value={x} />: проценты или поступление, которое не отмечено.</>} />}
       </Account>
 
-      {led.cards.length > 0 && (
-        <div className="space-y-1 px-1 pt-1">
+        </>
+      )}
+      {led.cards.map((c, i) => step === 2 + i && (
+        <div key={c.debt.id} className="space-y-3">
+          <div className="space-y-1 px-1">
           <div className="text-[15px] font-medium"><span className="mr-2 inline-block size-2.5 rounded-[3px]" style={{ background: 'var(--loan-hatch)' }} />Кредитки — в долг</div>
           <details className="text-[12.5px] leading-snug text-muted">
             <summary className="cursor-pointer list-none font-medium text-sea [&::-webkit-details-marker]:hidden">Что вписывать</summary>
             <p className="mt-1">«Долг» — вся задолженность из приложения банка, с процентами на сегодня. «Доступно» — баланс карты, он бывает меньше нуля: для минуса — кнопка «−». Проценты приложение считает по дням, как банк.</p>
           </details>
+          </div>
+          <CardAccount c={c} entry={entryOf(c.debt.id)} onEntry={p => patchEntry(c.debt.id, p)} onAddSpend={x => addSpend(x, 'credit', c.debt.id)} />
         </div>
-      )}
-      {led.cards.map(c => (
-        <CardAccount key={c.debt.id} c={c} entry={entryOf(c.debt.id)} onEntry={p => patchEntry(c.debt.id, p)} onAddSpend={x => addSpend(x, 'credit', c.debt.id)} />
       ))}
-
+      {step === last && (
+        <>
+          {!ready && <Note>Заполнены не все шаги — вернитесь к пропущенным, и приложение скажет, сколько перевести.</Note>}
       {mirror && <Note>Карта и резерв разошлись на одну сумму в разные стороны: похоже, <Money value={Math.abs(dCard!)} /> уже переведены между ними. Это не ошибка, сверка запомнит остатки из банка.</Note>}
 
       {ready && (
@@ -194,6 +222,13 @@ function Body({ monday }: { monday: string }) {
           </div>
         </section>
       )}
+        </>
+      )}
+      </motion.div>
+      <div className="grid grid-cols-[auto_1fr] gap-2">
+        <SecondaryButton onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0}>Назад</SecondaryButton>
+        {step < last && <PrimaryButton onClick={() => setStep(step + 1)} disabled={!filled(step)}>{step === last - 1 ? 'К итогу' : 'Далее'}</PrimaryButton>}
+      </div>
     </div>
   );
 }

@@ -86,8 +86,32 @@ function Body() {
     return next;
   });
 
+  // ответ чата одним касанием: прочитать буфер (iPhone спросит «Вставить») и сразу показать изменения
+  const pasteAnswer = async () => {
+    let raw = '';
+    try { raw = await navigator.clipboard.readText(); } catch { /* буфер закрыт */ }
+    if (raw.trim()) parse(raw); else toast('Буфер пуст или закрыт — вставьте ответ в поле ниже');
+  };
+
   return (
     <div className="space-y-5 pt-1">
+      {/* обмен в два касания: скопировать файл для чата — и вставить его ответ. Подробности — ниже */}
+      {!file && (
+        <div className="grid grid-cols-2 gap-2">
+          <button type="button" onClick={() => void copy(exportText(true))} className="deep-card px-4 py-4 text-left transition-transform duration-100 active:scale-[.97]" style={{ background: 'linear-gradient(165deg, #8f58e2 0%, #6a3fc0 55%, #432a86 100%)' }}>
+            <span aria-hidden="true" className="deep-sheen" />
+            <ArrowUpFromLine size={22} strokeWidth={1.9} />
+            <span className="mt-2 block text-[15.5px] leading-tight font-medium">Скопировать для чата</span>
+            <span className="mt-1 block text-[12px] leading-snug text-white/75">короткий файл для сверки</span>
+          </button>
+          <button type="button" onClick={() => void pasteAnswer()} className="deep-card px-4 py-4 text-left transition-transform duration-100 active:scale-[.97]">
+            <span aria-hidden="true" className="deep-sheen" />
+            <ArrowDownToLine size={22} strokeWidth={1.9} />
+            <span className="mt-2 block text-[15.5px] leading-tight font-medium">Вставить ответ чата</span>
+            <span className="mt-1 block text-[12px] leading-snug text-card-muted">покажу, что изменится</span>
+          </button>
+        </div>
+      )}
       <section className="card space-y-3 p-4">
         <h3 className="flex items-center gap-2.5 text-[15px] font-medium"><Tile c="#8b63e0" className="size-8 !rounded-[10px]"><ArrowUpFromLine size={16} strokeWidth={2} /></Tile>Из приложения в чат</h3>
         <p className="text-[13.5px] leading-snug">Файл со всем, что знает приложение. Добавьте его в <b className="font-medium">файлы проекта «Финансы»</b> вместо прошлого или приложите к сообщению.</p>
