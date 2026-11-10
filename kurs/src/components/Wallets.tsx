@@ -1,7 +1,8 @@
 // «Где деньги» на «Сегодня» (версия 0.3): три сосуда с уровнем воды — свои на карте, взятое в долг по мосту и
 // резерв. Сплошная вода — свои деньги, штриховка — чужие. Нажатие — подробности счёта.
-import type { CSSProperties, ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { BridgeState } from '../domain/bridge';
+import { Roll } from './motion';
 import { Money } from './ui';
 
 const WAVE = 'M0 4 Q7.5 1 15 4 T30 4 T45 4 T60 4 T75 4 T90 4 T105 4 T120 4';
@@ -10,6 +11,10 @@ function Vessel({ label, value, caption, level, fill, ink, onClick, i, alert }: 
   label: string; value: number; caption: ReactNode; level: number; fill: string; ink: string; onClick: () => void; i: number; alert?: boolean;
 }) {
   const h = Math.max(0.08, Math.min(1, level));
+  // деньги ушли или пришли (отметили платёж, записали трату) — по воде расходится круг, уровень плавно меняется
+  const prev = useRef(value);
+  const [ripple, setRipple] = useState(0);
+  useEffect(() => { if (Math.round(prev.current) !== Math.round(value)) { prev.current = value; setRipple(n => n + 1); } }, [value]);
   return (
     <button type="button" onClick={onClick}
       className="relative flex min-h-[86px] min-w-0 flex-col items-start overflow-hidden rounded-[20px] border bg-surface px-3 pt-2.5 pb-2.5 text-left transition-transform duration-100 active:scale-[.97]"
@@ -21,7 +26,8 @@ function Vessel({ label, value, caption, level, fill, ink, onClick, i, alert }: 
         <svg className="sc-wave absolute -top-1 left-0 h-1.5 w-[200%]" viewBox="0 0 120 8" preserveAspectRatio="none"><path d={WAVE} fill="none" strokeWidth="1.3" style={{ stroke: ink }} /></svg>
       </span>
       <span className="relative text-[12px] font-medium" style={{ color: ink }}>{label}</span>
-      <span className={`figure relative mt-0.5 text-[17px] leading-tight ${alert ? 'text-warn' : ''}`}><Money value={value} /></span>
+      {ripple > 0 && <span key={ripple} aria-hidden="true" className="vessel-ripple absolute left-1/2 size-10 rounded-[50%] border-2" style={{ bottom: `calc(${h * 100}% - 20px)`, borderColor: ink }} />}
+      <span className={`figure relative mt-0.5 text-[17px] leading-tight ${alert ? 'text-warn' : ''}`}><Roll value={value} /></span>
       <span className="relative mt-auto pt-1 text-[11px] leading-tight text-muted">{caption}</span>
     </button>
   );

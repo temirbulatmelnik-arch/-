@@ -263,15 +263,16 @@ export function Row({ label, children, className = '' }: { label: ReactNode; chi
   );
 }
 
-export function Toast({ text, onDone }: { text: string | null; onDone: () => void }) {
+export function Toast({ text, onDone, undo }: { text: string | null; onDone: () => void; undo?: (() => void) | null }) {
   // таймер зависит только от текста: иначе каждое нажатие где угодно перезапускало бы его и сообщение висело
   const done = useRef(onDone);
   done.current = onDone;
   useEffect(() => {
     if (!text) return;
-    const t = setTimeout(() => done.current(), 2800);
+    // с «Отменить» сообщение держится 5 секунд — успеть передумать
+    const t = setTimeout(() => done.current(), undo ? 5000 : 2800);
     return () => clearTimeout(t);
-  }, [text]);
+  }, [text, undo]);
   // сообщение выезжает сверху, как «островок» iPhone: туда смотрят, оно не закрывает кнопки внизу
   return (
     <AnimatePresence>
@@ -281,6 +282,7 @@ export function Toast({ text, onDone }: { text: string | null; onDone: () => voi
           className="fixed inset-x-0 top-[calc(env(safe-area-inset-top)+10px)] z-[70] mx-auto flex w-fit max-w-[90%] items-center gap-2.5 rounded-full bg-ink px-4 py-2.5 text-[13.5px] leading-snug font-medium text-bg shadow-[0_14px_34px_-12px_rgba(4,14,22,.6)]">
           <motion.span className="size-2 shrink-0 rounded-full bg-sea" initial={{ scale: 0.5 }} animate={{ scale: [0.5, 1.5, 1] }} transition={{ duration: 0.45, delay: 0.1, ease: [0.23, 1, 0.32, 1] }} />
           {text}
+          {undo && <button type="button" onClick={e => { e.stopPropagation(); undo(); }} className="-my-1 -mr-1.5 ml-1 shrink-0 rounded-full bg-bg/15 px-3 py-1.5 text-[13px] font-medium text-[#ffc49a]">Отменить</button>}
         </motion.div>
       )}
     </AnimatePresence>

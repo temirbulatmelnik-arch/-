@@ -120,6 +120,7 @@ export default function App() {
   const tourSeen = useStore(s => s.settings.tourSeen ?? 0);
   const tab = useUi(s => s.tab);
   const toast = useUi(s => s.toast);
+  const undo = useUi(s => s.undo);
   const set = useUi(s => s.set);
   useTabScroll(tab);
   const mounted = useMountedTabs(tab, ready);
@@ -169,7 +170,7 @@ export default function App() {
         <TabBar />
 
         {SHEETS}
-        <Toast text={toast} onDone={() => set({ toast: null })} />
+        <Toast text={toast} undo={undo} onDone={() => set({ toast: null, undo: null })} />
       </div>
     </MotionConfig>
   );

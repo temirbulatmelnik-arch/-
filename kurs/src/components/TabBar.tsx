@@ -14,7 +14,7 @@ import { haptic } from './haptics';
 type Icon = ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
 export const TABS: { id: Tab; label: string; icon: Icon }[] = [
   { id: 'week', label: 'Сегодня', icon: BridgeIcon },
-  { id: 'payments', label: 'Платежи', icon: CalendarDays },
+  { id: 'payments', label: 'Впереди', icon: CalendarDays },
   { id: 'budget', label: 'Траты', icon: ReceiptText },
   { id: 'plan', label: 'Долги', icon: Anchor },
 ];
@@ -26,8 +26,11 @@ export function checkupMonday(): string {
   return weekToClose(today(), done);
 }
 
-/** Колонка вкладки в сетке панели: две слева, «плюс» посередине, две справа */
-const COL: Record<Tab, number> = { week: 0, payments: 1, budget: 3, plan: 4 };
+/** Внизу две вкладки и «плюс» между ними: «Сегодня» и «Впереди». «Траты» и «Долги» открываются плитками с «Сегодня»
+ *  и считаются его частью — пока они открыты, подсвечено «Сегодня», нажатие на него возвращает назад */
+const BAR: Tab[] = ['week', 'payments'];
+const home = (t: Tab): Tab => (t === 'payments' ? 'payments' : 'week');
+const COL: Record<Tab, number> = { week: 0, budget: 0, plan: 0, payments: 2 };
 
 const HOLD_MS = 420;
 const RING = 2 * Math.PI * 34;
@@ -76,11 +79,11 @@ export function TabBar() {
   const pick = (id: string) => { setFan(false); runQuick(id); };
 
   const tabButton = (t: typeof TABS[number]) => {
-    const active = t.id === tab;
+    const active = t.id === home(tab);
     return (
       <motion.button key={t.id} type="button" whileTap={{ scale: 0.94 }} transition={snappy} aria-current={active ? 'page' : undefined}
-        onClick={() => (active ? window.scrollTo({ top: 0, behavior: 'smooth' }) : setTab(t.id))}
-        className={`relative flex flex-col items-center gap-[3px] rounded-[22px] py-2 text-[10.5px] font-medium transition-colors ${active ? 'text-ink' : 'text-faint'}`}>
+        onClick={() => (t.id === tab ? window.scrollTo({ top: 0, behavior: 'smooth' }) : setTab(t.id))}
+        className={`relative flex flex-col items-center gap-[3px] rounded-[22px] py-2 text-[11px] font-medium transition-colors ${active ? 'text-ink' : 'text-faint'}`}>
         <motion.span key={String(active)} initial={active ? { y: 2, scale: 0.9 } : false} animate={{ y: 0, scale: 1 }} transition={{ type: 'spring', bounce: 0.3, duration: 0.3 }} className="relative">
           <t.icon size={21} strokeWidth={active ? 1.9 : 1.5} className={active ? 'text-sea' : ''} />
         </motion.span>
@@ -119,15 +122,15 @@ export function TabBar() {
 
       <nav className="pb-safe pointer-events-none fixed inset-x-0 bottom-0 z-40" aria-label="Разделы">
         <div className="pointer-events-auto relative mx-auto mb-2.5 w-[min(94%,404px)]">
-          <div className="bar-glass relative grid grid-cols-5 items-end rounded-[28px] p-1.5">
+          <div className="bar-glass relative grid grid-cols-3 items-end rounded-[28px] p-1.5">
             {/* подложка активной вкладки едет за пальцем обычным CSS-переходом: только transform, на видеокарте.
                 Раньше это была общая layout-анимация motion — она пересчитывала положение сотен элементов страницы
                 при каждом переключении и давала заметную задержку */}
-            <span aria-hidden="true" className="pointer-events-none absolute inset-y-1.5 left-1.5 w-[calc((100%-12px)/5)] rounded-[22px] transition-transform duration-[380ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none"
+            <span aria-hidden="true" className="pointer-events-none absolute inset-y-1.5 left-1.5 w-[calc((100%-12px)/3)] rounded-[22px] transition-transform duration-[380ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none"
               style={{ transform: `translateX(${COL[tab] * 100}%)`, background: 'var(--bar-pill)' }} />
-            {TABS.slice(0, 2).map(tabButton)}
+            {tabButton(TABS.find(t => t.id === BAR[0])!)}
             <span aria-hidden="true" />
-            {TABS.slice(2).map(tabButton)}
+            {tabButton(TABS.find(t => t.id === BAR[1])!)}
           </div>
           <motion.button type="button" aria-label={fan ? 'Закрыть' : 'Записать трату. Удерживайте — ещё действия'}
             onPointerDown={down} onPointerUp={up} onPointerLeave={cancel} onPointerCancel={cancel} onContextMenu={e => e.preventDefault()}

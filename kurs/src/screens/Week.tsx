@@ -1,10 +1,10 @@
-// «Неделя»: сцена с мостом, остаток недели и кольцо дня. Под сценой — действия и стопка карточек: сегодня,
-// ближайший платёж, дела, резерв. Плашка о перерасходе появляется при входе в приложение и сама растворяется.
-import { ChevronRight, Hourglass, MessagesSquare, PiggyBank, Scale, ScanText, Settings as Cog } from 'lucide-react';
+// «Сегодня»: сцена с мостом, остаток недели и кольцо дня. Под сценой — быстрые траты, один следующий шаг, строка
+// «Неделя», три сосуда «Где деньги» и плитки-входы «Траты» и «Долги». Плашка о перерасходе появляется при входе.
+import { ChevronRight, MessagesSquare, Scale, ScanText, Settings as Cog } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { CardStack, type StackCard } from '../components/CardStack';
+import { EntryTiles, flyCoin, NextStep, QuickSpends, type Step } from '../components/Home';
 import { DayRing } from '../components/DayRing';
 import { Wallets } from '../components/Wallets';
 import { WeekStrip } from '../components/WeekStrip';
@@ -12,19 +12,20 @@ import { bridgeControl, lampAt, setSceneHidden, SkyButton, WeekScene } from '../
 import { haptic } from '../components/haptics';
 import { Roll, spring } from '../components/motion';
 import { QUICK_COLOR, runQuick } from '../components/TabBar';
-import { AlertRow, EventRow } from '../components/rows';
-import { CatIcon, Money } from '../components/ui';
-import { eventsBetween, urgency } from '../domain/calendar';
+import { CAT_COLOR, Money } from '../components/ui';
+import { eventsBetween } from '../domain/calendar';
 import { activeBridge, bridgeState, weekMoney } from '../domain/bridge';
-import { addDays, dayMonth, ddmm, fromKey, monthIn, plural, weekday, weekdayFull, weekRange, weekStart } from '../domain/dates';
-import { BIG_PURCHASE_HOURS, currentPhase, phaseByDate, reserveNeed, totalDebt } from '../domain/plan';
-import { alerts as buildAlerts, type Alert, countsWeekly, dayBudget, weekSummary } from '../domain/summary';
+import { addDays, dayMonth, ddmm, fromKey, monthKey, plural, weekday, weekdayFull, weekRange, weekStart } from '../domain/dates';
+import { rub } from '../domain/money';
+import { quickSpends, yesterdaySet, type QuickSpend } from '../domain/quick';
+import { spendEffect, suggestSource } from '../domain/sources';
+import { CATEGORY, currentPhase, phaseByDate, reserveNeed, totalDebt } from '../domain/plan';
+import { alerts as buildAlerts, type Alert, countsWeekly, dayBudget, monthByCategory, weekSummary } from '../domain/summary';
 import type { CalEvent } from '../domain/types';
 import { weekReport, weekToClose } from '../domain/weekly';
 import { useStore } from '../store/store';
-import { toast, useCal, useToday, useUi } from '../store/ui';
+import { toast, useCal, useToday, useUi, withUndo } from '../store/ui';
 import { checkInbox, checkPlan } from './Sync';
-import { TodayDetails } from './TodaySheet';
 import { useLedger } from './Checkup';
 
 /* вход в приложение: запуск или возвращение из фона — тогда плашка о перерасходе показывается снова */
@@ -75,8 +76,8 @@ function useOverPill(left: number, alert: boolean) {
 export function Week() {
   const now = useToday();
   const cal = useCal();
-  const [expenses, debts, marks, wishes, reserve, settings, overrides, startTotal, closures, checklist, checks, toggleCheck, bridge, checkups] = useStore(useShallow(s => [
-    s.expenses, s.debts, s.marks, s.wishes, s.reserve, s.settings, s.weeklyOverrides, s.planTrajectory[0]?.[1] ?? 0, s.closures, s.checklist, s.checks, s.toggleCheck, s.bridge, s.checkups,
+  const [expenses, debts, marks, wishes, settings, overrides, startTotal, closures, checklist, checks, toggleCheck, bridge, checkups] = useStore(useShallow(s => [
+    s.expenses, s.debts, s.marks, s.wishes, s.settings, s.weeklyOverrides, s.planTrajectory[0]?.[1] ?? 0, s.closures, s.checklist, s.checks, s.toggleCheck, s.bridge, s.checkups,
   ] as const));
   // только нужное из состояния интерфейса: иначе весь экран перерисовывался бы при каждом переключении вкладки и листе
   const ui = { set: useUi(s => s.set), setTab: useUi(s => s.setTab), stackOpen: useUi(s => s.stackOpen) };
@@ -152,11 +153,7 @@ export function Week() {
   const over = week.left < 0;
   const dayAlert = today.mode !== 'ok';
   const pill = useOverPill(today.left, dayAlert);
-  const { need, next } = reserveNeed(now, debts);
-  // воскресное пополнение карты жизни: лимит следующей недели минус то, что на ней осталось
-  const current = useMemo(() => weekReport(expenses, debts, overrides, week.monday, bridge), [expenses, debts, overrides, week.monday, bridge]);
-  const topped = closures[week.monday]?.topUp;
-
+  const { need } = reserveNeed(now, debts);
   // в выходные и в начале недели — предложить закрыть неделю
   // неделя считается закрытой, когда сохранена сверка с банком (или закрыта по-старому)
   const done = useMemo(() => ({ ...closures, ...Object.fromEntries(checkups.map(c => [c.monday, c])) }) as typeof closures, [closures, checkups]);
@@ -164,21 +161,6 @@ export function Week() {
   const dow = fromKey(now).getDay();
   const offerClose = !done[closeMonday] && (dow === 0 || dow === 6 || closeMonday < week.monday);
   const closing = useMemo(() => (offerClose ? weekReport(expenses, debts, overrides, closeMonday, bridge) : null), [offerClose, expenses, debts, overrides, closeMonday, bridge]);
-
-  // платежи: просроченные и на 3 дня — из предупреждений, плюс всё неотмеченное на неделю вперёд
-  const ahead = useMemo(() => {
-    const out = new Map<string, CalEvent>();
-    for (const a of list) if (a.action === 'pay' && a.event) out.set(a.event.key, a.event);
-    for (const e of eventsBetween(cal, now, addDays(now, 7))) if (!marks[e.key]?.done) out.set(e.key, e);
-    return [...out.values()].sort((a, b) => a.date.localeCompare(b.date));
-  }, [list, cal, now, marks]);
-  const nextPay = ahead.find(e => e.kind === 'payment') ?? ahead[0];
-  const nextU = nextPay ? urgency(nextPay, marks[nextPay.key], now) : null;
-  const payHot = nextU === 'overdue' || (!!nextPay && nextPay.kind === 'payment' && nextPay.date <= addDays(now, 1));
-
-  const todoAlerts = list.filter(a => a.action !== 'pay' && a.action !== 'wish');
-  const todoCount = (closing ? 1 : 0) + todoAlerts.length + pending.length;
-  const todoFirst = closing ? `Сверка с банком за ${ddmm(closeMonday)}–${ddmm(addDays(closeMonday, 6))}` : todoAlerts[0]?.title ?? (pending[0] ? `Пауза 48 часов: ${pending[0].title}` : null);
 
   const onAlert = (a: Alert) => {
     if (a.action === 'pay' || a.action === 'weekly') ui.set({ event: a.event ?? null });
@@ -190,94 +172,101 @@ export function Week() {
   };
 
   const whenShort = (e: CalEvent) => `${weekday(e.date)} ${Number(e.date.slice(8))}`;
-  const cards: StackCard[] = [
-    {
-      id: 'today', tone: 'today', kicker: 'Сегодня', alert: dayAlert,
-      title: today.mode === 'week' ? <>Потрачено сегодня <Money value={today.spentToday} /></> : <>Потрачено <Money value={today.spentToday} /> из <Money value={today.day} /></>,
-      amount: <Money value={today.canSpend} />,
-      body: (
-        <>
-          <TodayDetails />
-          <button type="button" onClick={() => ui.set({ week: week.monday })} className="mt-2 flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-[13.5px]">
-            <span>Итог недели: <Money value={week.spent} /> из <Money value={week.limit} /></span>
-            <ChevronRight size={15} className="shrink-0 text-faint" />
-          </button>
-        </>
-      ),
-    },
-    {
-      id: 'ahead', tone: 'ahead', alert: nextU === 'overdue',
-      kicker: !nextPay ? 'Платежи' : nextU === 'overdue' ? 'Просрочен платёж' : nextPay.date === now ? 'Платёж сегодня'
-        : `${nextPay.kind === 'income' ? 'Поступление' : nextPay.kind === 'weekly' ? 'Пополнение карты' : 'Ближайший платёж'}, ${whenShort(nextPay)}`,
-      title: nextPay ? nextPay.title : 'На неделе платежей нет',
-      amount: nextPay ? <Money value={nextPay.amount} approx={nextPay.approx} sign={nextPay.kind === 'income'} /> : undefined,
-      body: (
-        <>
-          {ahead.length > 0 && <div className="divide-hair">{ahead.slice(0, 5).map(e => <EventRow key={e.key} e={e} mark={marks[e.key]} now={now} onClick={() => ui.set({ event: e })} />)}</div>}
-          <button type="button" onClick={() => ui.setTab('payments')} className="flex w-full items-center justify-between px-4 py-2.5 text-left text-[13.5px]" style={{ color: 'var(--stack-ahead-kicker)' }}>
-            Все платежи месяца <ChevronRight size={15} />
-          </button>
-        </>
-      ),
-    },
-    {
-      id: 'todo', tone: 'todo', kicker: 'Дела',
-      title: todoFirst ? <>{todoFirst}{todoCount > 1 ? ` и ещё ${todoCount - 1}` : ''}</> : 'Всё сделано',
-      amount: todoCount > 0 ? <span style={{ color: 'var(--stack-todo-kicker)' }}>{todoCount}</span> : undefined,
-      body: todoCount === 0
-        ? <p className="px-4 text-[13.5px] leading-snug text-muted">Здесь появятся сроки из чек-листа, резервная копия и закрытие недели.</p>
-        : (
-          <div className="divide-hair">
-            {closing && (
-              <button type="button" onClick={() => ui.set({ checkup: closeMonday })} className="flex w-full items-start gap-3 px-4 py-3.5 text-left">
-                <span className="grid size-9 shrink-0 place-items-center rounded-full bg-sea/12 text-sea"><PiggyBank size={17} strokeWidth={1.6} /></span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[14.5px] leading-snug font-medium">Сверка с банком и закрытие недели {ddmm(closeMonday)}–{ddmm(addDays(closeMonday, 6))}</span>
-                  <span className="mt-0.5 block text-[12.5px] leading-snug text-muted">
-                    Впишите остатки на карте, в резерве и на кредитке — приложение сверит с учётом и скажет, сколько перевести. По учёту из резерва на карту <Money value={closing.topUp} className="text-ink" />{closing.leftover > 0 ? <>, остаток <Money value={closing.leftover} /> уже на ней</> : closing.left < 0 ? <>, перерасход <Money value={-closing.left} /></> : ''}.
-                  </span>
-                </span>
-                <ChevronRight size={16} className="mt-2.5 shrink-0 text-faint" />
-              </button>
-            )}
-            {todoAlerts.map(a => (a.action === 'check'
-              ? <CheckRow key={a.id} a={a} onToggle={() => toggleCheck(a.id.replace(/^check:/, ''))} onOpen={() => onAlert(a)} />
-              : <AlertRow key={a.id} a={a} now={now} onClick={() => onAlert(a)} />))}
-            {pending.map(w => <WishRow key={w.id} id={w.id} />)}
-          </div>
-        ),
-    },
-    {
-      id: 'money', tone: 'money', kicker: topped != null ? 'Воскресенье: карта пополнена' : today.nextWeek ? 'Сегодня вечером' : 'В воскресенье', alert: reserve < need,
-      title: topped != null ? 'Долито из резерва' : 'Долить на карту из резерва',
-      amount: <Money value={topped ?? current.topUp} />,
-      body: (
-        <div className="flex flex-col">
-          <button type="button" onClick={() => ui.set({ reserve: true })} className="block w-full px-4 text-left">
-            <span className="relative block h-1.5 rounded-full" style={{ background: reserve >= need ? 'linear-gradient(90deg, var(--ring-1), var(--ring-2))' : 'var(--line)' }}>
-              {reserve >= need
-                ? <span className="absolute -top-[3px] h-3 w-0.5 rounded-full bg-ink" style={{ left: `${(need / Math.max(reserve, 1)) * 100}%` }} />
-                : <span className="absolute inset-y-0 left-0 rounded-full bg-warn" style={{ width: `${(reserve / Math.max(need, 1)) * 100}%` }} />}
-            </span>
-            <span className={`mt-2 block text-[12.5px] leading-snug ${reserve < need ? 'text-warn' : 'text-muted'}`}>
-              {reserve >= need ? <>Держит <Money value={need} /> до премии {monthIn(next)}, запас <Money value={reserve - need} /></> : <>До премии {monthIn(next)} нужно <Money value={need} />, не хватает <Money value={need - reserve} /></>}
-            </span>
-          </button>
-          <button type="button" onClick={() => ui.set({ week: week.monday })} className="order-first block w-full px-4 pt-1 pb-4 text-left">
-            <span className="flex h-1.5 overflow-hidden rounded-full bg-line">
-              <span className="bg-sea" style={{ width: `${(current.leftover / Math.max(current.nextLimit, 1)) * 100}%` }} />
-              <span className="bg-warn" style={{ width: `${(current.topUp / Math.max(current.nextLimit, 1)) * 100}%` }} />
-            </span>
-            <span className="mt-2 block text-[12.5px] leading-snug text-muted">
-              {topped != null ? 'из резерва на карту жизни' : current.leftover > 0 ? <>на карте останется <Money value={current.leftover} />, остальное из резерва</> : 'из резерва, до полного лимита'}
-            </span>
-          </button>
-        </div>
-      ),
-    },
-  ];
-  // раскрыта карточка, которую открыли; без выбора — срочный платёж, иначе «Сегодня»
-  const open = ui.stackOpen ?? (payHot ? 'ahead' : 'today');
+
+  // Следующий шаг: приложение само говорит, что сделать сейчас, — по одному. Сначала деньги (неотмеченные платежи
+  // и поступления до сегодня), потом сверка, вечерняя проверка, дела и отложенные покупки. «Позже» — до перезапуска
+  const [later, setLater] = useState<ReadonlySet<string>>(() => new Set());
+  const hour = new Date().getHours();
+  const steps = useMemo<Step[]>(() => {
+    const out: Step[] = [];
+    const due = eventsBetween(cal, addDays(now, -45), now).filter(e => !marks[e.key]?.done);
+    for (const e of due) {
+      const old = e.date < now;
+      if (e.kind === 'payment') {
+        out.push({
+          id: e.key, tone: 'out', kicker: old ? `Не отмечен платёж, ${ddmm(e.date)}` : 'Платёж сегодня', title: e.title,
+          amount: <Money value={e.amount} approx={e.approx} />, text: old ? 'Оплатили — отметьте. Нет — оплатите сегодня: просрочка недопустима.' : undefined,
+          primary: { label: 'Оплачено', run: () => ui.set({ event: e }) },
+        });
+      } else if (e.kind === 'income' && e.date >= addDays(now, -10)) {
+        const bonus = list.some(a => a.action === 'income' && a.event?.key === e.key);
+        out.push({
+          id: e.key, tone: 'in', kicker: old ? `Ожидалось ${ddmm(e.date)}` : 'Поступление сегодня', title: e.title, amount: <Money value={e.amount} approx={e.approx} sign />,
+          text: bonus ? 'Пришла? Распределите в тот же день: резерв по формуле, остальное в долг.' : undefined,
+          primary: { label: 'Пришло', run: () => ui.set(bonus ? { bonus: { event: e } } : { event: e }) },
+        });
+      } else if (e.kind === 'weekly' && !closing && e.date >= addDays(now, -7)) {
+        out.push({ id: e.key, tone: 'rsv', kicker: 'Пополнение карты из резерва', title: e.title, amount: <Money value={e.amount} />, primary: { label: 'Долито', run: () => ui.set({ event: e }) } });
+      }
+    }
+    if (closing) {
+      out.push({
+        id: `close:${closeMonday}`, tone: 'rsv', kicker: 'Сверка с банком', title: `Закрыть неделю ${ddmm(closeMonday)}–${ddmm(addDays(closeMonday, 6))}`,
+        text: <>Три вопроса: карта, резерв, кредитка. По учёту долить на карту <Money value={closing.topUp} className="text-ink" />.</>,
+        primary: { label: 'Сверить', run: () => ui.set({ checkup: closeMonday }) },
+      });
+    }
+    if (hour >= 19 && !expenses.some(e => e.date === now)) {
+      out.push({
+        id: `evening:${now}`, tone: 'calm', kicker: 'Вечер', title: 'Сегодня ничего не тратили?', text: 'Трат за сегодня нет. Если были — запишите, пока помните.',
+        primary: { label: 'Да, ноль', run: () => setLater(l => new Set(l).add(`evening:${now}`)) }, secondary: { label: 'Записать', run: () => ui.set({ add: {} }) },
+      });
+    }
+    for (const a of list) {
+      if (a.action === 'pay' || a.action === 'income' || a.action === 'wish') continue;
+      const check = a.action === 'check';
+      out.push({
+        id: a.id, tone: a.tone === 'danger' ? 'out' : 'todo', kicker: check ? 'Дело из чек-листа' : 'Внимание', title: a.title, text: a.text,
+        primary: check ? { label: 'Сделано', run: () => toggleCheck(a.id.replace(/^check:/, '')) } : { label: 'Открыть', run: () => onAlert(a) },
+        ...(check ? { secondary: { label: 'Открыть', run: () => onAlert(a) } } : {}),
+      });
+    }
+    for (const w of pending) {
+      out.push({
+        id: `wish:${w.id}`, tone: 'todo', kicker: 'Пауза 48 часов', title: w.title, amount: <Money value={w.amount} />, text: 'Прошло время подумать. Всё ещё нужно?',
+        primary: { label: 'Не нужно', run: () => useStore.getState().resolveWish(w.id, 'skipped') },
+        secondary: { label: 'Купил', run: () => ui.set({ add: { amount: w.amount, category: w.category, note: w.title, wishId: w.id } }) },
+      });
+    }
+    const todo = out.filter(x => !later.has(x.id));
+    if (todo.length) return todo;
+    // дел нет — спокойная карточка: что ближайшее впереди
+    const soon = eventsBetween(cal, addDays(now, 1), addDays(now, 14)).find(e => !marks[e.key]?.done && e.kind !== 'weekly');
+    return [{
+      id: 'calm', calm: true, tone: 'calm', kicker: soon ? `${soon.kind === 'income' ? 'Ближайшее поступление' : 'Ближайший платёж'}, ${whenShort(soon)}` : 'Всё сделано',
+      title: soon ? soon.title : 'Дел на сегодня нет', amount: soon ? <Money value={soon.amount} approx={soon.approx} sign={soon.kind === 'income'} /> : undefined,
+      primary: { label: 'Что впереди', run: () => ui.setTab('payments') },
+    }];
+  }, [cal, marks, now, list, closing, closeMonday, hour, expenses, pending, later]);
+
+  // кольцо крутят пальцем: «а если потрачу?» — что останется сегодня и какой станет норма завтра
+  const [whatIf, setWhatIf] = useState<number | null>(null);
+  const whatIfEffect = useMemo(() => spendEffect({ expenses, debts, weeklyOverrides: overrides, bridge }, { amount: whatIf ?? 0, source: 'life', date: now, now, reserve: led.reserve }),
+    [expenses, debts, overrides, bridge, whatIf, now, led.reserve]);
+  const whatIfTomorrow = whatIf && !today.nextWeek && today.morning - today.spentToday - whatIf > 0 ? Math.floor((today.morning - today.spentToday - whatIf) / (today.daysLeft - 1) / 10) * 10 : null;
+
+  // быстрые траты: частое — одной кнопкой, «как вчера» — пока сегодня пусто. Источник приложение выбирает само
+  const quick = useMemo(() => quickSpends(expenses, now), [expenses, now]);
+  const ySet = useMemo(() => (expenses.some(e => e.date === now) ? [] : yesterdaySet(expenses, now)), [expenses, now]);
+  const spendQuick = (q: QuickSpend, el: Element) => {
+    const st = useStore.getState();
+    const source = suggestSource(st, now);
+    const effect = spendEffect(st, { amount: q.amount, source, date: now, now, reserve: led.reserve });
+    withUndo(`${q.note ?? CATEGORY[q.category].short}, ${rub(q.amount)}. ${effect.text}`, () => st.addExpenses([{ date: now, amount: q.amount, category: q.category, note: q.note, source, origin: 'manual' }]));
+    haptic('success');
+    flyCoin(el, CAT_COLOR[q.category]);
+  };
+  const repeatYesterday = (el: Element) => {
+    const st = useStore.getState();
+    withUndo(`Как вчера: ${ySet.length} ${plural(ySet.length, 'трата', 'траты', 'трат')} на ${rub(ySet.reduce((t, e) => t + e.amount, 0))}`,
+      () => st.addExpenses(ySet.map(e => ({ date: now, amount: e.amount, category: e.category, note: e.note, source: e.source, origin: 'manual' as const, ...(e.creditCard ? { creditCard: e.creditCard } : {}) }))));
+    haptic('success');
+    flyCoin(el);
+  };
+  // плитки-входы на месте прежних вкладок «Траты» и «Долги»
+  const monthRows = useMemo(() => monthByCategory(expenses, debts, monthKey(now)), [expenses, debts, now]);
+  const monthSpent = monthRows.reduce((t, r) => t + r.spent, 0), monthLimit = monthRows.reduce((t, r) => t + r.limit, 0);
+  const monthShares = monthRows.filter(r => r.spent > 0).sort((a, b) => b.spent - a.spent).map(r => ({ id: r.id, share: r.spent / Math.max(monthLimit, monthSpent, 1) }));
 
   return (
     <div className="relative">
@@ -311,7 +300,8 @@ export function Week() {
             {/* сколько на самом деле на карте (по учёту): остаток не сгорает, а уменьшает воскресное пополнение. При перерасходе
                 через кредитку моста на карте может остаться плюс — это нормально */}
           </div>
-          <DayRing day={today.day} canSpend={today.canSpend} mode={today.mode} overDay={today.overDay} nextWeek={today.nextWeek} onClick={() => ui.set({ today: true })} />
+          <DayRing day={today.day} canSpend={today.canSpend} mode={today.mode} overDay={today.overDay} nextWeek={today.nextWeek} onClick={() => ui.set({ today: true })}
+            scrubMax={Math.max(1000, Math.ceil(Math.max(today.day * 2.5, 0) / 500) * 500)} onScrub={setWhatIf} onCommit={amount => ui.set({ add: { amount } })} />
         </div>
         {money.creditCap > 0 && !over && money.cardLeft <= 0 && money.creditLeft > 0 && !pill.phase && (
           <p className="sc-pop mx-5 mt-3 rounded-2xl border px-3.5 py-2.5 text-[13.5px] leading-snug backdrop-blur-md"
@@ -319,7 +309,13 @@ export function Week() {
             Карта пуста — дальше {bridgeCardName}, доступно <Money value={money.creditLeft} /> до воскресенья. Только покупки картой.
           </p>
         )}
-        {pill.phase && (
+        {whatIf != null && (
+          <p className="mx-5 mt-3 rounded-2xl border px-3.5 py-2.5 text-[13.5px] leading-snug font-medium backdrop-blur-md" aria-live="polite"
+            style={{ background: 'var(--pill)', borderColor: 'var(--pill-border)', color: whatIfEffect.tone === 'neg' ? 'var(--ring-neg)' : 'var(--scene-ink)' }}>
+            {whatIf > 0 ? <>Если потратить <Money value={whatIf} />: {whatIfEffect.text.replace(/^./, c => c.toLowerCase())}{whatIfTomorrow != null && <>, завтра норма <Money value={whatIfTomorrow} /></>}. Отпустите — записать</> : 'Ведите палец по кольцу — сумма растёт'}
+          </p>
+        )}
+        {pill.phase && whatIf == null && (
           <button key={pill.key} type="button" onClick={pill.hide} aria-label="Скрыть"
             className={`pointer-events-auto relative mx-5 mt-3 block w-[calc(100%-2.5rem)] overflow-hidden rounded-2xl border px-3.5 pt-2.5 pb-3.5 text-left text-[14px] leading-snug shadow-lg backdrop-blur-md ${pill.phase === 'out' ? 'sc-pill-out' : 'sc-pill-in'}`}
             style={{ background: 'var(--pill)', borderColor: 'var(--pill-border)', color: 'var(--scene-ink)' }}>
@@ -338,8 +334,18 @@ export function Week() {
       </div>
       </div>
 
+      {/* частые траты одной кнопкой — сразу под сценой */}
+      <div className="relative z-[1] -mt-1 bg-bg pt-2.5">
+        <QuickSpends items={quick} yesterday={ySet.length ? { count: ySet.length, sum: ySet.reduce((t, e) => t + e.amount, 0) } : null} onSpend={spendQuick} onYesterday={repeatYesterday} />
+      </div>
+
+      {/* следующий шаг: одно дело за раз */}
+      <div className="relative z-[1] bg-bg px-4 pt-2.5">
+        <NextStep steps={steps} onLater={id => setLater(l => new Set(l).add(id))} />
+      </div>
+
       {/* строка «Неделя»: свои, в долг по мосту и сверх лимита — раскладка во всю ширину, сцена остаётся чистой */}
-      <div className="relative z-[1] -mt-1 bg-bg px-4 pt-2">
+      <div className="relative z-[1] bg-bg px-4 pt-2.5">
         <WeekStrip money={money} onOpen={() => ui.set({ week: week.monday })} />
       </div>
 
@@ -349,23 +355,24 @@ export function Week() {
           onCard={() => ui.set({ card: true })} onLoan={() => ui.set({ loan: true })} onReserve={() => ui.set({ reserve: true })} />
       </div>
 
-      {/* действия с данными: всё, что приходит из банка и из чата */}
+      {/* «Траты» и «Долги» — плитки на месте прежних вкладок: внутри те же экраны целиком */}
+      <div className="relative z-[1] bg-bg px-4 pt-2">
+        <EntryTiles spent={monthSpent} limit={monthLimit} shares={monthShares} debt={debt} melted={Math.max(0, startTotal - debt)}
+          onSpend={() => ui.setTab('budget')} onDebts={() => ui.setTab('plan')} />
+      </div>
+
+      {/* действия с данными: вставить из банка, сверка, чат */}
       <div className="relative z-[1] grid grid-cols-3 gap-2 bg-bg px-4 pt-2">
         {([
           ['scan', 'Из банка', ScanText],
           ['checkup', 'Сверка', Scale],
           ['sync', 'Чат', MessagesSquare],
-        ] as const).map(([id, label, Icon], i) => (
-          <motion.button key={id} type="button" whileTap={{ scale: 0.95 }} onClick={() => runQuick(id)}
-            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: 0.2 + i * 0.05 }}
-            className="flex h-[52px] items-center justify-center gap-2 rounded-[18px] bg-surface text-[13px] font-medium shadow-[0_1px_2px_rgba(10,36,51,.06),0_10px_24px_-18px_rgba(10,36,51,.45)]">
+        ] as const).map(([id, label, Icon]) => (
+          <button key={id} type="button" onClick={() => runQuick(id)}
+            className="flex h-[52px] items-center justify-center gap-2 rounded-[18px] bg-surface text-[13px] font-medium shadow-[0_1px_2px_rgba(10,36,51,.06),0_10px_24px_-18px_rgba(10,36,51,.45)] transition-transform duration-100 active:scale-[.95]">
             <span className="dot-tile size-8" style={{ '--c': QUICK_COLOR[id] } as CSSProperties}><Icon size={17} strokeWidth={1.9} /></span>{label}
-          </motion.button>
+          </button>
         ))}
-      </div>
-
-      <div className="relative z-[1] bg-bg px-4 pt-4">
-        <CardStack cards={cards} open={open} onOpen={id => ui.set({ stackOpen: id ?? '' })} />
       </div>
 
       <button type="button" onClick={() => ui.setTab('plan')} className="relative z-[1] mx-4 mt-4 flex w-[calc(100%-2rem)] items-center justify-between gap-3 rounded-[20px] px-4 py-3 text-left text-[13px] text-muted">
@@ -376,44 +383,6 @@ export function Week() {
         </span>
         <ChevronRight size={15} className="shrink-0" />
       </button>
-    </div>
-  );
-}
-
-/** Пункт чек-листа: кружок — отметить сделанным прямо здесь, текст — открыть чек-лист */
-function CheckRow({ a, onToggle, onOpen }: { a: Alert; onToggle: () => void; onOpen: () => void }) {
-  return (
-    <div className="flex items-start gap-3 px-4 py-3.5">
-      <button type="button" onClick={onToggle} aria-label={`Отметить сделанным: ${a.title}`}
-        className={`mt-0.5 size-8 shrink-0 rounded-full border-[1.5px] transition active:scale-90 ${a.tone === 'warn' ? 'border-warn' : 'border-sea'}`} />
-      <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left">
-        <span className="block text-[14.5px] leading-snug font-medium">{a.title}</span>
-        {a.text && <span className={`mt-0.5 block text-[12.5px] leading-snug ${a.tone === 'warn' ? 'text-warn' : 'text-muted'}`}>{a.text}</span>}
-      </button>
-    </div>
-  );
-}
-
-function WishRow({ id }: { id: string }) {
-  const w = useStore(s => s.wishes.find(x => x.id === id))!;
-  const resolve = useStore(s => s.resolveWish);
-  const set = useUi(s => s.set);
-  const left = Date.parse(w.createdAt) + BIG_PURCHASE_HOURS * 3600_000 - Date.now();
-  const ready = left <= 0;
-  const h = Math.ceil(left / 3600_000);
-  return (
-    <div className="flex items-center gap-3 px-4 py-3">
-      <CatIcon id={w.category} />
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-[14.5px] font-medium">Пауза 48 часов: {w.title}</div>
-        <div className={`flex items-center gap-1 text-[12px] ${ready ? 'text-pos' : 'text-muted'}`}>
-          <Hourglass size={11} /> {ready ? 'можно решать' : `ещё ${h} ${plural(h, 'час', 'часа', 'часов')}`}, <Money value={w.amount} />
-        </div>
-      </div>
-      <div className="flex shrink-0 gap-1.5">
-        <button type="button" onClick={() => resolve(w.id, 'skipped')} className="rounded-full bg-pos/12 px-3 py-1.5 text-[12.5px] font-medium text-pos">Не нужно</button>
-        {ready && <button type="button" onClick={() => set({ add: { amount: w.amount, category: w.category, note: w.title, wishId: w.id } })} className="rounded-full border border-line px-3 py-1.5 text-[12.5px] font-medium">Купить</button>}
-      </div>
     </div>
   );
 }

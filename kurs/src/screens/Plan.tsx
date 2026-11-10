@@ -39,7 +39,7 @@ export function Plan() {
 
   return (
     <div>
-      <SkyHeader title="Долги" subtitle="Курс к свободе" action={
+      <SkyHeader back={{ label: 'Сегодня', onClick: () => useUi.getState().setTab('week') }} title="Долги" subtitle="Курс к свободе" action={
         <motion.button type="button" whileTap={{ scale: 0.97 }} onClick={() => set({ bonus: {} })} className="flex h-11 items-center gap-1.5 rounded-full bg-ink px-4 text-[13.5px] font-medium text-bg"><Gift size={15} strokeWidth={1.8} /> Пришла премия</motion.button>
       } />
       <DebtHero />

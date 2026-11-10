@@ -68,19 +68,29 @@ interface Ui {
   /** раскрытая карточка в стопке «Недели»; null — выбрать по обстановке */
   stackOpen: string | null;
   toast: string | null;
+  /** «Отменить» в сообщении: вернуть как было (5 секунд после записи или отметки) */
+  undo: (() => void) | null;
   setTab: (t: Tab) => void;
   set: (p: Partial<Omit<Ui, 'set' | 'setTab'>>) => void;
 }
 
 export const useUi = create<Ui>()(set => ({
   tab: 'week', add: null, scan: false, settings: false, event: null, bonus: null, debt: null, reserve: false,
-  week: null, savings: false, sync: false, fixed: false, card: false, loan: false, unlock: false, planView: 'debts', focus: null, settingsFocus: null, inbox: null, checkup: null, hub: false, tour: false, payView: 'month', today: false, stackOpen: null, toast: null,
+  week: null, savings: false, sync: false, fixed: false, card: false, loan: false, unlock: false, planView: 'debts', focus: null, settingsFocus: null, inbox: null, checkup: null, hub: false, tour: false, payView: 'list', today: false, stackOpen: null, toast: null, undo: null,
   // прокрутку каждой вкладки помнит App (useTabScroll)
   setTab: tab => set({ tab }),
   set: p => set(p),
 }));
 
-export const toast = (text: string) => useUi.getState().set({ toast: text });
+export const toast = (text: string, undo?: () => void) => useUi.getState().set({ toast: text, undo: undo ?? null });
+
+/** Сделать действие с данными и показать сообщение с «Отменить»: траты, отметки, долги и резерв вернутся как были */
+export function withUndo(text: string | (() => string), action: () => void) {
+  const s = useStore.getState();
+  const before = { expenses: s.expenses, marks: s.marks, debts: s.debts, reserve: s.reserve, reserveLog: s.reserveLog };
+  action();
+  toast(typeof text === 'function' ? text() : text, () => { useStore.setState(before); toast('Отменено'); });
+}
 
 /** Сегодняшняя дата; обновляется, когда приложение снова открыли (оно могло висеть в фоне со вчера) */
 export function useToday(): string {

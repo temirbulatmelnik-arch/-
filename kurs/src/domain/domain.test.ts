@@ -17,6 +17,7 @@ import { weekReport, weekToClose } from './weekly';
 import { dayBudget, weekSummary } from './summary';
 import { bridgeState, weekMoney, weekParts, type Bridge } from './bridge';
 import { bySource, spendEffect, suggestSource } from './sources';
+import { quickSpends, yesterdaySet } from './quick';
 import { isWorkday, workdayOnOrBefore } from './workdays';
 import { draft } from './statements';
 import { parseCsv, parseText } from './statements';
@@ -691,6 +692,15 @@ describe('мост на кредитке', () => {
     expect(eff(st(), { ...at, amount: 1000, source: 'reserve' })).toEqual({ tone: 'rsv', text: 'Из резерва: останется 49 000 ₽. В лимит недели не входит' });
     expect(spendEffect(st([exp('e', '2026-11-11', 700)]), { ...at, amount: 700, source: 'life', skipId: 'e' })).toEqual(spendEffect(st(), { ...at, amount: 700, source: 'life' }));
     expect(bySource([exp('a', '2026-11-10', 100), exp('b', '2026-11-10', 40, 'credit'), exp('c', '2026-11-10', 7, 'reserve')])).toEqual({ life: 100, credit: 40, reserve: 7 });
+  });
+
+  it('быстрые траты: частое — одной кнопкой; «как вчера» — вчерашний набор', () => {
+    const e = (id: string, date: string, amount: number, note: string, category: Expense['category'] = 'transport', source: Expense['source'] = 'life'): Expense => ({ id, date, amount, category, note, source, createdAt: '' });
+    const list = [e('1', '2026-11-03', 95, 'Метро'), e('2', '2026-11-04', 95, 'метро'), e('3', '2026-11-05', 95, 'Метро '), e('4', '2026-11-04', 340, 'Обед', 'work'), e('5', '2026-11-05', 340, 'Обед', 'work'),
+      e('6', '2026-11-05', 900, 'Разовое', 'fun'), e('7', '2026-11-04', 500, 'Аптека', 'health', 'reserve'), e('8', '2026-11-05', 500, 'Аптека', 'health', 'reserve'), e('9', '2026-09-01', 46, 'Старое'), e('10', '2026-09-02', 46, 'Старое')];
+    expect(quickSpends(list, '2026-11-06').map(q => [q.note, q.amount, q.count])).toEqual([['Метро', 95, 3], ['Обед', 340, 2]]);
+    expect(yesterdaySet(list, '2026-11-06').map(x => x.id)).toEqual(['3', '5', '6']);
+    expect(yesterdaySet(list, '2026-11-08')).toEqual([]);
   });
 
   it('строка «Неделя»: свои + в долг по мосту + сверх лимита = потрачено; перерасход сначала на кредитку', () => {

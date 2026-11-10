@@ -1,12 +1,12 @@
 // «Платежи» — хватит ли денег на всё, что спишется. Три вида, листаются пальцем:
 // «Месяц» — календарь с водой и линия денег, выбранный день; «Хватит ли» — счета и прогноз покрытия до премии;
 // «Список» — все платежи месяца по датам, отметка «оплачено» свайпом вправо.
-import { BellRing, CalendarArrowUp, Check, ChevronLeft, ChevronRight, PencilLine, Repeat, Scale, Undo2 } from 'lucide-react';
+import { BellRing, CalendarArrowUp, Check, ChevronLeft, ChevronRight, PencilLine, ReceiptText, Repeat, Scale, Undo2 } from 'lucide-react';
 import { Hold } from '../components/Hold';
 import { toast } from '../store/ui';
 import { animate, AnimatePresence, motion, useMotionValue } from 'motion/react';
 import { haptic } from '../components/haptics';
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { CoverageCard, useCoverage } from '../components/Coverage';
 import { ease, Flip, item, list as listAnim, Pager, Roll, spring, SwipeRow, useEnter, usePan } from '../components/motion';
@@ -14,11 +14,11 @@ import { LevelChart, MonthGrid, monthHeight, verdict, Weekdays, type DayMoney } 
 import { SkyButton, SkyHeader } from '../components/Petersburg';
 import { EventRow } from '../components/rows';
 import { runQuick } from '../components/TabBar';
-import { Bar, Empty, IconButton, Money } from '../components/ui';
+import { Bar, Empty, IconButton, Money, Sheet } from '../components/ui';
 import { weekMoney, type WeekMoney } from '../domain/bridge';
 import { monthDays, NARROW, reserveByDay } from '../domain/coverage';
 import { eventGroup, eventsBetween, type EventGroup } from '../domain/calendar';
-import { addDays, addMonths, dayMonth, ddmm, lastDay, monthKey, monthName, weekday, weekdayFull, weekStart } from '../domain/dates';
+import { addDays, addMonths, dayMonth, ddmm, lastDay, monthKey, monthName, plural, weekday, weekdayFull, weekStart } from '../domain/dates';
 import type { CalEvent, EventMark } from '../domain/types';
 import { useStore } from '../store/store';
 import { useCal, useToday, useUi, type PayView } from '../store/ui';
@@ -78,6 +78,7 @@ export function Payments() {
   const shift = useCallback((n: 1 | -1) => startTransition(() => setMonth(m => addMonths(m, n))), []);
   // стрелки листают ту же ленту, что и палец; лента скрыта (другой вид) — месяц меняется сразу
   const flip = useRef<((dir: 1 | -1) => boolean) | null>(null);
+  const [cover, setCover] = useState(false);
   const arrow = (n: 1 | -1) => { if (!(view === 'month' && flip.current?.(n))) shift(n); };
 
   return (
@@ -91,11 +92,20 @@ export function Payments() {
             <SkyButton onClick={() => arrow(1)} label="Следующий месяц"><ChevronRight size={18} strokeWidth={1.7} /></SkyButton>
           </div>
         } />
-      <Pager<PayView> className="mt-3" value={view} onChange={v => set({ payView: v })} pages={[
-        { id: 'month', label: 'Месяц', render: () => <MonthView months={[prev, cur, next]} selected={selected} onSelect={setPicked} onShift={shift} flip={flip} said={said} /> },
-        { id: 'cover', label: 'Хватит ли', render: () => <CoverView /> },
-        { id: 'list', label: 'Список', render: () => <ListView month={month} events={events} total={total} incomes={incomes} /> },
+      {/* «Хватит ли» — ответ одной строкой над лентой и месяцем; нажатие — линия резерва, счета и подсказки */}
+      {said && (
+        <button type="button" onClick={() => setCover(true)}
+          className={`mx-4 mt-3 flex w-[calc(100%-2rem)] items-center gap-2 rounded-2xl px-4 py-2.5 text-left text-[13.5px] leading-snug transition-transform duration-100 active:scale-[.985] ${said.tone === 'neg' ? 'bg-neg/10 text-neg' : said.tone === 'warn' ? 'bg-warn/12 text-warn' : 'bg-pos/10 text-pos'}`}>
+          <span className="min-w-0 flex-1">{said.text}</span><ChevronRight size={16} className="shrink-0 opacity-70" />
+        </button>
+      )}
+      <Pager<PayView> className="mt-3" value={view === 'month' ? 'month' : 'list'} onChange={v => set({ payView: v })} pages={[
+        { id: 'list', label: 'Лента', render: () => <ListView month={month} events={events} total={total} incomes={incomes} /> },
+        { id: 'month', label: 'Месяц', render: () => <MonthView months={[prev, cur, next]} selected={selected} onSelect={setPicked} onShift={shift} flip={flip} /> },
       ]} />
+      <Sheet open={cover} onClose={() => setCover(false)} title="Хватит ли резерва" subtitle="Прогноз по дням до премии">
+        {cover && <div className="-mx-5"><CoverView /></div>}
+      </Sheet>
     </div>
   );
 }
@@ -131,11 +141,11 @@ function SwipeEvent({ e, mark, now, showDate = false }: { e: CalEvent; mark?: Ev
 /** Высота воды в ячейках: от наибольшего резерва месяца, но не ниже четырёх запасов */
 const topOf = (days: DayMoney[]) => Math.max(NARROW * 4, ...days.map(d => d.total ?? 0));
 
-function MonthView({ months, selected, onSelect, onShift, flip, said }: {
+function MonthView({ months, selected, onSelect, onShift, flip }: {
   /** предыдущий, текущий и следующий месяцы — лента календаря */
   months: readonly [MonthData, MonthData, MonthData];
   selected: string; onSelect: (d: string) => void; onShift: (n: 1 | -1) => void;
-  flip: { current: ((dir: 1 | -1) => boolean) | null }; said: ReturnType<typeof verdict>;
+  flip: { current: ((dir: 1 | -1) => boolean) | null };
 }) {
   const now = useToday();
   const [marks, expenses, debts, overrides, bridge] = useStore(useShallow(s => [s.marks, s.expenses, s.debts, s.weeklyOverrides, s.bridge] as const));
@@ -153,11 +163,6 @@ function MonthView({ months, selected, onSelect, onShift, flip, said }: {
   const keys = useMemo(() => [months[0].month, month, months[2].month] as const, [months[0].month, month, months[2].month]);
   return (
     <>
-      {/* вывод по резерву день за днём — те же числа, что в «Хватит ли» */}
-      {said && (
-        <motion.p key={said.text} initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, ease: [0.23, 1, 0.32, 1] }}
-          className={`mx-4 mt-3 rounded-2xl px-4 py-2.5 text-[13.5px] leading-snug ${said.tone === 'neg' ? 'bg-neg/10 text-neg' : said.tone === 'warn' ? 'bg-warn/12 text-warn' : 'bg-pos/10 text-pos'}`}>{said.text}</motion.p>
-      )}
       <section className="mt-3 px-3" data-noswipe>
         <Weekdays />
         {/* лента месяцев: идёт за пальцем, соседние месяцы уже собраны по бокам */}
@@ -325,11 +330,24 @@ function ListView({ month, events, total, incomes }: { month: string; events: Ca
   const paid = payments.filter(e => marks[e.key]?.done).reduce((s, e) => s + amount(e), 0);
   const byGroup = (g: EventGroup) => payments.filter(e => eventGroup(e) === g).reduce((s, e) => s + amount(e), 0);
   const visible = events.filter(e => matches(filter, eventGroup(e)) || (topUps && e.kind === 'weekly' && filter === 'all'));
+  // лента дней: платежи, поступления и траты идут вместе. Траты — одной строкой на день (сумма и сколько «в долг»)
+  const expenses = useStore(s => s.expenses);
+  const spentBy = useMemo(() => {
+    const map = new Map<string, { sum: number; loan: number; n: number }>();
+    for (const e of expenses) {
+      if (monthKey(e.date) !== month) continue;
+      const d = map.get(e.date) ?? { sum: 0, loan: 0, n: 0 };
+      d.sum += e.amount; d.n++; if (e.source === 'credit') d.loan += e.amount;
+      map.set(e.date, d);
+    }
+    return map;
+  }, [expenses, month]);
   const byDate = useMemo(() => {
     const map = new Map<string, CalEvent[]>();
     for (const e of visible) map.set(e.date, [...(map.get(e.date) ?? []), e]);
-    return [...map.entries()];
-  }, [visible]);
+    if (filter === 'all') for (const d of spentBy.keys()) if (!map.has(d)) map.set(d, []);
+    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [visible, spentBy, filter]);
 
   return (
     <>
@@ -370,6 +388,7 @@ function ListView({ month, events, total, incomes }: { month: string; events: Ca
         {byDate.map(([date, list]) => {
           const bal = levels[date];
           const isToday = date === now;
+          const spent = spentBy.get(date);
           return (
             <motion.section key={date} variants={item} className="mt-5">
               <div className="mb-2 flex items-baseline justify-between px-5">
@@ -381,9 +400,21 @@ function ListView({ month, events, total, incomes }: { month: string; events: Ca
                   <span className={`text-[12px] ${bal < 0 ? 'text-neg' : bal < NARROW ? 'text-warn' : 'text-muted'}`}>в резерве ≈ <Money value={bal} /></span>
                 )}
               </div>
-              <div className="card divide-hair mx-4 overflow-hidden">
-                {list.map(e => <SwipeEvent key={e.key} e={e} mark={marks[e.key]} now={now} />)}
-              </div>
+              {(list.length > 0 || spent) && (
+                <div className="card divide-hair mx-4 overflow-hidden">
+                  {list.map(e => <SwipeEvent key={e.key} e={e} mark={marks[e.key]} now={now} />)}
+                  {spent && filter === 'all' && (
+                    <button type="button" onClick={() => (isToday ? set({ today: true }) : useUi.getState().setTab('budget'))} className="flex w-full items-center gap-3 px-4 py-2.5 text-left">
+                      <span className="dot-tile size-10" style={{ '--c': 'var(--own)' } as CSSProperties}><ReceiptText size={18} strokeWidth={1.7} /></span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[14.5px] font-medium">Траты {isToday ? 'сегодня' : 'дня'}</span>
+                        <span className="block text-[12px] text-muted">{spent.n} {plural(spent.n, 'запись', 'записи', 'записей')}{spent.loan > 0 && <span style={{ color: 'var(--loan)' }}>, в долг <Money value={spent.loan} /></span>}</span>
+                      </span>
+                      <Money value={spent.sum} className="shrink-0 text-[15px]" />
+                    </button>
+                  )}
+                </div>
+              )}
             </motion.section>
           );
         })}

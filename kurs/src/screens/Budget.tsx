@@ -75,7 +75,7 @@ export function Budget() {
 
   return (
     <div>
-      <SkyHeader
+      <SkyHeader back={{ label: 'Сегодня', onClick: () => useUi.getState().setTab('week') }}
         title="Траты"
         subtitle={<button type="button" onClick={() => setMonth(monthKey(now))} className="text-left first-letter:uppercase">{monthName(month)}{month !== monthKey(now) ? ', к текущему' : ''}</button>}
         action={

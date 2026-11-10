@@ -2,7 +2,8 @@
 // Больше 5 000 — предложить паузу 48 часов. Сверху — «Из банка»: загрузить траты разом.
 import { CalendarDays, CreditCard, Delete, Hourglass, PiggyBank, ScanText, Trash2, Wallet, type LucideIcon } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { snappy } from '../components/motion';
 import { useShallow } from 'zustand/react/shallow';
 import { haptic } from '../components/haptics';
@@ -85,17 +86,49 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   const effect = useMemo(() => spendEffect({ expenses, debts, weeklyOverrides, bridge }, { amount: value, source, date, now: today(), reserve: led.reserve, skipId: edit?.id }),
     [expenses, debts, weeklyOverrides, bridge, value, source, date, led.reserve, edit?.id]);
 
-  const save = () => {
+  /** src — источник, если сумму бросили в сосуд: состояние ещё не успело обновиться */
+  const save = (src: Source = source) => {
     if (!valid) return;
-    if (!edit && !p.wishId && value > BIG_PURCHASE && source === 'life' && !askPause) { setAskPause(true); return; }
-    const item = { date, amount: value, category: category!, note: note.trim() || undefined, source, origin: 'manual' as const, ...(source === 'credit' && p.creditCard ? { creditCard: p.creditCard } : {}) };
+    if (!edit && !p.wishId && value > BIG_PURCHASE && src === 'life' && !askPause) { setAskPause(true); return; }
+    const item = { date, amount: value, category: category!, note: note.trim() || undefined, source: src, origin: 'manual' as const, ...(src === 'credit' && p.creditCard ? { creditCard: p.creditCard } : {}) };
+    const done = src === source ? effect : spendEffect({ expenses, debts, weeklyOverrides, bridge }, { amount: value, source: src, date, now: today(), reserve: led.reserve, skipId: edit?.id });
     if (edit) store.updateExpense(edit.id, item);
     else store.addExpenses([item]);
     haptic('success');
     if (p.wishId) store.resolveWish(p.wishId, 'bought');
     // то же, что было написано под суммой
-    toast(`Записано. ${effect.text}`);
+    toast(`Записано. ${done.text}`);
     onDone();
+  };
+
+  // сумму можно потянуть пальцем и бросить в сосуд: «Свои», «В долг» или «Резерв». Сосуд под пальцем подрастает;
+  // отпустили над ним — источник выбран, а если сумма и категория есть — трата сразу записана
+  const vessels = useRef<Partial<Record<Source, HTMLElement | null>>>({});
+  const grab = useRef<{ x: number; y: number } | null>(null);
+  const [drag, setDrag] = useState<{ x: number; y: number; over: Source | null } | null>(null);
+  const hit = (x: number, y: number): Source | null => SOURCES.find(id => {
+    const r = vessels.current[id]?.getBoundingClientRect();
+    return !!r && x >= r.left - 4 && x <= r.right + 4 && y >= r.top - 14 && y <= r.bottom + 14;
+  }) ?? null;
+  const dragHandlers = {
+    onPointerDown: (e: ReactPointerEvent<HTMLElement>) => { if (value > 0) { grab.current = { x: e.clientX, y: e.clientY }; e.currentTarget.setPointerCapture?.(e.pointerId); } },
+    onPointerMove: (e: ReactPointerEvent<HTMLElement>) => {
+      const g = grab.current;
+      if (!g || (!drag && Math.hypot(e.clientX - g.x, e.clientY - g.y) < 10)) return;
+      const over = hit(e.clientX, e.clientY);
+      if (over !== (drag?.over ?? null) && over) haptic();
+      setDrag({ x: e.clientX, y: e.clientY, over });
+    },
+    onPointerUp: () => {
+      grab.current = null;
+      if (!drag) return;
+      const over = drag.over;
+      setDrag(null);
+      if (!over) return;
+      setSource(over); setPicked(true);
+      if (valid) save(over);
+    },
+    onPointerCancel: () => { grab.current = null; setDrag(null); },
   };
 
   const pause = () => {
@@ -115,7 +148,7 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
           </div>
         </div>
         <PrimaryButton onClick={pause}><Hourglass size={17} strokeWidth={1.6} /> Отложить на 48 часов</PrimaryButton>
-        <SecondaryButton onClick={save} className="w-full">Уже купил — просто записать</SecondaryButton>
+        <SecondaryButton onClick={() => save()} className="w-full">Уже купил — просто записать</SecondaryButton>
       </div>
     );
   }
@@ -125,7 +158,7 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
     {/* сверху — сумма, когда, откуда, категория; прокручивается сама, если экран невысокий */}
     <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-5 pb-4 [mask-image:linear-gradient(to_bottom,black_calc(100%-18px),transparent)]">
       {/* сумма: цифры выпрыгивают по одной */}
-      <div className="flex min-h-[64px] items-end justify-center gap-1 pt-1" aria-live="polite" aria-label={`Сумма ${amount || 0} ₽`}>
+      <div {...dragHandlers} className={`flex min-h-[64px] touch-none items-end justify-center gap-1 pt-1 transition-opacity duration-150 ${drag ? 'opacity-30' : ''}`} aria-live="polite" aria-label={`Сумма ${amount || 0} ₽`}>
         <span className="figure flex text-[52px] leading-none">
           <AnimatePresence initial={false} mode="popLayout">
             {(amount || '0').split('').map((ch, i) => (
@@ -147,8 +180,8 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
           const Icon = SRC_UI[id].icon;
           const on = source === id;
           return (
-            <button key={id} type="button" role="radio" aria-checked={on} onClick={() => { setSource(id); setPicked(true); haptic(); }}
-              className={`relative flex flex-col items-center gap-px rounded-[15px] py-1.5 transition-colors duration-200 ${on ? 'text-white' : 'text-muted'}`}>
+            <button key={id} ref={el => { vessels.current[id] = el; }} type="button" role="radio" aria-checked={on} onClick={() => { setSource(id); setPicked(true); haptic(); }}
+              className={`relative flex flex-col items-center gap-px rounded-[15px] py-1.5 transition-[color,transform,box-shadow] duration-200 ${on ? 'text-white' : 'text-muted'} ${drag?.over === id ? 'drop-over shadow-[0_0_0_2px_var(--ink)]' : ''}`}>
               <span className="flex items-center gap-1.5 text-[13.5px] font-medium"><Icon size={15} strokeWidth={1.8} />{SOURCE_LABEL[id]}</span>
               <span className={`text-[11px] leading-tight ${on ? 'opacity-85' : 'opacity-80'}`}>
                 {id === 'life' ? (led.card != null ? <>на карте <Money value={Math.max(0, led.card)} /></> : 'с карты')
@@ -159,6 +192,11 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
           );
         })}
       </div>
+      {value > 0 && !!category && !drag && !edit && <p className="-mt-1.5 text-center text-[11.5px] text-faint">Потяните сумму в «Свои», «В долг» или «Резерв» — запишется сразу</p>}
+      {drag && createPortal(
+        <div className="pointer-events-none fixed z-[90] -translate-x-1/2 -translate-y-[130%] rounded-full bg-ink px-4 py-2 text-bg shadow-[0_14px_30px_-10px_rgba(4,14,22,.7)]" style={{ left: drag.x, top: drag.y }}>
+          <span className="figure text-[20px]"><Money value={value} /></span>
+        </div>, document.body)}
       {!picked && source === 'credit' && <p className="-mt-1 text-center text-[12px] leading-snug" style={{ color: 'var(--loan)' }}>Недельные деньги на карте кончились — предлагаю мост на кредитке</p>}
 
       {/* когда и что купили */}
@@ -207,7 +245,7 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
       </div>
 
       <div className="pt-2.5 pb-3">
-        <PrimaryButton onClick={save} disabled={!valid}>{edit ? 'Сохранить' : !value ? 'Введите сумму' : category ? `Записать ${rub(value)}` : 'Выберите категорию'}</PrimaryButton>
+        <PrimaryButton onClick={() => save()} disabled={!valid}>{edit ? 'Сохранить' : !value ? 'Введите сумму' : category ? `Записать ${rub(value)}` : 'Выберите категорию'}</PrimaryButton>
       </div>
     </div>
     </>

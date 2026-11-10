@@ -299,6 +299,12 @@ button:disabled { cursor: default; }
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28), inset 0 0 0 1px rgba(255, 255, 255, .06);
 }
 
+/* круг по воде в сосуде: деньги ушли или пришли */
+@keyframes vessel-ripple { from { transform: translateX(-50%) scale(.3, .12); opacity: .9; } to { transform: translateX(-50%) scale(2.6, 1); opacity: 0; } }
+.vessel-ripple { animation: vessel-ripple .9s ease-out both; pointer-events: none; }
+/* сосуд, над которым держат сумму в листе траты */
+.drop-over { transform: scale(1.08); }
+
 /* блик света пробегает по главному блоку один раз при показе вкладки — как солнце по воде */
 @keyframes deep-sheen { from { transform: translateX(-120%) skewX(-18deg); } to { transform: translateX(320%) skewX(-18deg); } }
 .deep-card > .deep-sheen { position: absolute; inset: 0 auto 0 0; width: 38%; pointer-events: none;

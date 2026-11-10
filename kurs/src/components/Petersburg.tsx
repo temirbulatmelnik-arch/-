@@ -374,7 +374,7 @@ export const lampAt = (i: number) => ({ x: (18 + (i + 0.5) * (354 / 7)) / 390, y
 /** Узкая панорама для шапок «Платежей», «Плана» и «Бюджета»: вечернее небо (конечный кадр заката), город, полоска
  *  воды. Закат здесь не проигрывается: вкладки собираются в фоне, и анимация шла бы впустую. Живые мелочи (звёзды, блики, чайка) — отдельные HTML-слои поверх картинки: их прозрачность и сдвиг крутит видеокарта,
  *  и картинка неба не перерисовывается каждый кадр (анимации внутри SVG на iPhone идут через основной поток) */
-export function SkyHeader({ title, subtitle, action }: { title: ReactNode; subtitle?: ReactNode; action?: ReactNode }) {
+export function SkyHeader({ title, subtitle, action, back }: { title: ReactNode; subtitle?: ReactNode; action?: ReactNode; back?: { label: string; onClick: () => void } }) {
   // у каждой шапки свои имена градиентов: вкладки живут одновременно, и при общих именах браузер брал бы градиенты
   // из скрытой вкладки — там они не рисуются, и небо выходило пустым
   const id = `sh${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
@@ -429,6 +429,12 @@ export function SkyHeader({ title, subtitle, action }: { title: ReactNode; subti
       </div>
       <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-3 px-5 pt-4">
         <div className="min-w-0" style={{ color: 'var(--scene-ink)' }}>
+          {/* экран открыт из «Сегодня» — путь назад на привычном месте, слева сверху */}
+          {back && (
+            <button type="button" onClick={back.onClick} className="pointer-events-auto -ml-1.5 mb-0.5 flex h-8 items-center gap-0.5 rounded-full pr-2.5 text-[14px] font-medium transition-transform duration-100 active:scale-[.96]" style={{ color: 'var(--scene-muted)' }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>{back.label}
+            </button>
+          )}
           <h1 className="font-display text-[24px] leading-tight font-medium first-letter:uppercase">{title}</h1>
           {subtitle && <div className="mt-1 text-[13.5px]" style={{ color: 'var(--scene-muted)' }}>{subtitle}</div>}
         </div>
