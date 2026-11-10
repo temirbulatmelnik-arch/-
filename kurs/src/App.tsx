@@ -5,6 +5,7 @@ import { Salute } from './components/Salute';
 import { TABS, TabBar } from './components/TabBar';
 import { Toast } from './components/ui';
 import { CardSheet, SavingsSheet } from './screens/Accounts';
+import { LoanSheet } from './screens/LoanSheet';
 import { AddExpenseSheet } from './screens/AddExpense';
 import { BonusSheet } from './screens/BonusSheet';
 import { Budget } from './screens/Budget';
@@ -62,6 +63,7 @@ const SHEETS = (
     <TodaySheet />
     <SavingsSheet />
     <CardSheet />
+    <LoanSheet />
     <FixedSheet />
     <SyncSheet />
     <UnlockSheet />

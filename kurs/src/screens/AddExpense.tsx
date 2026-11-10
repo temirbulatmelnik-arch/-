@@ -1,22 +1,29 @@
 // Запись траты: своя клавиатура в листе (iPhone не закрывает экран своей), сумма, категория, «Записать».
 // Больше 5 000 — предложить паузу 48 часов. Сверху — «Из банка»: загрузить траты разом.
-import { AlertTriangle, CalendarDays, CreditCard, Delete, Hourglass, PiggyBank, ScanText, Trash2 } from 'lucide-react';
+import { CalendarDays, CreditCard, Delete, Hourglass, PiggyBank, ScanText, Trash2, Wallet, type LucideIcon } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { snappy } from '../components/motion';
+import { useShallow } from 'zustand/react/shallow';
 import { haptic } from '../components/haptics';
-import { CAT_COLOR, CATEGORY_ICON, PrimaryButton, SecondaryButton, Sheet } from '../components/ui';
-import { bridgeWeek, weekMoney } from '../domain/bridge';
-import { dayMonth, today, weekday, weekStart } from '../domain/dates';
+import { CAT_COLOR, CATEGORY_ICON, Money, PrimaryButton, SecondaryButton, Sheet } from '../components/ui';
+import { activeBridge, bridgeState } from '../domain/bridge';
+import { dayMonth, today, weekday } from '../domain/dates';
 import { parseAmount, rub } from '../domain/money';
 import { BIG_PURCHASE, CATEGORIES, CATEGORY } from '../domain/plan';
-import { weekSummary } from '../domain/summary';
+import { SOURCE_LABEL, SOURCES, spendEffect, suggestSource, type SpendEffect } from '../domain/sources';
 import type { CategoryId, Source } from '../domain/types';
 import { useStore } from '../store/store';
 import { toast, useUi, type AddPrefill } from '../store/ui';
+import { useLedger } from './Checkup';
 
-const SOURCE_NAME: Record<Source, string> = { life: 'Карта', reserve: 'Резерв', credit: 'Кредитка' };
-const NEXT: Record<Source, Source> = { life: 'reserve', reserve: 'credit', credit: 'life' };
+/** Источник денег: свои — Нева, в долг — сиреневая штриховка (чужие деньги), резерв — сумерки */
+const SRC_UI: Record<Source, { icon: LucideIcon; pill: string }> = {
+  life: { icon: Wallet, pill: 'linear-gradient(180deg, var(--own-2), var(--own))' },
+  credit: { icon: CreditCard, pill: 'var(--loan-pill)' },
+  reserve: { icon: PiggyBank, pill: 'linear-gradient(180deg, var(--rsv-2), var(--rsv))' },
+};
+const EFFECT_COLOR: Record<SpendEffect['tone'], string> = { ok: 'var(--muted)', warn: 'var(--warn)', neg: 'var(--neg)', loan: 'var(--loan)', rsv: 'var(--rsv)' };
 
 export function AddExpenseSheet() {
   const prefill = useUi(s => s.add);
@@ -39,10 +46,16 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   const store = useStore.getState();
   const [amount, setAmount] = useState(edit ? String(edit.amount) : p.amount ? String(p.amount) : '');
   const [category, setCategory] = useState<CategoryId | null>(edit?.category ?? p.category ?? null);
-  const [source, setSource] = useState<Source>(edit?.source ?? p.source ?? 'life');
-  const bridge = useStore(s => s.bridge);
   const [note, setNote] = useState(edit?.note ?? p.note ?? '');
   const [date, setDate] = useState(edit?.date ?? p.date ?? today());
+  // откуда деньги: приложение само предлагает — карта, пока на ней есть недельные деньги; карта пуста и на неделе
+  // есть мост — кредитка моста. Выбор можно сменить одним нажатием
+  const suggested = useMemo(() => suggestSource(store, date), []);
+  const [source, setSource] = useState<Source>(edit?.source ?? p.source ?? suggested);
+  const [picked, setPicked] = useState(!!(edit || p.source));
+  const [expenses, debts, weeklyOverrides, bridge] = useStore(useShallow(s => [s.expenses, s.debts, s.weeklyOverrides, s.bridge] as const));
+  const led = useLedger();
+  const loan = useMemo(() => (activeBridge(bridge) ? bridgeState(expenses, bridge) : null), [expenses, bridge]);
   const [askPause, setAskPause] = useState(false);
   const dateInput = useRef<HTMLInputElement>(null);
 
@@ -68,6 +81,9 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
 
   const value = parseAmount(amount) ?? 0;
   const valid = value > 0 && !!category;
+  // что будет после записи — одной строкой под суммой: остаток дня, долг по мосту или остаток резерва
+  const effect = useMemo(() => spendEffect({ expenses, debts, weeklyOverrides, bridge }, { amount: value, source, date, now: today(), reserve: led.reserve, skipId: edit?.id }),
+    [expenses, debts, weeklyOverrides, bridge, value, source, date, led.reserve, edit?.id]);
 
   const save = () => {
     if (!valid) return;
@@ -77,13 +93,8 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
     else store.addExpenses([item]);
     haptic('success');
     if (p.wishId) store.resolveWish(p.wishId, 'bought');
-    const s = useStore.getState();
-    const week = weekSummary(s.expenses, s.debts, s.weeklyOverrides, today());
-    const plan = source === 'credit' ? weekMoney(s.expenses, s.debts, s.weeklyOverrides, s.bridge, weekStart(date)) : null;
-    if (plan && plan.creditCap > 0) toast(plan.creditLeft >= 0 ? `Мост на кредитке: на неделе ещё ${rub(plan.creditLeft)}` : `Сверх моста на ${rub(-plan.creditLeft)} — это перерасход`);
-    else if (source === 'credit') toast('Записано как нарушение: с кредиток не тратим');
-    else if (week.left < 0) toast(`Перерасход недели: ${rub(-week.left)}`);
-    else toast(`Записано. На неделю осталось ${rub(week.left)}`);
+    // то же, что было написано под суммой
+    toast(`Записано. ${effect.text}`);
     onDone();
   };
 
@@ -125,20 +136,37 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
         <span className="mb-1.5 text-[26px] text-muted">₽</span>
       </div>
 
-      {/* дата, откуда платили и что купили — одной строкой; источник переключается по кругу, обычно это карта */}
+      {/* что будет после записи: остаток дня, долг по мосту, остаток резерва — меняется вместе с суммой и источником */}
+      <p className="-mt-1 min-h-[18px] text-center text-[12.5px] leading-snug font-medium" style={{ color: EFFECT_COLOR[effect.tone] }} aria-live="polite">{effect.text}</p>
+
+      {/* откуда деньги: свои, в долг или резерв — три кнопки, под каждой — сколько там сейчас */}
+      <div role="radiogroup" aria-label="Откуда деньги" className="relative grid grid-cols-3 rounded-[18px] bg-surface-2 p-[3px]">
+        <span aria-hidden="true" className="pointer-events-none absolute inset-y-[3px] left-[3px] rounded-[15px] shadow-[0_6px_14px_-8px_rgba(10,36,51,.5),inset_0_1px_0_rgba(255,255,255,.3)] transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none"
+          style={{ width: 'calc((100% - 6px) / 3)', transform: `translateX(${SOURCES.indexOf(source) * 100}%)`, background: SRC_UI[source].pill }} />
+        {SOURCES.map(id => {
+          const Icon = SRC_UI[id].icon;
+          const on = source === id;
+          return (
+            <button key={id} type="button" role="radio" aria-checked={on} onClick={() => { setSource(id); setPicked(true); haptic(); }}
+              className={`relative flex flex-col items-center gap-px rounded-[15px] py-1.5 transition-colors duration-200 ${on ? 'text-white' : 'text-muted'}`}>
+              <span className="flex items-center gap-1.5 text-[13.5px] font-medium"><Icon size={15} strokeWidth={1.8} />{SOURCE_LABEL[id]}</span>
+              <span className={`text-[11px] leading-tight ${on ? 'opacity-85' : 'opacity-80'}`}>
+                {id === 'life' ? (led.card != null ? <>на карте <Money value={Math.max(0, led.card)} /></> : 'с карты')
+                  : id === 'credit' ? (loan ? <>мост: ещё <Money value={Math.max(0, loan.left)} /></> : 'с кредитки')
+                    : <Money value={led.reserve} />}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {!picked && source === 'credit' && <p className="-mt-1 text-center text-[12px] leading-snug" style={{ color: 'var(--loan)' }}>Недельные деньги на карте кончились — предлагаю мост на кредитке</p>}
+
+      {/* когда и что купили */}
       <div className="flex items-center gap-2">
         <button type="button" onClick={() => dateInput.current?.showPicker?.() ?? dateInput.current?.focus()} className="relative flex h-10 shrink-0 items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-[13px] font-medium">
           <CalendarDays size={15} strokeWidth={1.6} className="text-sea" />{date === today() ? 'Сегодня' : `${weekday(date)}, ${dayMonth(date)}`}
           <input ref={dateInput} type="date" value={date} onChange={e => setDate(e.target.value || today())} className="absolute inset-0 opacity-0" aria-label="Дата" />
         </button>
-        <motion.button type="button" whileTap={{ scale: 0.95 }} transition={snappy} onClick={() => setSource(NEXT[source])} aria-label={`Откуда: ${SOURCE_NAME[source]}. Нажмите, чтобы сменить`}
-          className={`flex h-10 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[13px] font-medium ${source === 'credit' ? 'border-neg/40 bg-neg/10 text-neg' : source === 'reserve' ? 'border-info/40 bg-info/10 text-info' : 'border-line bg-surface'}`}>
-          <AnimatePresence mode="popLayout" initial={false}>
-            <motion.span key={source} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={snappy} className="flex items-center gap-1.5">
-              {source === 'reserve' ? <PiggyBank size={15} strokeWidth={1.6} /> : <CreditCard size={15} strokeWidth={1.6} className={source === 'life' ? 'text-sea' : ''} />}{SOURCE_NAME[source]}
-            </motion.span>
-          </AnimatePresence>
-        </motion.button>
         <input value={note} onChange={e => setNote(e.target.value)} placeholder="Что купили" className="h-10 min-w-0 flex-1 rounded-full border border-line bg-surface px-3.5 text-[16px] outline-none placeholder:text-faint focus:border-sea" />
       </div>
 
@@ -148,10 +176,10 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
           const on = category === c.id;
           return (
             <motion.button key={c.id} type="button" onClick={() => setCategory(c.id)} whileTap={{ scale: 0.95 }} transition={snappy}
-              style={on ? { background: CAT_COLOR[c.id] } : undefined}
-              className={`relative flex aspect-[1/0.92] flex-col items-center justify-center gap-1 overflow-hidden rounded-[18px] border text-center transition-colors duration-200 ${on ? 'border-transparent text-white' : 'border-line bg-surface'}`}>
+              style={{ '--c': CAT_COLOR[c.id], ...(on ? {} : { background: `color-mix(in oklab, ${CAT_COLOR[c.id]} 13%, var(--surface))` }) } as CSSProperties}
+              className={`relative flex aspect-[1/0.92] flex-col items-center justify-center gap-1 overflow-hidden rounded-[18px] text-center transition-shadow duration-200 ${on ? 'tile' : ''}`}>
               <motion.span className="relative" animate={on ? { rotate: [0, -12, 10, 0], scale: [1, 1.25, 1] } : { rotate: 0, scale: 1 }} transition={{ duration: 0.45 }}>
-                <Icon size={20} strokeWidth={1.6} className={on ? '' : 'text-ink/75'} />
+                <Icon size={21} strokeWidth={1.8} style={on ? undefined : { color: CAT_COLOR[c.id] }} />
               </motion.span>
               <span className="relative px-0.5 text-[10px] leading-tight font-medium">{c.short}</span>
             </motion.button>
@@ -159,18 +187,6 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
         })}
       </div>
 
-      <AnimatePresence initial={false}>
-        {source === 'credit' && !bridgeWeek(bridge, weekStart(date)) && (
-          <motion.p key="credit" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-            className="flex items-start gap-2 overflow-hidden px-1 text-[12.5px] leading-snug text-neg">
-            <AlertTriangle size={14} className="mt-0.5 shrink-0" /> Кредитки заморожены — только гасим. Запишу как нарушение плана.
-          </motion.p>
-        )}
-        {source === 'reserve' && (
-          <motion.p key="reserve" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden px-1 text-[12.5px] leading-snug text-info">Из резерва — только здоровье и срочное, в недельный лимит не входит.</motion.p>
-        )}
-      </AnimatePresence>
       {edit && (
         <SecondaryButton onClick={() => { store.removeExpense(edit.id); toast('Трата удалена'); onDone(); }} className="w-full text-neg">
           <Trash2 size={16} strokeWidth={1.5} /> Удалить

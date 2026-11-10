@@ -84,6 +84,7 @@ function DebtHero() {
   const path = pts.reduce((d, p, i) => (i ? `${d} S${p.x - step / 2} ${p.y + (i % 2 ? 22 : -22)} ${p.x} ${p.y}` : `M8 ${p.y + 6} Q${p.x / 2} ${p.y + 14} ${p.x} ${p.y}`), '') + ` S${W - 70} 48 ${W - 40} 62`;
   return (
     <section className="deep-card deep-dusk mx-4 mt-3 pt-5 pb-3">
+        <span aria-hidden="true" className="deep-sheen" />
       <div className="px-5">
         <div className="text-[13px] text-card-muted">Общий долг</div>
         <CountTo to={total} from={start > total ? start : total} className="figure mt-1 block text-[42px] leading-none" />

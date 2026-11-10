@@ -114,6 +114,7 @@ export function CoverageCard() {
   return (
     <section className="mx-4 mt-4">
       <div className="deep-card px-5 pt-5 pb-4">
+        <span aria-hidden="true" className="deep-sheen" />
         <div className="flex items-start gap-3">
           {s ? <TriangleAlert size={22} strokeWidth={1.8} className="mt-0.5 shrink-0 text-[#ff9a70]" /> : <CheckCircle2 size={22} strokeWidth={1.8} className="mt-0.5 shrink-0 text-[#9ff0d4]" />}
           <div className="min-w-0">

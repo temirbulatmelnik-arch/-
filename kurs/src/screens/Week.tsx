@@ -2,15 +2,16 @@
 // ближайший платёж, дела, резерв. Плашка о перерасходе появляется при входе в приложение и сама растворяется.
 import { ChevronRight, Hourglass, MessagesSquare, PiggyBank, Scale, ScanText, Settings as Cog } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { CardStack, type StackCard } from '../components/CardStack';
 import { DayRing } from '../components/DayRing';
+import { Wallets } from '../components/Wallets';
 import { WeekStrip } from '../components/WeekStrip';
 import { bridgeControl, lampAt, setSceneHidden, SkyButton, WeekScene } from '../components/Petersburg';
 import { haptic } from '../components/haptics';
 import { Roll, spring } from '../components/motion';
-import { runQuick } from '../components/TabBar';
+import { QUICK_COLOR, runQuick } from '../components/TabBar';
 import { AlertRow, EventRow } from '../components/rows';
 import { CatIcon, Money } from '../components/ui';
 import { eventsBetween, urgency } from '../domain/calendar';
@@ -247,11 +248,12 @@ export function Week() {
         ),
     },
     {
-      id: 'money', tone: 'money', kicker: 'Резерв', alert: reserve < need,
-      title: <><Money value={reserve} />, нужно <Money value={need} /></>,
+      id: 'money', tone: 'money', kicker: topped != null ? 'Воскресенье: карта пополнена' : today.nextWeek ? 'Сегодня вечером' : 'В воскресенье', alert: reserve < need,
+      title: topped != null ? 'Долито из резерва' : 'Долить на карту из резерва',
+      amount: <Money value={topped ?? current.topUp} />,
       body: (
-        <>
-          <button type="button" onClick={() => ui.set({ reserve: true })} className="block w-full px-4 pt-1 text-left">
+        <div className="flex flex-col">
+          <button type="button" onClick={() => ui.set({ reserve: true })} className="block w-full px-4 text-left">
             <span className="relative block h-1.5 rounded-full" style={{ background: reserve >= need ? 'linear-gradient(90deg, var(--ring-1), var(--ring-2))' : 'var(--line)' }}>
               {reserve >= need
                 ? <span className="absolute -top-[3px] h-3 w-0.5 rounded-full bg-ink" style={{ left: `${(need / Math.max(reserve, 1)) * 100}%` }} />
@@ -261,12 +263,8 @@ export function Week() {
               {reserve >= need ? <>Держит <Money value={need} /> до премии {monthIn(next)}, запас <Money value={reserve - need} /></> : <>До премии {monthIn(next)} нужно <Money value={need} />, не хватает <Money value={need - reserve} /></>}
             </span>
           </button>
-          <button type="button" onClick={() => ui.set({ week: week.monday })} className="mt-4 block w-full px-4 pb-1 text-left">
-            <span className="flex items-baseline justify-between gap-3 text-[14px]">
-              {topped != null ? 'Долито в воскресенье' : 'Долить в воскресенье'}
-              <Money value={topped ?? current.topUp} className="figure text-[15px]" />
-            </span>
-            <span className="mt-2 flex h-1.5 overflow-hidden rounded-full bg-line">
+          <button type="button" onClick={() => ui.set({ week: week.monday })} className="order-first block w-full px-4 pt-1 pb-4 text-left">
+            <span className="flex h-1.5 overflow-hidden rounded-full bg-line">
               <span className="bg-sea" style={{ width: `${(current.leftover / Math.max(current.nextLimit, 1)) * 100}%` }} />
               <span className="bg-warn" style={{ width: `${(current.topUp / Math.max(current.nextLimit, 1)) * 100}%` }} />
             </span>
@@ -274,7 +272,7 @@ export function Week() {
               {topped != null ? 'из резерва на карту жизни' : current.leftover > 0 ? <>на карте останется <Money value={current.leftover} />, остальное из резерва</> : 'из резерва, до полного лимита'}
             </span>
           </button>
-        </>
+        </div>
       ),
     },
   ];
@@ -312,11 +310,6 @@ export function Week() {
             </div>
             {/* сколько на самом деле на карте (по учёту): остаток не сгорает, а уменьшает воскресное пополнение. При перерасходе
                 через кредитку моста на карте может остаться плюс — это нормально */}
-            {led.card != null && (
-              <div className="mt-1.5 max-w-[200px] text-[12.5px] leading-snug" style={{ color: 'var(--scene-muted)' }}>
-                На карте <Money value={Math.max(0, led.card)} />{led.card > 0 && <> — уменьшат пополнение {today.nextWeek ? 'сегодня вечером' : 'в воскресенье'}</>}
-              </div>
-            )}
           </div>
           <DayRing day={today.day} canSpend={today.canSpend} mode={today.mode} overDay={today.overDay} nextWeek={today.nextWeek} onClick={() => ui.set({ today: true })} />
         </div>
@@ -347,7 +340,13 @@ export function Week() {
 
       {/* строка «Неделя»: свои, в долг по мосту и сверх лимита — раскладка во всю ширину, сцена остаётся чистой */}
       <div className="relative z-[1] -mt-1 bg-bg px-4 pt-2">
-        <WeekStrip money={money} bridge={bridgeNow} onOpen={() => ui.set({ week: week.monday })} />
+        <WeekStrip money={money} onOpen={() => ui.set({ week: week.monday })} />
+      </div>
+
+      {/* где деньги: свои на карте, взятое в долг и резерв — три сосуда */}
+      <div className="relative z-[1] bg-bg px-4 pt-2">
+        <Wallets card={led.card} weekLimit={week.limit} loan={bridgeNow} reserve={led.reserve} need={need}
+          onCard={() => ui.set({ card: true })} onLoan={() => ui.set({ loan: true })} onReserve={() => ui.set({ reserve: true })} />
       </div>
 
       {/* действия с данными: всё, что приходит из банка и из чата */}
@@ -359,8 +358,8 @@ export function Week() {
         ] as const).map(([id, label, Icon], i) => (
           <motion.button key={id} type="button" whileTap={{ scale: 0.95 }} onClick={() => runQuick(id)}
             initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: 0.2 + i * 0.05 }}
-            className="flex h-[62px] flex-col items-center justify-center gap-1 rounded-[18px] bg-surface text-[12.5px] font-medium text-sea shadow-[0_1px_2px_rgba(10,36,51,.06),0_10px_24px_-18px_rgba(10,36,51,.45)]">
-            <Icon size={21} strokeWidth={1.7} /> {label}
+            className="flex h-[52px] items-center justify-center gap-2 rounded-[18px] bg-surface text-[13px] font-medium shadow-[0_1px_2px_rgba(10,36,51,.06),0_10px_24px_-18px_rgba(10,36,51,.45)]">
+            <span className="dot-tile size-8" style={{ '--c': QUICK_COLOR[id] } as CSSProperties}><Icon size={17} strokeWidth={1.9} /></span>{label}
           </motion.button>
         ))}
       </div>

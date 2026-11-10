@@ -1,22 +1,21 @@
 // Строка «Неделя» под сценой «Сегодня» (вариант Б — решение владельца, DESIGN.md): сколько недели ушло и откуда — свои
-// деньги, в долг по мосту (кредитка в лимите недели) и сверх лимита (новый долг, красным за чертой лимита). Ниже — сколько
-// моста взято из общего лимита и до какого числа вернуть. Нажатие — итог недели.
+// деньги, в долг по мосту (кредитка в лимите недели) и сверх лимита (новый долг, красным за чертой лимита). Сколько моста
+// взято всего — в сосуде «В долг» ниже (components/Wallets.tsx). Нажатие — итог недели.
 import { ChevronRight } from 'lucide-react';
-import type { BridgeState, WeekMoney } from '../domain/bridge';
+import type { WeekMoney } from '../domain/bridge';
 import { weekParts } from '../domain/bridge';
-import { ddmm } from '../domain/dates';
 import { Money } from './ui';
 
-const LOAN = 'repeating-linear-gradient(135deg, #c77dff 0 5px, #9b5de5 5px 10px)';
-const OVER = 'repeating-linear-gradient(135deg, #ee6125 0 5px, #c9471a 5px 10px)';
+const LOAN = 'var(--loan-hatch)';
+const OVER = 'var(--over-hatch)';
 const pct = (x: number, of: number) => `${of > 0 ? (Math.max(0, x) / of) * 100 : 0}%`;
 
-export function WeekStrip({ money, bridge, onOpen }: { money: WeekMoney; bridge: BridgeState | null; onOpen: () => void }) {
+export function WeekStrip({ money, onOpen }: { money: WeekMoney; onOpen: () => void }) {
   const p = weekParts(money);
   const left = money.limit - money.spent;
   const parts = [
     { key: 'own', label: 'свои', value: p.own, fill: 'linear-gradient(90deg, var(--ring-1), var(--ring-2))', ink: 'var(--ink)' },
-    { key: 'loan', label: 'в долг', value: p.loan, fill: LOAN, ink: 'var(--loan-ink)' },
+    { key: 'loan', label: 'в долг', value: p.loan, fill: LOAN, ink: 'var(--loan)' },
     { key: 'over', label: 'сверх лимита', value: p.over, fill: OVER, ink: 'var(--neg)' },
   ];
   return (
@@ -43,18 +42,6 @@ export function WeekStrip({ money, bridge, onOpen }: { money: WeekMoney; bridge:
           </span>
         ))}
       </span>
-      {bridge && (
-        <>
-          <span className="my-2.5 block h-px" style={{ background: 'var(--line)' }} />
-          <span className="flex items-center gap-2.5 text-[12px] text-muted">
-            <span className="whitespace-nowrap">Мост <span className="font-medium" style={{ color: 'var(--loan-ink)' }}><Money value={bridge.used} /></span> из <Money value={bridge.bridge.cap} /></span>
-            <span className="h-2 flex-1 overflow-hidden rounded-full" style={{ background: 'color-mix(in oklab, var(--loan-ink) 16%, transparent)' }}>
-              <span className="block h-full rounded-full" style={{ width: pct(Math.min(bridge.used, bridge.bridge.cap), bridge.bridge.cap), background: bridge.used > bridge.bridge.cap ? OVER : LOAN }} />
-            </span>
-            {bridge.bridge.repayBy && <span className="whitespace-nowrap">вернуть до {ddmm(bridge.bridge.repayBy)}</span>}
-          </span>
-        </>
-      )}
     </button>
   );
 }

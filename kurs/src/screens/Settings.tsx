@@ -1,6 +1,6 @@
-import { BellRing, ChevronRight, Download, KeyRound, Smartphone, Upload } from 'lucide-react';
+import { BellRing, ChevronRight, Download, KeyRound, MessagesSquare, PiggyBank, Repeat, Smartphone, Upload, Wallet } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { Field, PrimaryButton, SecondaryButton, Segmented, Sheet, Switch } from '../components/ui';
+import { Field, PrimaryButton, SecondaryButton, Segmented, Sheet, Switch, Tile } from '../components/ui';
 import { MODELS } from '../domain/models';
 import { ddmmyyyy, today } from '../domain/dates';
 import { downloadFile } from '../domain/ics';
@@ -61,14 +61,16 @@ function Body() {
   return (
     <div className="-mt-3">
       <Section title="План">
+        {/* как в «Настройках» iPhone: у каждой строки свой цветной значок */}
         {([
-          ['Связь с чатом «Финансы»', 'Файл обмена: туда и обратно', { sync: true }],
-          ['Обязательные платежи', 'Связь, спортзал, подписки — даты и суммы', { fixed: true }],
-          ['Зарплатная карта', 'Остаток для прогноза по дням', { card: true }],
-          ['Остатки недель', 'Копилка и закрытые недели', { savings: true }],
-        ] as const).map(([title, hint, open]) => (
-          <button key={title} type="button" onClick={() => useUi.getState().set({ settings: false, ...open })} className="flex w-full items-center justify-between gap-3 py-1 text-left">
-            <span><span className="block text-[14.5px] font-medium">{title}</span><span className="block text-[12.5px] text-muted">{hint}</span></span>
+          ['Связь с чатом «Финансы»', 'Файл обмена: туда и обратно', { sync: true }, MessagesSquare, '#8b63e0'],
+          ['Обязательные платежи', 'Связь, спортзал, подписки — даты и суммы', { fixed: true }, Repeat, '#5b6fb8'],
+          ['Зарплатная карта', 'Остаток для прогноза по дням', { card: true }, Wallet, '#1f8fb0'],
+          ['Остатки недель', 'Копилка и закрытые недели', { savings: true }, PiggyBank, '#e9a01c'],
+        ] as const).map(([title, hint, open, Icon, color]) => (
+          <button key={title} type="button" onClick={() => useUi.getState().set({ settings: false, ...open })} className="flex w-full items-center gap-3 py-1 text-left">
+            <Tile c={color} className="size-9 !rounded-[11px]"><Icon size={17} strokeWidth={1.9} /></Tile>
+            <span className="min-w-0 flex-1"><span className="block text-[14.5px] font-medium">{title}</span><span className="block text-[12.5px] text-muted">{hint}</span></span>
             <ChevronRight size={16} className="shrink-0 text-faint" />
           </button>
         ))}

@@ -1,9 +1,9 @@
 // Связь с чатом «Финансы»: один файл обмена в обе стороны (domain/exchange.ts).
 // Приложение отдаёт всё состояние; ответ чата с изменениями показывается по разделам и применяется выбранное.
 // А ещё — новая редакция зашифрованного плана с сайта: подтягивается по коду, данные на телефоне остаются.
-import { ClipboardPaste, Copy, Download, FileUp, Share2 } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpFromLine, ClipboardPaste, Copy, Download, FileUp, Share2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { Field, PrimaryButton, SecondaryButton, Segmented, Sheet, Switch } from '../components/ui';
+import { Field, PrimaryButton, SecondaryButton, Segmented, Sheet, Switch, Tile } from '../components/ui';
 import { today } from '../domain/dates';
 import {
   applyExchange, buildExchange, exchangeDigest, exchangeFileName, normalize, parseExchange, previewExchange, type ExchangeFile, type ExchangeSection, type SectionId,
@@ -89,8 +89,8 @@ function Body() {
   return (
     <div className="space-y-5 pt-1">
       <section className="card space-y-3 p-4">
-        <h3 className="text-[15px] font-medium">Из приложения в чат</h3>
-        <p className="text-[13.5px] leading-snug">Один файл со всем, что знает приложение: лимиты, обязательные платежи, календарь с отметками, траты и зачисления за 90 дней, долги, резерв, копилка, чек-лист и стратегия. Добавьте его в <b className="font-medium">файлы проекта «Финансы»</b> вместо прошлого или приложите к сообщению.</p>
+        <h3 className="flex items-center gap-2.5 text-[15px] font-medium"><Tile c="#8b63e0" className="size-8 !rounded-[10px]"><ArrowUpFromLine size={16} strokeWidth={2} /></Tile>Из приложения в чат</h3>
+        <p className="text-[13.5px] leading-snug">Файл со всем, что знает приложение. Добавьте его в <b className="font-medium">файлы проекта «Финансы»</b> вместо прошлого или приложите к сообщению.</p>
         <Segmented value={short ? 'short' : 'full'} onChange={v => setShort(v === 'short')} options={[{ id: 'short', label: 'Коротко, для сверки' }, { id: 'full', label: 'Полностью' }]} />
         <p className="text-[12px] leading-snug text-muted">{short ? 'Календарь на 2 недели назад и 45 дней вперёд, траты за 14 дней, 4 недели, без стратегии — чтобы не вставлять в чат тысячи строк.' : 'Всё: календарь с дальними поправками, траты за 90 дней, шаблоны, стратегия и правила.'}</p>
         <PrimaryButton onClick={() => void copy(exportText(short))}><Copy size={17} strokeWidth={1.6} /> Отправить в Claude — скопировать</PrimaryButton>
@@ -101,7 +101,7 @@ function Body() {
       </section>
 
       <section className="card space-y-3 p-4">
-        <h3 className="text-[15px] font-medium">Из чата в приложение</h3>
+        <h3 className="flex items-center gap-2.5 text-[15px] font-medium"><Tile c="#1f8fb0" className="size-8 !rounded-[10px]"><ArrowDownToLine size={16} strokeWidth={2} /></Tile>Из чата в приложение</h3>
         {file ? (
           <>
             {file.summary && <p className="text-[14px] leading-snug font-medium">{file.summary}</p>}

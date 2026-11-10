@@ -1,7 +1,7 @@
 // «Траты» — куда ушли деньги. Месяц против лимитов этапа: «прилив» из цветов категорий, категории с полосами,
 // недели месяца, поиск и фильтры, все траты по дням. Нажатие на категорию — фильтр; свайп влево — изменить, удалить.
 import { AnimatePresence, motion } from 'motion/react';
-import { ChevronLeft, ChevronRight, Copy, CreditCard, Pencil, Search, Trash2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Copy, Pencil, Search, Trash2, X } from 'lucide-react';
 import { Hold } from '../components/Hold';
 import { useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
@@ -11,6 +11,7 @@ import { ExpenseRow } from '../components/rows';
 import { CAT_COLOR, CatIcon, Empty, Money } from '../components/ui';
 import { addDays, addMonths, ddmm, monthKey, monthName, weekday, weekStart } from '../domain/dates';
 import { CATEGORY, currentPhase, weeklyLimit } from '../domain/plan';
+import { bySource } from '../domain/sources';
 import { countsWeekly, monthByCategory } from '../domain/summary';
 import type { CategoryId, Expense, Source } from '../domain/types';
 import { useStore } from '../store/store';
@@ -18,7 +19,9 @@ import { toast, useToday, useUi } from '../store/ui';
 
 
 type SourceFilter = 'all' | Source;
-const SOURCES: { id: SourceFilter; label: string }[] = [{ id: 'all', label: 'Все' }, { id: 'life', label: 'Карта' }, { id: 'credit', label: 'Кредитка' }, { id: 'reserve', label: 'Резерв' }];
+const SOURCES: { id: SourceFilter; label: string; dot?: string }[] = [
+  { id: 'all', label: 'Все' }, { id: 'life', label: 'Свои', dot: 'var(--own)' }, { id: 'credit', label: 'В долг', dot: 'var(--loan-hatch)' }, { id: 'reserve', label: 'Резерв', dot: 'var(--rsv)' },
+];
 
 export function Budget() {
   const now = useToday();
@@ -35,8 +38,9 @@ export function Budget() {
   const spent = rows.reduce((s, r) => s + r.spent, 0);
   const limit = rows.reduce((s, r) => s + r.limit, 0);
   const baseline = rows.reduce((s, r) => s + r.baseline, 0);
-  const credit = monthList.filter(e => e.source === 'credit');
-  const fromReserve = monthList.filter(e => e.source === 'reserve').reduce((s, e) => s + e.amount, 0);
+  // откуда ушли деньги месяца: свои, в долг (кредитка) и из резерва
+  const src = useMemo(() => bySource(monthList), [monthList]);
+  const srcAll = Math.max(1, src.life + src.credit + src.reserve);
   const saved = wishes.filter(w => w.resolved === 'skipped').reduce((s, w) => s + w.amount, 0);
   const shown = rows.filter(r => r.spent > 0).sort((a, b) => b.spent - a.spent);
 
@@ -82,6 +86,7 @@ export function Budget() {
         } />
 
       <section className="deep-card mx-4 mt-3 px-5 pt-5 pb-4">
+        <span aria-hidden="true" className="deep-sheen" />
         <div className="flex items-baseline justify-between gap-3">
           <span className="text-[13px] text-card-muted">Потрачено за месяц</span>
           <span className="text-[12.5px] text-card-muted">лимит этапа {phase.id}: <Money value={limit} className="text-card" /></span>
@@ -99,15 +104,22 @@ export function Budget() {
           <span>{spent <= limit ? <>осталось <Money value={limit - spent} className="text-card" /></> : <>сверх лимита <Money value={spent - limit} className="text-[#f2a596]" /></>}</span>
           {baseline > 0 && <span>до плана уходило <Money value={baseline} className="text-card" /></span>}
         </div>
-        {fromReserve > 0 && <p className="mt-2 text-[12px] leading-snug text-card-muted">Из резерва — <Money value={fromReserve} className="text-card" />, в лимит не входит.</p>}
+        {/* откуда деньги: сплошная — свои, штриховка — в долг, сумерки — из резерва (в лимит не входит) */}
+        {(src.credit > 0 || src.reserve > 0) && (
+          <>
+            <div className="mt-4 flex h-1.5 gap-px overflow-hidden rounded-full bg-card/12">
+              <span className="h-full bg-white/85" style={{ width: `${(src.life / srcAll) * 100}%` }} />
+              <span className="h-full" style={{ width: `${(src.credit / srcAll) * 100}%`, background: 'var(--loan-hatch)' }} />
+              <span className="h-full bg-[#aab8f0]" style={{ width: `${(src.reserve / srcAll) * 100}%` }} />
+            </div>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-card-muted">
+              <span><span className="mr-1.5 inline-block size-2 rounded-[3px] bg-white/85 align-[0px]" />свои <Money value={src.life} className="text-card" /></span>
+              {src.credit > 0 && <span><span className="mr-1.5 inline-block size-2 rounded-[3px] align-[0px]" style={{ background: 'var(--loan-hatch)' }} />в долг <Money value={src.credit} className="text-card" /></span>}
+              {src.reserve > 0 && <span><span className="mr-1.5 inline-block size-2 rounded-[3px] bg-[#aab8f0] align-[0px]" />из резерва <Money value={src.reserve} className="text-card" /></span>}
+            </div>
+          </>
+        )}
       </section>
-
-      {credit.length > 0 && (
-        <div className="mx-4 mt-3 flex items-start gap-3 rounded-[22px] bg-neg/10 px-4 py-3.5 text-neg">
-          <CreditCard size={18} strokeWidth={1.5} className="mt-0.5 shrink-0" />
-          <div className="text-[13.5px] leading-snug">С кредиток: {credit.length} на <Money value={credit.reduce((s, e) => s + e.amount, 0)} />. В неделю моста — по плану моста, иначе это нарушение: кредитки только гасим.</div>
-        </div>
-      )}
 
       {weeks.length > 0 && (
         <section className="mt-5">
@@ -179,7 +191,7 @@ export function Budget() {
           {SOURCES.map(s => (
             <motion.button key={s.id} type="button" whileTap={{ scale: 0.95 }} onClick={() => setSource(s.id)}
               className={`relative shrink-0 rounded-full border px-3.5 py-2 text-[13px] font-medium transition-colors duration-200 ${source === s.id ? 'border-transparent bg-ink text-bg' : 'border-line text-muted'}`}>
-              <span className="relative">{s.label}</span>
+              <span className="relative flex items-center gap-1.5">{s.dot && <span className="size-2 rounded-[3px]" style={{ background: s.dot }} />}{s.label}</span>
             </motion.button>
           ))}
         </div>

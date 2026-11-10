@@ -2,7 +2,7 @@
 // поступления (премия сразу открывает распределение), остаток на карте. После — итог недели.
 import { AlertTriangle, Camera, Check, ClipboardPaste, FileSpreadsheet, FileText, KeyRound, Loader2 } from 'lucide-react';
 import { useRef, useState, type ReactNode } from 'react';
-import { Chip, Money, PrimaryButton, SecondaryButton, Sheet } from '../components/ui';
+import { Chip, Money, PrimaryButton, SecondaryButton, Sheet, Tile } from '../components/ui';
 import { ddmm, fromKey, today } from '../domain/dates';
 import { CATEGORIES } from '../domain/plan';
 import { fromAi, fromBank, fromDrafts, type AnyProposal } from '../domain/proposals';
@@ -110,13 +110,15 @@ function Flow() {
       <input ref={shots} type="file" accept="image/*" multiple hidden onChange={e => { const f = [...(e.target.files ?? [])]; e.target.value = ''; void runAi(f); }} />
       <input ref={csv} type="file" accept=".csv,text/csv,text/plain,.txt" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; void runCsv(f); }} />
 
-      <Option icon={<FileText size={19} strokeWidth={1.5} />} title="Выписка PDF" tag={apiKey ? 'Claude' : 'на телефоне'}
+      <Option icon={<FileText size={19} strokeWidth={1.9} />} color="#f0603a" title="Выписка PDF" tag={apiKey ? 'Claude' : 'на телефоне'}
+        lead="Файл выписки за неделю — самый точный способ"
         text="В приложении банка: карта → «Выписка» → период «неделя» → поделиться PDF → «Сохранить в Файлы». Затем выберите файл здесь."
         onClick={() => pdf.current?.click()}>
         {apiKey && <button type="button" onClick={e => { e.stopPropagation(); pdfLocal.current?.click(); }} className="mt-2 text-[12.5px] font-medium text-sea">Разобрать без Claude, бесплатно</button>}
       </Option>
 
-      <Option icon={<Camera size={19} strokeWidth={1.5} />} title="Скриншоты" tag="Claude"
+      <Option icon={<Camera size={19} strokeWidth={1.9} />} color="#8b63e0" title="Скриншоты" tag="Claude"
+        lead="Снимки экрана банка — приложение само поймёт, что на них"
         text="Список операций, экран кредитки, чек платежа, зачисление, накопительный счёт — приложение поймёт, что это."
         onClick={() => (apiKey ? shots.current?.click() : undefined)} disabled={!apiKey}>
         {apiKey ? (
@@ -133,11 +135,13 @@ function Flow() {
         )}
       </Option>
 
-      <Option icon={<ClipboardPaste size={19} strokeWidth={1.5} />} title="Текст со скриншота" tag="на телефоне"
+      <Option icon={<ClipboardPaste size={19} strokeWidth={1.9} />} color="#1f8fb0" title="Текст со скриншота" tag="на телефоне"
+        lead="Скопируйте текст со снимка в «Фото» и вставьте"
         text="ВТБ «История», Сбер, Т-Банк: в «Фото» удерживайте палец на тексте → «Выбрать всё» → «Скопировать» и вставьте сюда. Категории банка, переводы себе, погашения и повторы приложение разберёт само."
         onClick={() => setStep({ s: 'text' })} />
 
-      <Option icon={<FileSpreadsheet size={19} strokeWidth={1.5} />} title="Файл CSV" tag="на телефоне"
+      <Option icon={<FileSpreadsheet size={19} strokeWidth={1.9} />} color="#2ba36a" title="Файл CSV" tag="на телефоне"
+        lead="Таблица операций из банка"
         text="Если банк выгружает таблицу: даты, суммы и описания найдутся по заголовкам."
         onClick={() => csv.current?.click()} />
 
@@ -146,14 +150,21 @@ function Flow() {
   );
 }
 
-function Option({ icon, title, tag, text, onClick, disabled, children }: { icon: ReactNode; title: string; tag: string; text: string; onClick: () => void; disabled?: boolean; children?: ReactNode }) {
+/** Способ загрузки: цветной значок, одна строка «что это»; подробности «как» — по нажатию, чтобы не читать стену текста */
+function Option({ icon, color, title, tag, lead, text, onClick, disabled, children }: {
+  icon: ReactNode; color: string; title: string; tag: string; lead: string; text: string; onClick: () => void; disabled?: boolean; children?: ReactNode;
+}) {
   return (
-    <div role="button" tabIndex={0} onClick={onClick} onKeyDown={e => e.key === 'Enter' && onClick()} className={`card block w-full p-4 text-left transition active:scale-[0.99] ${disabled ? '' : 'cursor-pointer'}`}>
+    <div role="button" tabIndex={0} onClick={onClick} onKeyDown={e => e.key === 'Enter' && e.target === e.currentTarget && onClick()} className={`card block w-full p-4 text-left transition active:scale-[0.99] ${disabled ? '' : 'cursor-pointer'}`}>
       <div className="flex items-start gap-3">
-        <span className="grid size-10 shrink-0 place-items-center rounded-full bg-surface-2 text-ink/80">{icon}</span>
+        <Tile c={color}>{icon}</Tile>
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-2"><span className="text-[15px] font-medium">{title}</span><Chip tone={tag === 'Claude' ? 'info' : 'neutral'}>{tag}</Chip></span>
-          <span className="mt-1 block text-[12.5px] leading-snug text-muted">{text}</span>
+          <span className="mt-0.5 block text-[13px] leading-snug text-muted">{lead}</span>
+          <details className="mt-1.5 text-[12.5px] leading-snug text-muted" onClick={e => e.stopPropagation()}>
+            <summary className="cursor-pointer list-none font-medium text-sea [&::-webkit-details-marker]:hidden">Как это сделать</summary>
+            <p className="mt-1">{text}</p>
+          </details>
         </span>
       </div>
       {children}

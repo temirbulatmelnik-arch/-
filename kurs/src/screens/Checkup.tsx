@@ -123,7 +123,7 @@ function Body({ monday }: { monday: string }) {
     <div className="space-y-4 pt-1">
       <p className="text-[13.5px] leading-snug text-muted">Откройте банк и впишите, что видите сейчас, до перевода. Приложение сравнит с учётом и скажет, сколько перевести.</p>
 
-      <Account label="На карте ВТБ" hint="мастер-счёт, карта жизни" value={card} onChange={setCard}>
+      <Account label="На карте ВТБ" hint="свои: мастер-счёт, карта жизни" dot="var(--own)" value={card} onChange={setCard}>
         {cardV != null && (led.card == null
           ? <Note>Первая сверка: с этой суммы начнётся учёт карты.</Note>
           : <Verdict d={dCard!} expected={led.card}
@@ -132,7 +132,7 @@ function Body({ monday }: { monday: string }) {
               more={x => <>Больше, чем по учёту, на <Money value={x} />: пришло, но не отмечено (возврат, перевод или доход).</>} />)}
       </Account>
 
-      <Account label="В резерве" hint="накопительный счёт" value={reserve} onChange={setReserve}>
+      <Account label="В резерве" hint="накопительный счёт" dot="var(--rsv)" value={reserve} onChange={setReserve}>
         {reserveV != null && <Verdict d={dReserve!} expected={led.reserve}
           less={x => <>Меньше, чем по учёту, на <Money value={x} />: платёж или трата из резерва не отмечены.</>}
           more={x => <>Больше, чем по учёту, на <Money value={x} />: проценты или поступление, которое не отмечено.</>} />}
@@ -140,8 +140,11 @@ function Body({ monday }: { monday: string }) {
 
       {led.cards.length > 0 && (
         <div className="space-y-1 px-1 pt-1">
-          <div className="text-[15px] font-medium">Кредитки</div>
-          <p className="text-[12.5px] leading-snug text-muted">«Долг» — вся задолженность из приложения банка, с процентами на сегодня. «Доступно» — баланс карты, он бывает меньше нуля: для минуса — кнопка «−». Проценты приложение считает по дням, как банк.</p>
+          <div className="text-[15px] font-medium"><span className="mr-2 inline-block size-2.5 rounded-[3px]" style={{ background: 'var(--loan-hatch)' }} />Кредитки — в долг</div>
+          <details className="text-[12.5px] leading-snug text-muted">
+            <summary className="cursor-pointer list-none font-medium text-sea [&::-webkit-details-marker]:hidden">Что вписывать</summary>
+            <p className="mt-1">«Долг» — вся задолженность из приложения банка, с процентами на сегодня. «Доступно» — баланс карты, он бывает меньше нуля: для минуса — кнопка «−». Проценты приложение считает по дням, как банк.</p>
+          </details>
         </div>
       )}
       {led.cards.map(c => (
@@ -318,10 +321,13 @@ function LimitLine({ debt }: { debt: Debt }) {
   );
 }
 
-function Account({ label, hint, value, onChange, top, children }: { label: string; hint: string; value: string; onChange: (v: string) => void; top?: ReactNode; children?: ReactNode }) {
+function Account({ label, hint, value, onChange, top, children, dot }: { label: string; hint: string; value: string; onChange: (v: string) => void; top?: ReactNode; children?: ReactNode; dot?: string }) {
   return (
     <div className="space-y-2">
-      <div className="flex items-baseline justify-between gap-3 px-1"><span className="text-[14px] font-medium">{label}</span><span className="text-[12px] text-faint">{hint}</span></div>
+      <div className="flex items-baseline justify-between gap-3 px-1">
+        <span className="text-[14px] font-medium">{dot && <span className="mr-2 inline-block size-2.5 rounded-[3px]" style={{ background: dot }} />}{label}</span>
+        <span className="text-[12px] text-faint">{hint}</span>
+      </div>
       {top}
       <AmountInput value={value} onChange={onChange} size="md" />
       {children}
