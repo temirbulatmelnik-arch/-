@@ -8,9 +8,10 @@ import { useStore } from '../store/store';
 import { salute } from '../store/events';
 import { useUi } from '../store/ui';
 
-export const TOUR_VERSION = 4;
+export const TOUR_VERSION = 5;
 
 const SLIDES: { title: string; text: string; art: () => ReactNode }[] = [
+  { title: 'Свои, в долг и резерв', text: 'У денег теперь цвет. Синяя вода — свои, сиреневая штриховка — взятое в долг, сумерки — резерв. В трате выберите, откуда деньги: под суммой сразу видно, что останется. На «Сегодня» — три сосуда «Где деньги»: нажмите на любой.', art: () => <ArtMoney /> },
   { title: 'Сегодня — сколько можно', text: 'Сверху остаток недели и кольцо дня. Фонари — дни недели: ведите пальцем вдоль набережной, и подпись покажет траты каждого дня. Потяните сцену вниз — мост сведётся, а приложение проверит обновления. Прокрутите — сверху появится «Остров» с деньгами на сегодня, нажмите на него.', art: () => <ArtToday /> },
   { title: '«+» — записать трату', text: 'Одно нажатие — сумма, категория, готово. Удержите «+», и раскроются остальные действия: из банка, сверка, чат, премия.', art: () => <ArtPlus /> },
   { title: 'Платежи — хватит ли денег', text: 'Три вида, листаются пальцем: месяц с водой в днях, «Хватит ли» — ответ одной фразой и линия резерва, которую можно вести пальцем, и список. Нажмите на день — он раскроется прямо из календаря. Строку можно сдвинуть вправо — «оплачено» — или удержать: появится меню.', art: () => <ArtPay /> },
@@ -107,6 +108,23 @@ function ArtToday() {
   );
 }
 
+/** Три сосуда: свои, в долг, резерв — вода поднимается по очереди */
+function ArtMoney() {
+  const k = useTick(1800, 2);
+  const cells = [['Свои', 'linear-gradient(180deg, var(--own-2), var(--own))', 0.7], ['В долг', 'var(--loan-hatch)', 0.35], ['Резерв', 'linear-gradient(180deg, var(--rsv-2), var(--rsv))', 0.9]] as const;
+  return (
+    <div className="flex w-[300px] gap-2.5">
+      {cells.map(([label, fill, level], n) => (
+        <div key={label} className="relative h-[120px] flex-1 overflow-hidden rounded-[20px] bg-surface shadow-lg">
+          <motion.span className="absolute inset-x-0 bottom-0 origin-bottom" style={{ height: `${level * 100}%`, background: fill, opacity: 0.45 }}
+            animate={{ scaleY: k ? 1 : 0.35 }} transition={{ type: 'spring', bounce: 0.25, duration: 1.1, delay: n * 0.12 }} />
+          <span className="relative block px-3 pt-2.5 text-[12.5px] font-medium text-ink">{label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ArtPlus() {
   const k = useTick(1600, 2);
   const icons = [ScanText, Scale, MessagesSquare, Gift];
@@ -121,7 +139,7 @@ function ArtPlus() {
         );
       })}
       <motion.span animate={{ rotate: k ? 135 : 0, scale: k ? 0.94 : 1 }} transition={{ type: 'spring', stiffness: 380, damping: 18 }}
-        className="absolute bottom-[22px] left-1/2 -ml-[30px] grid size-[60px] place-items-center rounded-full text-on-sea shadow-xl" style={{ background: 'linear-gradient(160deg, var(--ring-1), var(--sea) 55%, var(--ring-2))' }}>
+        className="sun absolute bottom-[22px] left-1/2 -ml-[30px] grid size-[60px] place-items-center rounded-full">
         <Plus size={26} strokeWidth={2.2} />
       </motion.span>
     </div>
