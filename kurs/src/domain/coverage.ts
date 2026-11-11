@@ -62,12 +62,13 @@ export interface CoverageInput {
 
 /**
  * Вход прогноза — один на всё приложение: календарь (остаток дня), «Хватит ли», «самая тонкая точка» и status.coverage
- * в файле для чата. Резерв — по учёту плюс поступления на карте, ждущие перевода в резерв. Недельные деньги считаются
+ * в файле для чата. Резерв — по учёту плюс деньги резерва на карте: поступления, ждущие перевода в резерв, и переводы
+ * под ещё не отмеченные платежи. Недельные деньги считаются
  * потраченными до нуля: из резерва уходит только воскресное пополнение карты (в неделю моста — fromReserve), траты с
  * кредитки моста резерв не уменьшают — они растят долг по кредитке.
  */
-export function coverageInput(s: CalendarInput & { marks: Record<string, EventMark>; expenses: Expense[] }, led: Pick<Ledger, 'reserve' | 'incomeOnCard'>): CoverageInput {
-  return { cal: s, marks: s.marks, reserve: led.reserve + led.incomeOnCard, debts: s.debts, expenses: s.expenses, bridge: s.bridge ?? null };
+export function coverageInput(s: CalendarInput & { marks: Record<string, EventMark>; expenses: Expense[] }, led: Pick<Ledger, 'reserve' | 'incomeOnCard' | 'heldOnCard'>): CoverageInput {
+  return { cal: s, marks: s.marks, reserve: led.reserve + led.incomeOnCard + led.heldOnCard, debts: s.debts, expenses: s.expenses, bridge: s.bridge ?? null };
 }
 
 /** Погашение моста и рост минималок по кредитке моста — как события прогноза */

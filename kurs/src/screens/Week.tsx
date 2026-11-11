@@ -16,6 +16,7 @@ import { CAT_COLOR, Money } from '../components/ui';
 import { eventsBetween } from '../domain/calendar';
 import { activeBridge, bridgeState, weekMoney } from '../domain/bridge';
 import { addDays, dayMonth, ddmm, fromKey, monthKey, plural, weekday, weekdayFull, weekRange, weekStart } from '../domain/dates';
+import { heldKeys, transferPlan } from '../domain/ledger';
 import { rub } from '../domain/money';
 import { quickSpends, yesterdaySet, type QuickSpend } from '../domain/quick';
 import { spendEffect, suggestSource } from '../domain/sources';
@@ -27,6 +28,7 @@ import { useStore } from '../store/store';
 import { toast, useCal, useToday, useUi, withUndo } from '../store/ui';
 import { checkInbox, checkPlan } from './Sync';
 import { useLedger } from './Checkup';
+import { recordTransfer } from './TransferSheet';
 
 /* вход в приложение: запуск или возвращение из фона — тогда плашка о перерасходе показывается снова */
 let entry = 0;
@@ -76,8 +78,8 @@ function useOverPill(left: number, alert: boolean) {
 export function Week() {
   const now = useToday();
   const cal = useCal();
-  const [expenses, debts, marks, wishes, settings, overrides, startTotal, closures, checklist, checks, toggleCheck, bridge, checkups] = useStore(useShallow(s => [
-    s.expenses, s.debts, s.marks, s.wishes, s.settings, s.weeklyOverrides, s.planTrajectory[0]?.[1] ?? 0, s.closures, s.checklist, s.checks, s.toggleCheck, s.bridge, s.checkups,
+  const [expenses, debts, marks, wishes, settings, overrides, startTotal, closures, checklist, checks, toggleCheck, bridge, checkups, reserveLog] = useStore(useShallow(s => [
+    s.expenses, s.debts, s.marks, s.wishes, s.settings, s.weeklyOverrides, s.planTrajectory[0]?.[1] ?? 0, s.closures, s.checklist, s.checks, s.toggleCheck, s.bridge, s.checkups, s.reserveLog,
   ] as const));
   // только нужное из состояния интерфейса: иначе весь экран перерисовывался бы при каждом переключении вкладки и листе
   const ui = { set: useUi(s => s.set), setTab: useUi(s => s.setTab), stackOpen: useUi(s => s.stackOpen) };
@@ -179,13 +181,32 @@ export function Week() {
   const hour = new Date().getHours();
   const steps = useMemo<Step[]>(() => {
     const out: Step[] = [];
+    // накануне вечером и в день платежа: перевести из резерва на карту, с которой он спишется. Сделали — резерв в
+    // приложении сразу как в банке, а платёж потом отмечается «с карты»
+    const move = transferPlan({ events: eventsBetween(cal, now, addDays(now, 1)), marks, log: reserveLog, incomeOnCard: led.incomeOnCard, now, hour });
+    if (move) {
+      const names = move.events.map(e => e.title).join(', ');
+      const day = move.when === 'tomorrow' ? 'Завтра' : move.when === 'today' ? 'Сегодня' : 'Сегодня и завтра';
+      out.push({
+        id: `move:${move.keys.join('|')}`, tone: 'rsv', kicker: `${day} ${move.events.length > 1 ? 'платежи' : 'платёж'}: ${names}`,
+        title: move.amount > 0 ? 'Перевести из резерва на карту' : 'Деньги под платёж уже на карте',
+        amount: <Money value={move.amount > 0 ? move.amount : move.total} approx={move.events.some(e => e.approx)} />,
+        text: move.amount > 0
+          ? <>{move.onCard > 0 && <>На карте уже лежат поступления на <Money value={move.onCard} /> — они идут в счёт платежа. </>}В резерве станет <Money value={led.reserve - move.amount} className="text-ink" />.</>
+          : 'Поступлений на карте хватает, переводить из резерва не нужно.',
+        primary: { label: move.amount > 0 ? 'Перевёл' : 'Понятно', run: () => recordTransfer(move, move.amount, led.reserve) },
+        secondary: { label: 'Другая сумма', run: () => ui.set({ transfer: move }) },
+      });
+    }
+    const held = heldKeys(reserveLog, marks);
     const due = eventsBetween(cal, addDays(now, -45), now).filter(e => !marks[e.key]?.done);
     for (const e of due) {
       const old = e.date < now;
       if (e.kind === 'payment') {
         out.push({
           id: e.key, tone: 'out', kicker: old ? `Не отмечен платёж, ${ddmm(e.date)}` : 'Платёж сегодня', title: e.title,
-          amount: <Money value={e.amount} approx={e.approx} />, text: old ? 'Оплатили — отметьте. Нет — оплатите сегодня: просрочка недопустима.' : undefined,
+          amount: <Money value={e.amount} approx={e.approx} />,
+          text: held.has(e.key) ? 'Деньги под него уже на карте. Списалось — отметьте.' : old ? 'Оплатили — отметьте. Нет — оплатите сегодня: просрочка недопустима.' : undefined,
           primary: { label: 'Оплачено', run: () => ui.set({ event: e }) },
         });
       } else if (e.kind === 'income' && e.date >= addDays(now, -10)) {
@@ -237,7 +258,7 @@ export function Week() {
       title: soon ? soon.title : 'Дел на сегодня нет', amount: soon ? <Money value={soon.amount} approx={soon.approx} sign={soon.kind === 'income'} /> : undefined,
       primary: { label: 'Что впереди', run: () => ui.setTab('payments') },
     }];
-  }, [cal, marks, now, list, closing, closeMonday, hour, expenses, pending, later]);
+  }, [cal, marks, now, list, closing, closeMonday, hour, expenses, pending, later, reserveLog, led.incomeOnCard, led.reserve]);
 
   // кольцо крутят пальцем: «а если потрачу?» — что останется сегодня и какой станет норма завтра
   const [whatIf, setWhatIf] = useState<number | null>(null);
@@ -351,7 +372,7 @@ export function Week() {
 
       {/* где деньги: свои на карте, взятое в долг и резерв — три сосуда */}
       <div className="relative z-[1] bg-bg px-4 pt-2">
-        <Wallets card={led.card} weekLimit={week.limit} loan={bridgeNow} reserve={led.reserve} need={need}
+        <Wallets card={led.card} held={led.heldOnCard} weekLimit={week.limit} loan={bridgeNow} reserve={led.reserve} need={need}
           onCard={() => ui.set({ card: true })} onLoan={() => ui.set({ loan: true })} onReserve={() => ui.set({ reserve: true })} />
       </div>
 

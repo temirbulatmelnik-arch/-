@@ -9,7 +9,7 @@ import { rub, parseAmount } from './money';
 import { categoryLimit, currentPhase, DEFAULT_PLAN, setPlanSource, splitBonus, targetDebt, weeklyLimit, type PlanConfig } from './plan';
 import { fromAi, fromDrafts } from './proposals';
 import { PROTOCOL_VERSION } from './sync';
-import { accruedOnCard, cardOn, checkupPlan, ledger, type Checkup, type LedgerInput } from './ledger';
+import { accruedOnCard, cardOn, checkupPlan, heldKeys, ledger, transferPlan, type Checkup, type LedgerInput } from './ledger';
 import { mergeSeed, type PlanState } from './planUpdate';
 import { applyExchange, buildExchange, dropChatTwins, exchangeDigest, normalize, parseExchange, previewExchange, type ExchangeState } from './exchange';
 import { parseStatementText, isIncomeLine } from './pdf';
@@ -874,6 +874,66 @@ describe('учёт по счетам для воскресной сверки', 
     const p = checkupPlan({ expenses: [], debts: [], overrides: [], bridge: null, marks: { 'wk:2026-11-02': { done: true, amount: 7000, at: 'x' } }, monday: '2026-10-26', leftover: 0, incomeOnCard: 0 });
     expect(p.topUp).toBe(0);
     expect(p.toppedBefore).toBe(7000);
+  });
+});
+
+describe('перевод из резерва на карту под платёж', () => {
+  const pay = (key: string, date: string, amount: number): CalEvent => ({ key, date, title: key, amount, kind: 'payment' } as CalEvent);
+  const events = [pay('pay:a:2026-11', '2026-11-11', 40_000), pay('fix:b:2026-11', '2026-11-11', 2000), pay('pay:c:2026-11', '2026-11-13', 9000)];
+  const NOW = '2026-11-10';
+  const ask = (o: Partial<Parameters<typeof transferPlan>[0]> = {}) => transferPlan({ events, marks: {}, log: [], incomeOnCard: 0, now: NOW, hour: 19, ...o });
+
+  it('шаг появляется накануне с 18:00 и в день платежа; сумма — все платежи этого дня', () => {
+    expect(ask({ hour: 17 })).toBeNull();
+    expect(ask()).toMatchObject({ keys: ['pay:a:2026-11', 'fix:b:2026-11'], total: 42_000, onCard: 0, amount: 42_000, when: 'tomorrow' });
+    expect(ask({ now: '2026-11-11', hour: 8 })).toMatchObject({ amount: 42_000, when: 'today' });
+    // послезавтрашний платёж ещё не зовёт; прошедший неотмеченный — тоже: его отмечают, а не переводят под него
+    expect(ask({ now: '2026-11-12', hour: 12 })).toBeNull();
+    expect(ask({ now: '2026-11-12', hour: 18 })).toMatchObject({ keys: ['pay:c:2026-11'], when: 'tomorrow' });
+  });
+
+  it('поступления на карте идут в счёт платежа; отмеченное и уже переведённое не предлагается', () => {
+    expect(ask({ incomeOnCard: 30_000 })).toMatchObject({ total: 42_000, onCard: 30_000, amount: 12_000 });
+    expect(ask({ incomeOnCard: 90_000 })).toMatchObject({ onCard: 42_000, amount: 0 });
+    expect(ask({ marks: { 'pay:a:2026-11': { done: true, amount: 40_000, at: 'x' } } })).toMatchObject({ keys: ['fix:b:2026-11'], amount: 2000 });
+    const log = [{ id: 't', date: NOW, at: '2026-11-10T19:00:00.000Z', amount: -42_000, note: 'под платёж', card: 42_000, forKeys: ['pay:a:2026-11', 'fix:b:2026-11'] }];
+    expect(ask({ log })).toBeNull();
+    expect([...heldKeys(log, {})]).toEqual(['pay:a:2026-11', 'fix:b:2026-11']);
+    expect([...heldKeys(log, { 'pay:a:2026-11': { done: true, at: 'x' } })]).toEqual(['fix:b:2026-11']);
+  });
+
+  const check = (date: string, at: string, card: number, reserve: number): Checkup => ({ monday: '2026-11-02', date, at, expected: { card: null, reserve, credit: null }, actual: { card, reserve }, topUp: 0, toReserve: 0, after: { card, reserve } });
+  const base: LedgerInput = { checkups: [check('2026-11-08', '2026-11-08T18:00:00.000Z', 5000, 60_000)], cardBalance: null, reserve: 60_000, reserveLog: [], marks: {}, expenses: [], oneOff: [], debts: [], bridge: null, now: '2026-11-11' };
+  const move = (amount: number, forKeys: string[], at = '2026-11-10T19:00:00.000Z') => ({ id: `t${at}`, date: at.slice(0, 10), at, amount: -amount, note: 'под платёж', ...(amount ? { card: amount } : {}), forKeys });
+  const pool = (s: LedgerInput) => { const l = ledger(s); return l.reserve + l.incomeOnCard + l.heldOnCard; };
+
+  it('перевод сразу уменьшает резерв, деньги ждут на карте; платёж с карты резерв второй раз не трогает', () => {
+    const moved = { ...base, reserve: 20_000, reserveLog: [move(40_000, ['pay:a:2026-11'])] };
+    expect(ledger(moved)).toMatchObject({ reserve: 20_000, card: 45_000, heldOnCard: 40_000, incomeOnCard: 0 });
+    // для прогноза денег столько же, сколько до перевода: платёж ещё впереди
+    expect(pool(moved)).toBe(pool(base));
+    const paid = { ...moved, marks: { 'pay:a:2026-11': { done: true, amount: 40_000, at: '2026-11-11T09:00:00.000Z', paidFrom: 'card' as const } } };
+    expect(ledger(paid)).toMatchObject({ reserve: 20_000, card: 5000, heldOnCard: 0, incomeOnCard: 0 });
+    expect(pool(paid)).toBe(pool(base) - 40_000);
+  });
+
+  it('на карте лежала зарплата — перевели меньше платежа: остальное платёж берёт из неё', () => {
+    const salary = { 'inc:salary:2026-11': { done: true, amount: 25_000, at: '2026-11-10T09:00:00.000Z' } };
+    const moved = { ...base, reserve: 45_000, marks: salary, reserveLog: [move(15_000, ['pay:a:2026-11'])] };
+    expect(ledger(moved)).toMatchObject({ reserve: 45_000, card: 45_000, heldOnCard: 15_000, incomeOnCard: 25_000 });
+    const paid = { ...moved, marks: { ...salary, 'pay:a:2026-11': { done: true, amount: 40_000, at: '2026-11-11T09:00:00.000Z', paidFrom: 'card' as const } } };
+    expect(ledger(paid)).toMatchObject({ reserve: 45_000, card: 5000, heldOnCard: 0, incomeOnCard: 0 });
+    // перевод не понадобился вовсе: запись с нулём помечает платёж «с карты»
+    const zero = { ...base, marks: { 'inc:salary:2026-11': { done: true, amount: 50_000, at: '2026-11-10T09:00:00.000Z' } }, reserveLog: [move(0, ['pay:a:2026-11'])] };
+    expect(ledger(zero)).toMatchObject({ reserve: 60_000, heldOnCard: 0, incomeOnCard: 50_000 });
+    expect(ledger({ ...zero, marks: { ...zero.marks, 'pay:a:2026-11': { done: true, amount: 40_000, at: '2026-11-11T09:00:00.000Z', paidFrom: 'card' as const } } })).toMatchObject({ reserve: 60_000, incomeOnCard: 10_000 });
+  });
+
+  it('сверка между переводом и платежом: деньги под платёж не предлагается вернуть в резерв', () => {
+    const s = { ...base, reserve: 20_000, checkups: [check('2026-11-10', '2026-11-10T21:00:00.000Z', 45_000, 20_000)], reserveLog: [move(40_000, ['pay:a:2026-11'])] };
+    expect(ledger(s)).toMatchObject({ reserve: 20_000, card: 45_000, heldOnCard: 40_000, incomeOnCard: 0 });
+    const paid = { ...s, marks: { 'pay:a:2026-11': { done: true, amount: 40_000, at: '2026-11-11T09:00:00.000Z', paidFrom: 'card' as const } } };
+    expect(ledger(paid)).toMatchObject({ reserve: 20_000, card: 5000, heldOnCard: 0, incomeOnCard: 0 });
   });
 });
 

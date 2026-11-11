@@ -5,6 +5,7 @@ import { AmountInput, Money, PrimaryButton, Row, SecondaryButton, Segmented, She
 import { GROUP_LABEL, whenText } from '../components/rows';
 import { eventGroup } from '../domain/calendar';
 import { addDays, dayMonth, relDays, weekdayFull } from '../domain/dates';
+import { heldKeys } from '../domain/ledger';
 import { parseAmount, rub } from '../domain/money';
 import type { CalEvent } from '../domain/types';
 import { weekReport } from '../domain/weekly';
@@ -39,7 +40,8 @@ function Body({ e }: { e: CalEvent }) {
     return String(Math.round((mark?.amount ?? e.amount) * 100) / 100);
   });
   const [editing, setEditing] = useState(false);
-  const [from, setFrom] = useState<'reserve' | 'card'>(mark?.paidFrom ?? 'reserve');
+  // деньги под платёж уже перевели на карту — по умолчанию «с карты»
+  const [from, setFrom] = useState<'reserve' | 'card'>(() => mark?.paidFrom ?? (heldKeys(useStore.getState().reserveLog, useStore.getState().marks).has(e.key) ? 'card' : 'reserve'));
   const [newAmount, setNewAmount] = useState(String(e.amount));
   const [newDate, setNewDate] = useState(e.date);
   const value = parseAmount(amount) ?? 0;

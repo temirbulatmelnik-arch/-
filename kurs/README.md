@@ -109,6 +109,10 @@
 - **Трата одной фразой** — `domain/spoken.ts` (`parseSpoken`, `guessCategory`; тест «трата одной фразой»), поле «Что
   купили» в `screens/AddExpense.tsx`.
 - **Ответ чата по одной карточке** — `Review` и `ChangeCard` в `screens/Sync.tsx`.
+- **Перевод под платёж** — `transferPlan`, `heldKeys` и `heldOnCard` в `domain/ledger.ts` (тест «перевод из резерва на
+  карту под платёж»): перевод — запись в `reserveLog` с `card` и `forKeys`; шаг собирается в `screens/Week.tsx`, окно
+  «другая сумма» и `recordTransfer` — `screens/TransferSheet.tsx`; отметка такого платежа по умолчанию «с карты»
+  (`markEvent` в `store/store.ts`). В файле обмена — `status.ledger.heldOnCard`, протокол 2.6.
 - **Навигация** — `components/TabBar.tsx`: две вкладки и «+» (`BAR`); `budget` и `plan` остаются вкладками по
   устройству (собраны и скрыты), но открываются плитками с «Сегодня», подсвечено «Сегодня», в шапке — `back` у
   `SkyHeader`. «Впереди» — `screens/Payments.tsx`: `Pager` «Лента / Месяц», ответ «хватит ли» — кнопка над ним, по

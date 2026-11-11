@@ -33,9 +33,11 @@ function Vessel({ label, value, caption, level, fill, ink, onClick, i, alert }: 
   );
 }
 
-export function Wallets({ card, weekLimit, loan, reserve, need, onCard, onLoan, onReserve }: {
+export function Wallets({ card, held = 0, weekLimit, loan, reserve, need, onCard, onLoan, onReserve }: {
   /** остаток карты по учёту; null — нет точки отсчёта */
   card: number | null; weekLimit: number;
+  /** из денег на карте — переведено из резерва под платёж, который ещё не списан */
+  held?: number;
   /** мост на кредитке; null — моста нет, с кредиток не берём */
   loan: BridgeState | null;
   reserve: number; need: number;
@@ -43,7 +45,7 @@ export function Wallets({ card, weekLimit, loan, reserve, need, onCard, onLoan, 
 }) {
   return (
     <div className="grid grid-cols-3 gap-2" style={{ '--own-fill': 'linear-gradient(180deg, var(--own-2), var(--own))' } as CSSProperties}>
-      <Vessel i={0} label="Свои" value={Math.max(0, card ?? 0)} caption={card == null ? 'нет сверки' : 'на карте'} level={(card ?? 0) / Math.max(1, weekLimit)}
+      <Vessel i={0} label="Свои" value={Math.max(0, card ?? 0)} caption={card == null ? 'нет сверки' : held > 0 ? <><Money value={held} /> под платёж</> : 'на карте'} level={(card ?? 0) / Math.max(1, weekLimit)}
         fill="linear-gradient(180deg, var(--own-2), var(--own))" ink="var(--own)" onClick={onCard} />
       <Vessel i={1} label="В долг" value={loan?.used ?? 0} caption={loan ? <>из <Money value={loan.bridge.cap} /> моста</> : 'не берём'}
         level={loan ? loan.used / Math.max(1, loan.bridge.cap) : 0} fill="var(--loan-hatch)" ink="var(--loan)" onClick={onLoan} />

@@ -161,7 +161,7 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
       },
       ledger: {
         card: led.card == null ? null : r0(led.card), reserve: r0(led.reserve), credit: led.credit == null ? null : r0(led.credit),
-        incomeOnCard: r0(led.incomeOnCard), ...(led.creditInterest ? { creditInterest: r0(led.creditInterest) } : {}),
+        incomeOnCard: r0(led.incomeOnCard), ...(led.heldOnCard ? { heldOnCard: r0(led.heldOnCard) } : {}), ...(led.creditInterest ? { creditInterest: r0(led.creditInterest) } : {}),
         ...(led.cardFrom ? { since: led.cardFrom.date } : {}),
       },
     },

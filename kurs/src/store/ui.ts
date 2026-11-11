@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 import type { CalendarInput } from '../domain/calendar';
 import { today } from '../domain/dates';
+import type { TransferPlan } from '../domain/ledger';
 import type { CalEvent, CategoryId, Expense, Source } from '../domain/types';
 import { useStore } from './store';
 
@@ -45,6 +46,8 @@ interface Ui {
   card: boolean;
   /** «В долг»: заёмные деньги — мост на кредитке */
   loan: boolean;
+  /** перевод из резерва на карту под платежи: окно «другая сумма» */
+  transfer: TransferPlan | null;
   /** код для новой редакции плана */
   unlock: boolean;
   /** раздел «Плана»: долги, чек-лист, стратегия */
@@ -76,7 +79,7 @@ interface Ui {
 
 export const useUi = create<Ui>()(set => ({
   tab: 'week', add: null, scan: false, settings: false, event: null, bonus: null, debt: null, reserve: false,
-  week: null, savings: false, sync: false, fixed: false, card: false, loan: false, unlock: false, planView: 'debts', focus: null, settingsFocus: null, inbox: null, checkup: null, hub: false, tour: false, payView: 'list', today: false, stackOpen: null, toast: null, undo: null,
+  week: null, savings: false, sync: false, fixed: false, card: false, loan: false, transfer: null, unlock: false, planView: 'debts', focus: null, settingsFocus: null, inbox: null, checkup: null, hub: false, tour: false, payView: 'list', today: false, stackOpen: null, toast: null, undo: null,
   // прокрутку каждой вкладки помнит App (useTabScroll)
   setTab: tab => set({ tab }),
   set: p => set(p),

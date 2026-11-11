@@ -10,7 +10,7 @@ import { mergeSeed } from '../domain/planUpdate';
 import type { Bridge } from '../domain/bridge';
 import { fixDefaultCategories } from '../domain/categorize';
 import { dropChatTwins } from '../domain/exchange';
-import { accruedOnCard, freshReserve, type Checkup } from '../domain/ledger';
+import { accruedOnCard, freshReserve, heldKeys, type Checkup } from '../domain/ledger';
 import { salute } from './events';
 import type { CalEvent, CardBalance, ChecklistItem, Debt, DebtSnapshot, EventMark, Expense, FixedItem, IncomeTemplate, MemoryRule, PlanSeed, ReserveMove, Settings, StrategySection, WeekClosure, WeeklyOverride, WishItem } from '../domain/types';
 
@@ -109,7 +109,8 @@ interface Actions {
   /** премия: резерв становится reserveAfter, остальное — досрочно по списку */
   applyBonus: (opts: { amount: number; reserveAfter: number; allocations: { debtId: string; amount: number }[]; title: string; eventKey?: string }) => void;
   /** card — перевод между картой и резервом: на сколько изменилась карта */
-  moveReserve: (amount: number, note: string, card?: number) => void;
+  /** card — на сколько изменилась карта (перевод между картой и резервом); forKeys — платежи, под которые перевели */
+  moveReserve: (amount: number, note: string, card?: number, forKeys?: string[]) => void;
   setReserve: (balance: number, note: string) => void;
   addWish: (w: Omit<WishItem, 'id' | 'createdAt'>) => void;
   resolveWish: (id: string, r: WishItem['resolved']) => void;
@@ -307,7 +308,8 @@ export const useStore = create<State>()(
         const debt = e.debtId ? s.debts.find(d => d.id === e.debtId) : undefined;
         if (done) {
           const paid = amount ?? e.amount;
-          marks[e.key] = { done: true, amount: paid, at: nowIso(), paidDate: today(), prevBalance: debt?.balance, ...(e.kind === 'payment' ? { paidFrom: paidFrom ?? 'reserve' } : {}) };
+          // деньги под платёж уже перевели на карту — он уходит с карты, резерв второй раз не уменьшается
+          marks[e.key] = { done: true, amount: paid, at: nowIso(), paidDate: today(), prevBalance: debt?.balance, ...(e.kind === 'payment' ? { paidFrom: paidFrom ?? (heldKeys(s.reserveLog, s.marks).has(e.key) ? 'card' : 'reserve') } : {}) };
           if (e.kind === 'weekly') return { marks, ...topUpMove(s, e.key, paid) };
           if (debt && e.kind === 'payment' && !prev?.done) {
             // погашение основного долга ≈ платёж минус проценты; закрывающий платёж обнуляет долг. По кредитке проценты —
@@ -369,7 +371,7 @@ export const useStore = create<State>()(
         };
       }),
 
-      moveReserve: (amount, note, card) => set(s => ({ reserve: s.reserve + amount, reserveLog: [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), amount, note, ...(card ? { card } : {}) }] })),
+      moveReserve: (amount, note, card, forKeys) => set(s => ({ reserve: s.reserve + amount, reserveLog: [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), amount, note, ...(card ? { card } : {}), ...(forKeys?.length ? { forKeys } : {}) }] })),
       setReserve: (balance, note) => set(s => ({ reserve: balance, reserveLog: [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), abs: true, amount: balance - s.reserve, note }] })),
 
       addWish: w => set(s => ({ wishes: [...s.wishes, { ...w, id: uid(), createdAt: nowIso() }] })),

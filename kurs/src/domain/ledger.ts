@@ -74,8 +74,11 @@ export interface Ledger {
   /** все кредитки для сверки: первой — кредитка моста, затем открытые по порядку закрытия.
    *  expected — долг по учёту: остаток, проценты по дням с его обновления и покупки с этой карты после него */
   cards: CardLedger[];
-  /** обычные поступления, пришедшие на карту после сверки и ещё не переведённые в резерв */
+  /** обычные поступления, пришедшие на карту после сверки и ещё не переведённые в резерв; платёж, под который
+   *  переводили деньги из резерва, тратит сначала перевод, потом их */
   incomeOnCard: number;
+  /** переведено из резерва на карту под платежи, которые ещё не отмечены: деньги на карте, но всё ещё часть резерва */
+  heldOnCard: number;
   /** из долга на кредитке моста — проценты по дням с последнего обновления остатка (сверки): банк начисляет их каждый
    *  день, поэтому credit больше, чем «сверка + траты с кредитки» */
   creditInterest: number;
@@ -108,6 +111,48 @@ function kindOf(key: string, oneOff: CalEvent[]): MarkKind {
   return e.kind;
 }
 
+/** платежи перевода, которые ещё не отмечены */
+const openKeys = (r: ReserveMove, marks: Record<string, EventMark>) => (r.forKeys ?? []).filter(k => !marks[k]?.done);
+
+/** Платежи, деньги под которые уже на карте (перевод из резерва сделан или не понадобился) и ещё не списаны */
+export function heldKeys(log: ReserveMove[], marks: Record<string, EventMark>): Set<string> {
+  const out = new Set<string>();
+  for (const r of log) for (const k of openKeys(r, marks)) out.add(k);
+  return out;
+}
+
+export interface TransferPlan {
+  events: CalEvent[];
+  keys: string[];
+  /** сумма платежей */
+  total: number;
+  /** сколько из неё покрывают поступления, уже лежащие на карте */
+  onCard: number;
+  /** сколько перевести из резерва */
+  amount: number;
+  when: 'today' | 'tomorrow' | 'both';
+}
+
+/**
+ * Перевод из резерва на карту под обязательные платежи: накануне вечером (с 18:00) и в день платежа. Платежи списываются
+ * с карты, поэтому деньги переводят заранее — и резерв в приложении сразу совпадает с банком. Поступления, которые уже
+ * лежат на карте, идут в счёт платежа первыми. null — переводить не под что: платежей нет, они отмечены или деньги
+ * под них уже на карте.
+ */
+export function transferPlan(o: { events: CalEvent[]; marks: Record<string, EventMark>; log: ReserveMove[]; incomeOnCard: number; now: string; hour: number }): TransferPlan | null {
+  const held = heldKeys(o.log, o.marks);
+  const tomorrow = addDays(o.now, 1);
+  const events = o.events.filter(e => e.kind === 'payment' && !o.marks[e.key]?.done && !held.has(e.key) && (e.date === o.now || (e.date === tomorrow && o.hour >= 18)));
+  if (!events.length) return null;
+  const total = Math.round(events.reduce((t, e) => t + e.amount, 0) * 100) / 100;
+  const onCard = Math.min(total, Math.max(0, o.incomeOnCard));
+  const days = new Set(events.map(e => e.date));
+  return {
+    events, keys: events.map(e => e.key), total, onCard, amount: Math.round((total - onCard) * 100) / 100,
+    when: days.size > 1 ? 'both' : days.has(o.now) ? 'today' : 'tomorrow',
+  };
+}
+
 export function ledger(s: LedgerInput): Ledger {
   const last = s.checkups.at(-1);
   // точка отсчёта карты: последняя сверка или остаток карты из выписки/вручную — что позже
@@ -116,7 +161,11 @@ export function ledger(s: LedgerInput): Ledger {
   const ref = cb && (!lc || cb.at > lc.at) ? cb : lc;
 
   let card: number | null = null;
-  let incomeOnCard = 0;
+  // pool — деньги резерва, которые лежат на карте: поступления и переводы под платежи минус сами эти платежи и то,
+  // что уже перевели в резерв. Из них held — под ещё не отмеченные платежи, остальное ждёт перевода в резерв.
+  // Платёж с карты без перевода под него (мелочь из недельных денег) в этот счёт не входит — как и раньше
+  let pool = 0;
+  const earmarked = new Set(s.reserveLog.flatMap(r => r.forKeys ?? []));
   if (ref) {
     card = ref.amount;
     for (const [key, m] of Object.entries(s.marks)) {
@@ -124,12 +173,21 @@ export function ledger(s: LedgerInput): Ledger {
       const amount = m.amount ?? 0;
       const kind = kindOf(key, s.oneOff);
       if (kind === 'weekly') card += amount;
-      else if (kind === 'payment' && m.paidFrom === 'card') card -= amount;
-      else if (kind === 'income') { card += amount; incomeOnCard += amount; }
+      else if (kind === 'payment' && m.paidFrom === 'card') { card -= amount; if (earmarked.has(key)) pool -= amount; }
+      else if (kind === 'income') { card += amount; pool += amount; }
     }
     for (const e of s.expenses) if (e.source === 'life' && after(e, ref.at, ref.date)) card -= e.amount;
-    for (const r of s.reserveLog) if (r.card && r.at && r.at > ref.at) { card += r.card; if (r.card < 0) incomeOnCard += r.card; }
+    for (const r of s.reserveLog) if (r.card && r.at && r.at > ref.at) { card += r.card; if (r.card < 0 || r.forKeys) pool += r.card; }
   }
+  let held = 0;
+  for (const r of s.reserveLog) {
+    if (!r.card || r.card <= 0 || !openKeys(r, s.marks).length) continue;
+    held += r.card;
+    // перевод сделан до точки отсчёта (сверка прошла между переводом и платежом): в остатке карты он уже есть
+    if (!ref || !r.at || r.at <= ref.at) pool += r.card;
+  }
+  pool = Math.max(0, Math.round(pool * 100) / 100);
+  held = Math.min(Math.round(held * 100) / 100, pool);
 
   // резерв: отметки «оплачено из резерва» и траты из резерва после последнего остатка из банка
   const anchor = [reserveAnchor(s.reserveLog), last ? { at: last.at, date: last.date } : null].filter(Boolean).sort((a, b) => b!.at.localeCompare(a!.at))[0] ?? null;
@@ -161,7 +219,7 @@ export function ledger(s: LedgerInput): Ledger {
 
   return {
     card, cardFrom: ref ? { at: ref.at, date: ref.date } : null, reserve, credit, creditCard, cards,
-    incomeOnCard: Math.max(0, Math.round(incomeOnCard * 100) / 100), creditInterest: creditCard ? accruedOnCard(creditCard, now) : 0,
+    incomeOnCard: Math.round((pool - held) * 100) / 100, heldOnCard: held, creditInterest: creditCard ? accruedOnCard(creditCard, now) : 0,
   };
 }
 
