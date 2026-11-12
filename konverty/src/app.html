@@ -84,6 +84,31 @@ svg.i { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none;
 .meter-bar i { display: block; height: 100%; width: 0; background: var(--ok); border-radius: 4px; transition: width .4s ease; }
 .meter-pct { font-size: 13px; color: var(--ink-2); min-width: 38px; text-align: right; }
 .top-actions { display: flex; gap: 8px; margin-left: auto; }
+/* Время раскладки: идёт только пока сканируют, по нажатию — прогноз */
+.clock-wrap { position: relative; flex: none; }
+.clock {
+  display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px;
+  border: 1px solid var(--rule); border-radius: 15px; background: var(--sheet); color: var(--ink-3);
+  font: 500 14px/1 var(--f-ui); cursor: pointer; white-space: nowrap; transition: color .2s ease, border-color .2s ease;
+}
+.clock:hover { border-color: var(--ink-3); }
+.clock[data-s="run"] { color: var(--ink); }
+.clock-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: .5; }
+.clock[data-s="run"] .clock-dot { background: var(--ok); opacity: 1; animation: clock-beat 2s ease-in-out infinite; }
+@keyframes clock-beat { 50% { opacity: .3; } }
+.clock-pop {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 25; width: 310px; padding: 14px 16px 12px;
+  background: var(--sheet); border: 1px solid var(--rule); border-radius: 12px; box-shadow: var(--shadow);
+  color: var(--ink-2); font-size: 13px; line-height: 1.45;
+}
+.cp-lead { margin: 0; font-size: 14px; }
+.cp-big { margin: 2px 0 4px; font: 700 32px/1.1 var(--f-sign); color: var(--ink); letter-spacing: .01em; }
+.cp-big.muted { color: var(--ink-3); font-size: 24px; }
+.cp-sub { margin: 0; }
+.cp-foot { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--rule-2); display: flex; gap: 12px; align-items: flex-end; color: var(--ink-3); font-size: 12px; }
+.cp-foot b { color: var(--ink-2); font-weight: 600; }
+.cp-foot .btn { flex: none; }
+.cp-foot .btn.armed { color: var(--err); border-color: var(--err); }
 
 /* ---------- Кнопки ---------- */
 .btn {
@@ -533,6 +558,10 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
       <span class="meter-num num"><b id="pDone">0</b> из <span id="pTotal">0</span></span>
       <span class="meter-bar"><i id="pBar"></i></span>
       <span class="meter-pct num" id="pPct">0 %</span>
+      <span class="clock-wrap">
+        <button class="clock num" id="clock" data-s="idle" aria-haspopup="dialog" aria-expanded="false" aria-controls="clockPop"><i class="clock-dot" aria-hidden="true"></i><span id="clockT">0:00</span></button>
+        <div class="clock-pop" id="clockPop" role="dialog" aria-label="Время раскладки" hidden></div>
+      </span>
     </div>
     <div class="top-actions">
       <span class="save-state" id="saveState" data-s="warn" role="status">Не сохраняется в файл</span>
@@ -1700,6 +1729,8 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
   let BASE_DATA = null;
   let BASE = null, KEY = '', OLD_KEY = '', DISTRICTS = [], TOTAL = {}, BASE_CUSTOM = null;
   let DONE = new Set(), HIST = [];
+  // Время раскладки: ms — накоплено, n — сколько новых конвертов за это время, last — время последней отметки
+  let WORK = { ms: 0, n: 0, last: 0 };
   const recOf = id => BASE.recs[id];
   const nameOf = r => SET.full ? r.fio : r.fioShort;
   const addrOf = r => SET.full ? [r.addr, r.idxRaw].filter(Boolean).join(', ') : r.addrShort;
@@ -1741,12 +1772,14 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     const a = store.get(KEY, []); if (Array.isArray(a)) a.forEach(i => { if (BASE.recs[i]) DONE.add(i); });
     const h = store.get(KEY + '_hist', []); if (Array.isArray(h)) HIST = h.filter(e => e && BASE.recs[e.id]);
     progSeq = +store.raw(KEY + '_seq') || 0;
+    WORK = workOk(store.get(KEY + '_work', null)) || workFromHist();
     const key = KEY;
     PROG_READY = progDb('readonly', s => s.get(key)).then(p => {
       if (!p || key !== KEY || !(p.seq > progSeq) || !Array.isArray(p.done)) return;
       // в IndexedDB более свежая копия — значит, localStorage не успел записаться (сбой питания)
       DONE = new Set(p.done.filter(i => BASE.recs[i])); HIST = (p.hist || []).filter(e => e && BASE.recs[e.id]); progSeq = p.seq;
-      store.set(KEY, [...DONE]); store.set(KEY + '_hist', HIST.slice(0, 800)); store.set(KEY + '_seq', progSeq);
+      WORK = workOk(p.work) || WORK;
+      store.set(KEY, [...DONE]); store.set(KEY + '_hist', HIST.slice(0, 800)); store.set(KEY + '_seq', progSeq); store.set(KEY + '_work', WORK);
       if (p.t) store.set(KEY + '_t', p.t);
       DISTRICTS.forEach(updateCell); renderProgress(); renderLedger(); renderList();
     }).catch(() => { /* IndexedDB недоступна — остаётся localStorage */ });
@@ -1758,7 +1791,8 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     store.set(KEY + '_hist', HIST.slice(0, 800));
     store.set(KEY + '_seq', progSeq);
     const now = Date.now(); store.set(KEY + '_t', now);
-    const rec = { seq: progSeq, t: now, done: [...DONE], hist: HIST.slice(0, 800) }, key = KEY;
+    store.set(KEY + '_work', WORK);
+    const rec = { seq: progSeq, t: now, done: [...DONE], hist: HIST.slice(0, 800), work: { ...WORK } }, key = KEY;
     progDb('readwrite', s => s.put(rec, key)).catch(() => { /* останется копия в localStorage */ });
     if (!ok) toast('Не удалось сохранить отметку в браузере. Нажмите «Сохранить прогресс».');
     if (PROGH) scheduleFileSave(); else unsavedN++;
@@ -1810,7 +1844,91 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     $('pDone').textContent = nf(n); $('pTotal').textContent = nf(t);
     $('pPct').textContent = (t ? Math.floor(100 * n / t) : 0) + ' %';
     $('pBar').style.width = (t ? 100 * n / t : 0) + '%';
+    renderClock();
   }
+
+  // ---------- Время раскладки ----------
+  // Время идёт от отметки к отметке; если 30 секунд нет новых отметок — останавливается (перерыв не считается).
+  const IDLE = 30000, PACE_MIN = 10, PACE_WIN = 60;
+  const workOk = w => w && Number.isFinite(+w.ms) && +w.ms >= 0 ? { ms: +w.ms, n: Math.max(0, Math.round(+w.n) || 0), last: +w.last || 0 } : null;
+  const scanned = e => e && e.src !== 'report'; // отметки в окне отчёта — правка, а не раскладка
+  const gapOf = (a, b) => Math.min(Math.max(a - b, 0), IDLE);
+  // прогресс прежней версии без счётчика: восстанавливаем время по журналу отметок
+  function workFromHist() {
+    const e = HIST.filter(scanned); let ms = 0, n = 0;
+    e.forEach((x, i) => { if (e[i + 1]) ms += gapOf(x.t, e[i + 1].t); if (!x.dup && !x.undone) n++; });
+    return { ms, n, last: e[0] ? +e[0].t || 0 : 0 };
+  }
+  function workTick(now, isNew) {
+    if (WORK.last) WORK.ms += gapOf(now, WORK.last);
+    WORK.last = now; if (isNew) WORK.n++;
+  }
+  const workMs = now => WORK.ms + (WORK.last ? gapOf(now, WORK.last) : 0);
+  // Темп: по последним конвертам из журнала, если их мало — средний за всё время
+  function pace() {
+    const all = HIST.filter(scanned), e = all.slice(0, PACE_WIN + 1); let t = 0, n = 0;
+    for (let i = 0; i < e.length - 1; i++) { t += gapOf(e[i].t, e[i + 1].t); if (!e[i].dup && !e[i].undone) n++; }
+    if (n >= PACE_MIN && t > 0) return { ms: t / n, n, recent: e.length < all.length };
+    if (WORK.n >= PACE_MIN && WORK.ms > 0) return { ms: WORK.ms / WORK.n, n: WORK.n, recent: false };
+    return null;
+  }
+  const two = x => String(x).padStart(2, '0');
+  function fmtClock(ms) {
+    const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+    return h ? `${h}:${two(m)}:${two(s % 60)}` : `${m}:${two(s % 60)}`;
+  }
+  function fmtDur(ms, approx) {
+    let min = Math.round(ms / 60000);
+    if (min < 1) return 'меньше минуты';
+    if (approx && min >= 90) min = Math.round(min / 5) * 5;
+    const h = Math.floor(min / 60), m = min % 60;
+    return [h ? h + ' ч' : '', m ? m + ' мин' : ''].filter(Boolean).join(' ');
+  }
+  const fmtPace = ms => { const s = ms / 1000; return s < 60 ? (s < 10 ? s.toFixed(1).replace('.', ',') : Math.round(s)) + ' с' : fmtDur(ms); };
+  const envW = n => plural(n, 'конверт', 'конверта', 'конвертов');
+  let clockArmed = false, clockArmT = 0, clockHtml = '';
+  function renderClock() {
+    if (!BASE) return;
+    const now = Date.now(), run = !!WORK.last && now - WORK.last < IDLE, el = $('clock');
+    const t = fmtClock(workMs(now)), s = run ? 'run' : WORK.ms ? 'pause' : 'idle';
+    if ($('clockT').textContent !== t) $('clockT').textContent = t;
+    if (el.dataset.s !== s) {
+      el.dataset.s = s;
+      el.title = (s === 'run' ? 'Время раскладки идёт' : s === 'pause' ? 'Время раскладки на паузе: 30 секунд не было отметок' : 'Время раскладки: пойдёт с первым конвертом') + '. Нажмите — сколько ещё осталось';
+      el.setAttribute('aria-label', el.title);
+    }
+    if (!$('clockPop').hidden) renderClockPop();
+  }
+  function renderClockPop() {
+    const now = Date.now(), left = BASE.recs.length - DONE.size, ms = workMs(now), p = pace();
+    let h;
+    if (!left) h = `<p class="cp-lead">Все конверты разложены</p><p class="cp-big">${fmtDur(ms)}</p><p class="cp-sub">ушло на раскладку.</p>`;
+    else if (!p) h = `<p class="cp-lead">Осталось ${nf(left)} ${envW(left)}</p><p class="cp-big muted">Считаю темп…</p><p class="cp-sub">Прогноз появится после первых ${PACE_MIN} конвертов.</p>`;
+    else {
+      const rest = left * p.ms, end = new Date(now + rest);
+      const fin = end.toDateString() === new Date(now).toDateString() ? ` Без перерывов — примерно к ${hhmm(end)}.` : '';
+      h = `<p class="cp-lead">Осталось ${nf(left)} ${envW(left)}, это примерно</p><p class="cp-big">${fmtDur(rest, true)}</p>` +
+        `<p class="cp-sub">${p.recent ? `По темпу последних ${nf(p.n)} ${envW(p.n)}` : 'По среднему темпу'}: ${fmtPace(p.ms)} на конверт, около ${nf(Math.round(3600000 / p.ms))} в час.${fin}</p>`;
+    }
+    h += `<div class="cp-foot"><span>Затрачено <b>${fmtDur(ms)}</b>${WORK.n ? ` на ${nf(WORK.n)} ${envW(WORK.n)}` : ''}. Перерывы дольше 30 секунд не считаются.</span>` +
+      `<button class="btn ghost small${clockArmed ? ' armed' : ''}" data-clock-reset type="button">${clockArmed ? 'Точно обнулить?' : 'Обнулить'}</button></div>`;
+    if (h !== clockHtml) { clockHtml = h; $('clockPop').innerHTML = h; }
+  }
+  function openClock(on) {
+    clockArmed = false; clockHtml = '';
+    $('clockPop').hidden = !on; $('clock').setAttribute('aria-expanded', String(on));
+    if (on) renderClockPop();
+  }
+  $('clock').onclick = () => openClock($('clockPop').hidden);
+  $('clockPop').addEventListener('click', e => {
+    if (!e.target.closest('[data-clock-reset]')) return;
+    clearTimeout(clockArmT);
+    if (!clockArmed) { clockArmed = true; clockArmT = setTimeout(() => { clockArmed = false; renderClock(); }, 4000); renderClockPop(); return; }
+    clockArmed = false; WORK = { ms: 0, n: 0, last: 0 }; saveProgress(); renderClock();
+    toast('Счётчик времени обнулён. Он пойдёт заново со следующего конверта.');
+  });
+  document.addEventListener('pointerdown', e => { if (!$('clockPop').hidden && !e.target.closest('.clock-wrap')) openClock(false); }, true);
+  setInterval(renderClock, 1000);
 
   // ---------- Журнал ----------
   const SRC = { camera: '', manual: 'вручную', photo: 'по фото', report: 'из отчёта' };
@@ -1843,6 +1961,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     if (!entry || entry.undone) return;
     entry.undone = 1;
     if (!entry.dup && !HIST.some(e => e !== entry && e.id === entry.id && !e.undone && !e.dup)) DONE.delete(entry.id);
+    if (!entry.dup && scanned(entry)) WORK.n = Math.max(0, WORK.n - 1);
     saveProgress();
     const r = recOf(entry.id);
     renderProgress(); updateCell(r.r); renderLedger(); renderList();
@@ -1937,6 +2056,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     if (!dup) DONE.add(rec.id);
     const entry = { id: rec.id, t: Date.now(), src, dup: dup ? 1 : 0 };
     HIST.unshift(entry);
+    workTick(entry.t, !dup);
     saveProgress();
     showVerdict(rec, dup ? 'dup' : (src === 'camera' || src === 'photo' ? 'ok' : 'manual'), { match, entry });
     say(dup ? phrase(rec.r) + '. Уже отмечен' : phrase(rec.r));
@@ -2413,6 +2533,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
       return;
     }
     const modalOpen = !$('report').hidden || !$('settings').hidden;
+    if (e.key === 'Escape' && !$('clockPop').hidden) { openClock(false); return; }
     if (e.key === 'Escape') {
       if (modalOpen) { closeAll(); return; }
       if (SCAN.armed) { disarm(); setVerdictState('idle', 'Сканирование остановлено'); }
@@ -2589,7 +2710,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     $('progReset').onclick = () => { $('resetConfirm').hidden = false; };
     $('resetNo').onclick = () => { $('resetConfirm').hidden = true; };
     $('resetYes').onclick = () => {
-      DONE = new Set(); HIST = []; saveProgress(); $('resetConfirm').hidden = true;
+      DONE = new Set(); HIST = []; WORK = { ms: 0, n: 0, last: 0 }; saveProgress(); $('resetConfirm').hidden = true;
       DISTRICTS.forEach(updateCell); renderProgress(); renderLedger(); setVerdictState('idle', 'Все отметки сняты');
       toast('Все отметки сняты.');
     };
@@ -2829,6 +2950,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
     if (ft > bt || (!DONE.size && j.done.length)) {
       const before = DONE.size;
       DONE = new Set(j.done.filter(i => BASE.recs[i])); HIST = fh.filter(e => e && BASE.recs[e.id]);
+      WORK = workOk(j.work) || workFromHist();
       saveProgress(); DISTRICTS.forEach(updateCell); renderProgress(); renderLedger(); renderList();
       return { from: 'file', n: DONE.size, before };
     }
@@ -2884,7 +3006,7 @@ input[type="range"] { width: 100%; accent-color: var(--stamp); }
   // ---------- Сохранение прогресса в файл ----------
   function progressJson() {
     const t = Date.now();
-    return JSON.stringify({ app: 'konverty', kind: 'progress', v: 2, key: KEY, t, savedAt: new Date(t).toISOString(), count: DONE.size, done: [...DONE], hist: HIST.slice(0, 800) });
+    return JSON.stringify({ app: 'konverty', kind: 'progress', v: 2, key: KEY, t, savedAt: new Date(t).toISOString(), count: DONE.size, done: [...DONE], hist: HIST.slice(0, 800), work: WORK });
   }
   async function writeProgressFile() {
     if (!PROGH) return false;
