@@ -4,7 +4,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { DEFAULT_MODEL } from '../domain/models';
 import { annuity } from '../domain/calendar';
-import { addDays, monthKey, monthsBetween, today } from '../domain/dates';
+import { addDays, monthKey, monthsBetween, toKey, today } from '../domain/dates';
 import { setPlanSource, totalDebt, type PlanConfig } from '../domain/plan';
 import { mergeSeed } from '../domain/planUpdate';
 import type { Bridge } from '../domain/bridge';
@@ -135,6 +135,24 @@ export interface ImportRecord {
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 const nowIso = () => new Date().toISOString();
 
+const includedAt = (expenses: Expense[], date: string) => expenses.filter(e => e.date <= date).map(e => e.id);
+
+function captureCardBalance(balance: CardBalance, expenses: Expense[]): CardBalance {
+  if (balance.at) return balance;
+  return { ...balance, ...(balance.date === today() ? { at: nowIso() } : {}), includedExpenseIds: includedAt(expenses, balance.date) };
+}
+
+/** Старые файлы обмена сохраняли время импорта только в журнале. */
+function restoreCardTime(balance: CardBalance | null, imports: ImportRecord[]): CardBalance | null {
+  if (!balance || balance.at || balance.source !== 'manual') return balance;
+  const entry = [...imports].reverse().find(({ snapshot }) => {
+    const prior = snapshot.cardBalance;
+    return !prior || prior.date !== balance.date || prior.amount !== balance.amount || prior.source !== balance.source;
+  });
+  if (!entry || toKey(new Date(entry.at)) !== balance.date) return balance;
+  return { ...balance, at: entry.at };
+}
+
 const EMPTY: Data = {
   ready: false, asOf: today(), debts: [], incomes: [], fixed: [], oneOff: [], templateFrom: monthKey(today()),
   weeklyOverrides: [], planTrajectory: [], baselineTrajectory: [], reserve: 0, reserveLog: [], expenses: [], marks: {}, wishes: [], snapshots: [], overrides: {}, plan: null,
@@ -203,9 +221,7 @@ export const useStore = create<State>()(
       updateFromSeed: (seed, code) => set(s => ({ ...mergeSeed(s, seed), planRev: seed.rev ?? s.planRev, planCode: code })),
       applySync: (patch, summary) => set(s => {
         const next: Partial<Data> = { ...patch };
-        if (patch.cardBalance && !patch.cardBalance.at && patch.cardBalance.date === today()) {
-          next.cardBalance = { ...patch.cardBalance, at: nowIso() };
-        }
+        if (patch.cardBalance) next.cardBalance = captureCardBalance(patch.cardBalance, patch.expenses ?? s.expenses);
         if (summary != null) {
           const { imports, settings, planCode, ready, ...snapshot } = pickData(s);
           void settings; void planCode; void ready;
@@ -232,7 +248,9 @@ export const useStore = create<State>()(
       rollbackImport: id => set(s => {
         const i = s.imports.findIndex(r => r.id === id);
         if (i < 0) return {};
-        return { ...s.imports[i].snapshot, imports: s.imports.slice(0, i) };
+        const snapshot = s.imports[i].snapshot;
+        const imports = s.imports.slice(0, i);
+        return { ...snapshot, imports, cardBalance: restoreCardTime(snapshot.cardBalance, imports) };
       }),
       toggleCheck: id => set(s => {
         const base = s.checklist.find(c => c.id === id)?.done ?? false;
@@ -256,6 +274,7 @@ export const useStore = create<State>()(
         const date = today();
         const key = `wk:${addDays(c.monday, 7)}`;
         const after = { card: Math.round((c.actual.card + c.topUp - c.toReserve) * 100) / 100, reserve: Math.round((c.actual.reserve - c.topUp + c.toReserve) * 100) / 100 };
+        const includedExpenseIds = includedAt(s.expenses, date);
         const entry: Checkup = { ...c, id: uid(), at, date, after };
         const marks = c.topUp > 0 ? { ...s.marks, [key]: { done: true, amount: c.topUp, at } } : s.marks;
         const closures = closure && !s.closures[c.monday] ? { ...s.closures, [c.monday]: { ...closure, topUp: c.topUp, at } } : s.closures;
@@ -271,7 +290,7 @@ export const useStore = create<State>()(
           closures,
           reserve: after.reserve,
           reserveLog: [...s.reserveLog, { id: uid(), date, at, abs: true, amount: after.reserve - s.reserve, note: `Сверка с банком${note ? `: ${note}` : ''}` }],
-          cardBalance: { amount: after.card, date, source: 'manual' as const, at },
+          cardBalance: { amount: after.card, date, source: 'manual' as const, at, includedExpenseIds },
           ...(debts !== s.debts ? withSnapshot(debts, s.snapshots) : {}),
         };
       }),
@@ -290,7 +309,7 @@ export const useStore = create<State>()(
         };
       }),
       moveSavings: (amount, note) => set(s => ({ savings: s.savings + amount, savingsLog: [...s.savingsLog, { id: uid(), date: today(), amount, note }] })),
-      setCardBalance: b => set({ cardBalance: b && { ...b, at: b.at ?? (b.date === today() ? nowIso() : undefined) } }),
+      setCardBalance: b => set(s => ({ cardBalance: b && captureCardBalance(b, s.expenses) })),
       setFixed: list => set({ fixed: list }),
       clearOverride: key => set(s => {
         const overrides = { ...s.overrides };
@@ -390,7 +409,7 @@ export const useStore = create<State>()(
       importData: raw => {
         const d = raw as Partial<Data> & { app?: string };
         if (!d || d.app !== 'kurs' || !Array.isArray(d.debts) || !Array.isArray(d.expenses)) return false;
-        set(s => ({ ...EMPTY, ...pickData({ ...EMPTY, ...d } as Data), fixed: withIds(d.fixed ?? []), ready: true, planCode: s.planCode, settings: { ...DEFAULT_SETTINGS, ...d.settings, apiKey: s.settings.apiKey } }));
+        set(s => ({ ...EMPTY, ...pickData({ ...EMPTY, ...d } as Data), fixed: withIds(d.fixed ?? []), cardBalance: restoreCardTime(d.cardBalance ?? null, d.imports ?? []), ready: true, planCode: s.planCode, settings: { ...DEFAULT_SETTINGS, ...d.settings, apiKey: s.settings.apiKey } }));
         return true;
       },
       reset: () => set({ ...EMPTY }),
@@ -415,7 +434,7 @@ export const useStore = create<State>()(
       },
       merge: (persisted, current) => {
         const p = persisted as Partial<Data> | undefined;
-        return { ...current, ...p, settings: { ...DEFAULT_SETTINGS, ...p?.settings } };
+        return { ...current, ...p, cardBalance: restoreCardTime(p?.cardBalance ?? null, p?.imports ?? []), settings: { ...DEFAULT_SETTINGS, ...p?.settings } };
       },
     },
   ),

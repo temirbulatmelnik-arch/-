@@ -236,6 +236,8 @@ export interface CardBalance {
   source: 'manual' | 'statement';
   /** когда введён (ISO) */
   at?: string;
+  /** Записи по дату банковского остатка, существовавшие на момент сверки. */
+  includedExpenseIds?: string[];
 }
 
 /** Исходные данные плана (зашифрованы в seed.enc.json) */

@@ -23,6 +23,12 @@ if (!import.meta.env.VITE_NO_SW && 'serviceWorker' in navigator && window.isSecu
   import('virtual:pwa-register').then(({ registerSW }) => {
     const update = registerSW({
       immediate: true,
+      onRegisteredSW(_url, registration) {
+        if (!registration) return;
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') void registration.update().catch(() => {});
+        });
+      },
       onNeedRefresh() {
         const apply = () => {
           if (document.visibilityState !== 'hidden') return;
@@ -30,6 +36,7 @@ if (!import.meta.env.VITE_NO_SW && 'serviceWorker' in navigator && window.isSecu
           void update(true);
         };
         document.addEventListener('visibilitychange', apply);
+        apply();
       },
     });
   }).catch(() => {});

@@ -89,6 +89,20 @@ const endOfDay = (date: string) => `${date}T23:59:59.999`;
 /** трата после точки: позже дня отсчёта; в сам день — только внесённая руками после сверки */
 const after = (e: Expense, at: string, date: string) => e.date > date || (e.date === date && e.origin === 'manual' && e.createdAt > at);
 
+type CardRef = { at: string; date: string; amount: number; dateOnly?: boolean; includedExpenseIds?: string[] };
+
+const fromBalance = (b: CardBalance): CardRef => ({ ...b, at: b.at ?? endOfDay(b.date), dateOnly: !b.at });
+const fromCheckup = (c: Checkup): CardRef => ({ at: c.at, date: c.date, amount: c.after.card });
+const time = (at: string) => Date.parse(at);
+
+function afterCard(e: Expense, ref: CardRef, included: Set<string>): boolean {
+  if (included.has(e.id) || e.date < ref.date) return false;
+  if (e.date > ref.date) return true;
+  if (ref.dateOnly) return false;
+  const elapsed = time(e.createdAt) - time(ref.at);
+  return elapsed > 0 || (elapsed === 0 && ref.includedExpenseIds !== undefined);
+}
+
 /** резерв, введённый из банка целиком (сверка, чат, премия), а не сдвинутый на сумму */
 export const isAbsolute = (m: ReserveMove) => m.abs ?? /^Сверка/.test(m.note);
 
@@ -156,9 +170,9 @@ export function transferPlan(o: { events: CalEvent[]; marks: Record<string, Even
 export function ledger(s: LedgerInput): Ledger {
   const last = s.checkups.at(-1);
   // точка отсчёта карты: последняя сверка или остаток карты из выписки/вручную — что позже
-  const cb = s.cardBalance ? { at: s.cardBalance.at ?? endOfDay(s.cardBalance.date), date: s.cardBalance.date, amount: s.cardBalance.amount } : null;
-  const lc = last ? { at: last.at, date: last.date, amount: last.after.card } : null;
-  const ref = cb && (!lc || cb.at > lc.at) ? cb : lc;
+  const cb = s.cardBalance ? fromBalance(s.cardBalance) : null;
+  const lc = last ? fromCheckup(last) : null;
+  const ref = cb && (!lc || time(cb.at) >= time(lc.at)) ? cb : lc;
 
   let card: number | null = null;
   // pool — деньги резерва, которые лежат на карте: поступления и переводы под платежи минус сами эти платежи и то,
@@ -169,22 +183,23 @@ export function ledger(s: LedgerInput): Ledger {
   if (ref) {
     card = ref.amount;
     for (const [key, m] of Object.entries(s.marks)) {
-      if (!m.done || m.at <= ref.at) continue;
+      if (!m.done || !(time(m.at) > time(ref.at))) continue;
       const amount = m.amount ?? 0;
       const kind = kindOf(key, s.oneOff);
       if (kind === 'weekly') card += amount;
       else if (kind === 'payment' && m.paidFrom === 'card') { card -= amount; if (earmarked.has(key)) pool -= amount; }
       else if (kind === 'income') { card += amount; pool += amount; }
     }
-    for (const e of s.expenses) if (e.source === 'life' && after(e, ref.at, ref.date)) card -= e.amount;
-    for (const r of s.reserveLog) if (r.card && r.at && r.at > ref.at) { card += r.card; if (r.card < 0 || r.forKeys) pool += r.card; }
+    const included = new Set(ref.includedExpenseIds);
+    for (const e of s.expenses) if (e.source === 'life' && afterCard(e, ref, included)) card -= e.amount;
+    for (const r of s.reserveLog) if (r.card && r.at && time(r.at) > time(ref.at)) { card += r.card; if (r.card < 0 || r.forKeys) pool += r.card; }
   }
   let held = 0;
   for (const r of s.reserveLog) {
     if (!r.card || r.card <= 0 || !openKeys(r, s.marks).length) continue;
     held += r.card;
     // перевод сделан до точки отсчёта (сверка прошла между переводом и платежом): в остатке карты он уже есть
-    if (!ref || !r.at || r.at <= ref.at) pool += r.card;
+    if (!ref || !r.at || time(r.at) <= time(ref.at)) pool += r.card;
   }
   pool = Math.max(0, Math.round(pool * 100) / 100);
   held = Math.min(Math.round(held * 100) / 100, pool);
@@ -229,14 +244,14 @@ export function ledger(s: LedgerInput): Ledger {
  * ближайшая после — назад от неё. null — точек отсчёта нет.
  */
 export function cardOn(s: LedgerInput, date: string): number | null {
-  const end = endOfDay(date);
+  const end = time(endOfDay(date));
   const topUp = `wk:${addDays(date, 1)}`;
   const refs = [
-    ...s.checkups.map(c => ({ at: c.at, date: c.date, amount: c.after.card })),
-    ...(s.cardBalance ? [{ at: s.cardBalance.at ?? endOfDay(s.cardBalance.date), date: s.cardBalance.date, amount: s.cardBalance.amount }] : []),
-  ].sort((a, b) => a.at.localeCompare(b.at));
-  const before = refs.filter(r => r.at <= end).at(-1);
-  const ref = before ?? refs.find(r => r.at > end);
+    ...s.checkups.map(fromCheckup),
+    ...(s.cardBalance ? [fromBalance(s.cardBalance)] : []),
+  ].sort((a, b) => time(a.at) - time(b.at));
+  const before = refs.filter(r => time(r.at) <= end).at(-1);
+  const ref = before ?? refs.find(r => time(r.at) > end);
   if (!ref) return null;
   const fwd = ref === before;
   // движение карты от отметки: пополнение и поступление — плюс, платёж с карты — минус; пополнение к следующей неделе
@@ -246,15 +261,17 @@ export function cardOn(s: LedgerInput, date: string): number | null {
     return kind === 'weekly' || kind === 'income' ? amount : kind === 'payment' && m.paidFrom === 'card' ? -amount : 0;
   };
   const inRange = (t: string, key = '') => {
-    const late = key === topUp ? '\uffff' : t;
-    return fwd ? t > ref.at && late <= end : late > end && t <= ref.at;
+    const at = time(t);
+    const late = key === topUp ? Infinity : at;
+    return fwd ? at > time(ref.at) && late <= end : late > end && at <= time(ref.at);
   };
   let delta = 0;
   for (const [key, m] of Object.entries(s.marks)) if (m.done && inRange(m.at, key)) delta += markMove(key, m);
   for (const r of s.reserveLog) if (r.card && r.at && inRange(r.at)) delta += r.card;
+  const included = new Set(ref.includedExpenseIds);
   for (const e of s.expenses) {
     if (e.source !== 'life') continue;
-    const afterRef = after(e, ref.at, ref.date);
+    const afterRef = afterCard(e, ref, included);
     if (fwd ? afterRef && e.date <= date : !afterRef && e.date > date) delta -= e.amount;
   }
   return Math.round((fwd ? ref.amount + delta : ref.amount - delta) * 100) / 100;
