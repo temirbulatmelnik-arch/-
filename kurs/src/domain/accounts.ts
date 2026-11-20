@@ -34,7 +34,7 @@ interface OperationBase {
 
 export type AccountOperation = OperationBase & (
   { type: 'transfer'; toAccountId: string }
-  | { type: 'loan_disbursement'; debtId: string; splitPlanId?: string; debtBooked?: boolean }
+  | { type: 'loan_disbursement'; debtId: string; splitPlanId?: string; debtBooked?: boolean; auditId?: string }
   | { type: 'debt_payment'; debtId?: string; principal?: number; interest?: number; fee?: number; debtBooked?: boolean }
   | { type: 'interest' | 'fee'; debtId?: string }
   | { type: 'income' | 'adjustment' | 'expense' }
@@ -59,12 +59,21 @@ export interface SplitDebit {
   replacesKeys: string[];
 }
 
+export interface LoanReview {
+  id: string;
+  from: string;
+  to: string;
+  amount: number;
+  label: string;
+}
+
 export interface AccountBook {
   accounts: CashAccount[];
   operations: AccountOperation[];
   paymentAccounts: Record<string, string>;
   splitPlans: SplitPlan[];
   splitDebits: SplitDebit[];
+  loanReviews?: LoanReview[];
   stress?: { date: string; amount: number; accountId: string };
 }
 
@@ -95,7 +104,8 @@ export function validOperation(op: AccountOperation): boolean {
       (op.at != null && (typeof op.at !== 'string' || !Number.isFinite(Date.parse(op.at))))) return false;
   switch (op.type) {
     case 'transfer': return typeof op.toAccountId === 'string' && !!op.toAccountId && op.accountId !== op.toAccountId;
-    case 'loan_disbursement': return typeof op.debtId === 'string' && !!op.debtId && op.fundingSource === 'borrowed';
+    case 'loan_disbursement': return typeof op.debtId === 'string' && !!op.debtId && op.fundingSource === 'borrowed'
+      && (op.auditId == null || (typeof op.auditId === 'string' && !!op.auditId && typeof op.debtBooked === 'boolean'));
     case 'refund': return typeof op.expenseId === 'string' && !!op.expenseId;
     case 'debt_payment': {
       const parts = [op.principal, op.interest, op.fee];
@@ -113,6 +123,7 @@ export function appendOperations(existing: AccountOperation[], incoming: Account
   const eventKeys = new Set(existing.flatMap(op => op.eventKey ? [op.eventKey] : []));
   const externalKey = (op: AccountOperation) => op.externalId ? JSON.stringify([op.accountId, op.externalId]) : null;
   const external = new Set(existing.map(externalKey).filter(k => k != null));
+  const reviewed = new Set(existing.flatMap(op => op.type === 'loan_disbursement' && op.auditId ? [op.auditId] : []));
   const added: AccountOperation[] = [];
   const confirmed = new Map<string, AccountOperation>();
   for (const op of incoming) {
@@ -125,8 +136,10 @@ export function appendOperations(existing: AccountOperation[], incoming: Account
       confirmed.set(op.id, op);
       continue;
     }
+    if (op.type === 'loan_disbursement' && op.auditId && reviewed.has(op.auditId)) continue;
     if (ids.has(op.id) || (key && external.has(key)) || (op.eventKey && eventKeys.has(op.eventKey))) continue;
     ids.add(op.id);
+    if (op.type === 'loan_disbursement' && op.auditId) reviewed.add(op.auditId);
     if (op.eventKey) eventKeys.add(op.eventKey);
     if (key) external.add(key);
     added.push(op);
@@ -230,6 +243,10 @@ export function bookOperationAllowed(op: AccountOperation, book: AccountBook, de
   if (op.type === 'transfer' && !accounts.some(a => a.id === op.toAccountId)) return false;
   if ('debtId' in op && op.debtId && !debts.some(d => d.id === op.debtId)) return false;
   if (op.type === 'loan_disbursement' && op.splitPlanId && !book.splitPlans.some(p => p.id === op.splitPlanId && p.debtId === op.debtId)) return false;
+  if (op.type === 'loan_disbursement' && op.auditId) {
+    const review = book.loanReviews?.find(r => r.id === op.auditId);
+    if (!review || op.date < review.from || op.date > review.to || cents(op.amount) !== cents(review.amount)) return false;
+  }
   if (op.type !== 'refund') return true;
   const expense = expenses.find(e => e.id === op.expenseId);
   if (!expense || expense.date > op.date) return false;
@@ -274,4 +291,10 @@ export function validSplitDebit(debit: SplitDebit, book: AccountBook, debts: Deb
     && stringList(debit.debtIds) && debit.debtIds.length > 0 && debit.debtIds.every(id => debts.some(d => d.id === id && d.kind === 'split'))
     && stringList(debit.replacesKeys) && debit.replacesKeys.length > 0
     && !book.splitDebits.some(d => d.id !== debit.id && d.replacesKeys.some(key => debit.replacesKeys.includes(key)));
+}
+
+
+export function validLoanReview(item: LoanReview): boolean {
+  return !!item && typeof item.id === 'string' && !!item.id && typeof item.label === 'string' && !!item.label.trim()
+    && validDate(item.from) && validDate(item.to) && item.from <= item.to && validAmount(item.amount) && item.amount > 0;
 }

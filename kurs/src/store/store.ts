@@ -428,10 +428,11 @@ export const useStore = create<State>()(
               accountId: e.accountId ?? LIFE_ACCOUNT, date, at: bookedAt, origin: 'manual', status: 'confirmed', fundingSource: 'own' };
             if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
             accountBook = { ...accountBook, operations: appendOperations(accountBook.operations, [op]) };
-            if (work && details?.payrollActual && e.nominalDate) {
+            if (work && e.nominalDate) {
               const key = e.incomeKind === 'salary' || e.incomeKind === 'advance' || e.incomeKind === 'bonusMonthly'
                 ? `inc:${e.incomeKind}:${monthKey(e.nominalDate)}` : e.key;
-              const updated = { ...work, actual: { ...work.actual, [key]: { ...details.payrollActual, asOf: date, verifiedBy: 'Расчётный листок' } } };
+              const updated = { ...work, actual: { ...work.actual, [key]: { ...details?.payrollActual, expectedNet: e.amount, asOf: date,
+                verifiedBy: details?.payrollActual ? 'Расчётный листок' : undefined } } };
               if (!validPayroll(updated)) return {};
               work = updated;
             }

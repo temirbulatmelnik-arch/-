@@ -57,3 +57,14 @@ describe('трудовые выплаты и календарь', () => {
     expect(workPayments(model, '2026-11-25', '2026-11-27', mark)).toMatchObject([{ actualPayDate: '2026-11-26', actualNet: 43650 }]);
   });
 });
+
+it('моделирует отпускные раньше начала отпуска по сроку гражданской службы и не меняет дату факта', () => {
+  const vacation = { id: 'annual', from: '2027-04-11', to: '2027-04-18', status: 'planned' as const, dailyGross: 2600, allowance: true };
+  const employment = { ...model, vacations: [vacation] };
+  const expected = workPayments(employment, '2027-04-01', '2027-04-11');
+  expect(expected.find(p => p.key === 'work:vacation:annual')).toMatchObject({ nominalDate: '2027-04-01', gross: 20800, confidence: 'tentative' });
+  const key = 'work:vacation:annual';
+  const fact = workPayments({ ...employment, actual: { [key]: { expectedNet: 18096, asOf: '2027-03-31' } } },
+    '2027-03-31', '2027-04-11', { [key]: { done: true, amount: 17900, paidDate: '2027-03-31', at: '2027-03-31T15:00:00Z' } });
+  expect(fact.find(p => p.key === key)).toMatchObject({ actualPayDate: '2027-03-31', actualNet: 17900, recordedForecast: 18096 });
+});

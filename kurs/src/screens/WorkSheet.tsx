@@ -1,3 +1,5 @@
+import { useCoverage } from '../components/Coverage';
+import { compare2027Coverage } from '../domain/coverage';
 import { useMemo, useState } from 'react';
 import { Field, Money, PrimaryButton, SecondaryButton, Segmented, Sheet } from '../components/ui';
 import { accountOptions, LIFE_ACCOUNT, validDate } from '../domain/accounts';
@@ -26,6 +28,19 @@ function Body() {
   </div>;
 }
 
+function UnitCoverage() {
+  const { input, now } = useCoverage('cautious');
+  const choices = useMemo(() => compare2027Coverage(input, now), [input, now]);
+  return choices.length > 0 && <div className="card space-y-3 p-4 text-[13px]">
+    <h3 className="font-medium">Осторожный прогноз по расчётным единицам</h3>
+    {choices.map(c => <div key={c.id}>
+      <p>{c.label} · <Money value={c.unit} /></p>
+      <p className="text-muted">Минимум до {ddmmyyyy(c.to)} · <Money value={Math.min(c.start, c.min?.balance ?? c.start)} /></p>
+      {c.accountRisk && <p className="text-warn">{ddmmyyyy(c.accountRisk.date)} · {c.accountRisk.title} · {c.accountRisk.amount == null ? 'проверьте счёт' : <Money value={c.accountRisk.amount} />}</p>}
+    </div>)}
+  </div>;
+}
+
 function Income({ profile, now, calendar }: { profile: PayrollProfile; now: string; calendar: boolean }) {
   const set = useUi(s => s.set);
   const cal = useCal();
@@ -44,7 +59,7 @@ function Income({ profile, now, calendar }: { profile: PayrollProfile; now: stri
         const pay = payments.find(p => p.key === e.key || (p.accrualPeriod === e.accrualPeriod && p.kind === e.incomeKind));
         const mark = cal.marks?.[e.key];
         const actual = mark?.done ? mark.amount : undefined;
-        const expected = pay?.net ?? e.amount;
+        const expected = pay?.recordedForecast ?? pay?.net ?? e.amount;
         return <button type="button" key={e.key} className="block w-full px-4 py-3 text-left" onClick={() => set({ workSheet: false, event: e })}>
           <div className="flex justify-between gap-2"><span className="font-medium">{e.title}</span><Money value={actual ?? e.amount} approx={actual == null} /></div>
           <div className="mt-1 text-[13px] text-muted">{ddmmyyyy(e.date)}
@@ -153,6 +168,7 @@ function WorkSettings() {
       <Field label="Облагаемый доход по справке"><input className="field" inputMode="decimal" value={taxBase} onChange={e => setTaxBase(e.target.value)} /></Field>
     </div>
     <PrimaryButton onClick={save}>Сохранить параметры</PrimaryButton>
+    {work && <UnitCoverage />}
   </>;
 }
 

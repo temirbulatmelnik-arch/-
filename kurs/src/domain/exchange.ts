@@ -1,4 +1,4 @@
-import { accountOptions, appendOperations, bookOperationAllowed, budgetExpenses, EMPTY_BOOK, LIFE_ACCOUNT, monthDebtActivity, RESERVE_ACCOUNT, validAmount, validBankBalance, validDate, validSplitDebit, validSplitPlan, type AccountBook, type CashAccount } from './accounts';
+import { accountOptions, appendOperations, bookOperationAllowed, budgetExpenses, EMPTY_BOOK, LIFE_ACCOUNT, monthDebtActivity, RESERVE_ACCOUNT, validAmount, validBankBalance, validDate, validLoanReview, validSplitDebit, validSplitPlan, type AccountBook, type CashAccount } from './accounts';
 import { validPayroll, type PayrollProfile } from './payroll';
 // Файл обмена с чатом «Финансы»: один формат в обе стороны.
 // Приложение выгружает всё, что знает (status — сводка только для чтения); чат возвращает тот же формат,
@@ -6,7 +6,7 @@ import { validPayroll, type PayrollProfile } from './payroll';
 // Перед применением приложение показывает разницу по разделам; присланное без изменений ничего не трогает.
 import { bridgeState, weekMoney, type Bridge } from './bridge';
 import { cardOn, ledger, type Checkup, type LedgerInput } from './ledger';
-import { coverage, coverageInput, safePrepayment } from './coverage';
+import { compare2027Coverage, coverage, coverageInput, safePrepayment } from './coverage';
 import { PROTOCOL_VERSION } from './sync';
 import { eventsBetween, paidOn, type CalendarInput } from './calendar';
 import { categorize } from './categorize';
@@ -179,6 +179,10 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
         debtActivity: monthDebtActivity(s.accountBook, s.expenses, now),
         accountRisk: cov.accountRisk,
         coverageScenarios: { cautious: byScenario('cautious'), ...(short ? {} : { stress: byScenario('stress') }) },
+        ...(!short && s.work ? { payUnitScenarios: compare2027Coverage(input, now).map(scenario => ({
+          id: scenario.id, unit: scenario.unit, to: scenario.to, min: Math.min(scenario.start, scenario.min?.balance ?? scenario.start),
+          shortage: scenario.shortage, accountRisk: scenario.accountRisk,
+        })) } : {}),
         safePrepayment: Object.fromEntries(accountOptions(s.accountBook).map(a => [a.id, safePrepayment(input, now, a.id)])),
       } : {}),
       ledger: {
@@ -203,14 +207,14 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
     calendar: calendar.map(e => {
       const m = s.marks[e.key];
       return {
-        key: e.key, date: e.date, title: e.title, kind: e.kind, amount: r0(e.amount),
+        key: e.key, date: e.date, title: e.title, kind: e.kind, amount: e.amount,
         ...(e.approx ? { approx: true } : {}), ...(e.dateMode !== 'exact' ? { dateMode: e.dateMode } : {}),
         // сумма или дата внесены в приложении вручную — это не оценка
         ...(s.overrides[e.key] ? { exact: true } : {}), ...(e.planned ? { planned: e.planned } : {}),
         ...(e.accountId ? { accountId: e.accountId } : {}), ...(e.economicType ? { economicType: e.economicType } : {}),
         ...(e.confidence ? { confidence: e.confidence } : {}),
         ...(e.accrualPeriod ? { accrualPeriod: e.accrualPeriod, nominalDate: e.nominalDate, expectedPayDate: e.expectedPayDate, actualPayDate: m?.done ? paidOn(e, m) : undefined } : {}),
-        done: !!m?.done, ...(m?.done && m.amount != null ? { paid: r0(m.amount) } : {}), ...(m?.paidFrom ? { paidFrom: m.paidFrom } : {}),
+        done: !!m?.done, ...(m?.done && m.amount != null ? { paid: m.amount } : {}), ...(m?.paidFrom ? { paidFrom: m.paidFrom } : {}),
         ...(m?.done ? { paidDate: paidOn(e, m) } : {}),
       };
     }),
@@ -591,7 +595,7 @@ const stepCalendar: Step = (f, s, ctx) => {
       const paid = isNum(p.paid) ? p.paid : mark?.done && mark.amount != null ? mark.amount : isNum(p.amount) ? p.amount : e.amount;
       // день фактической оплаты: из файла (paidDate); у уже отмеченного — прежний; у новой отметки — день импорта
       const paidDate = isDate(p.paidDate) ? p.paidDate : mark?.done ? paidOn(e, mark) : ctx.now;
-      if (!mark?.done || Math.abs((mark.amount ?? e.amount) - paid) >= 1 || paidDate !== paidOn(e, mark)) {
+      if (!mark?.done || Math.abs((mark.amount ?? e.amount) - paid) >= (f.protocolVersion === '2.7' ? 0.01 : 1) || paidDate !== paidOn(e, mark)) {
         marks[e.key] = { ...mark, done: true, amount: paid, at: ctx.at, paidDate, ...(p.paidFrom === 'card' || p.paidFrom === 'reserve' ? { paidFrom: p.paidFrom } : {}) };
         mc = true;
         lines.push(`${name}: ${e.kind === 'income' ? 'пришло' : 'оплачено'} ${money(paid)}${paidDate !== e.date ? ` (${ddmm(paidDate)})` : ''}`);
@@ -768,6 +772,15 @@ const stepAccountBook: Step = (f, s, ctx) => {
         || d.replacesKeys.some(key => s.marks[key]?.done)) continue;
     book = { ...book, splitDebits: [...book.splitDebits.filter(x => x.id !== d.id), d] };
     lines.push(`Автосписание Сплита ${d.date} · ${money(d.amount)} · заменяет строк ${d.replacesKeys.length}`);
+  }
+  if (Array.isArray(incoming.loanReviews)) {
+    const reviews = new Map((book.loanReviews ?? []).map(r => [r.id, r]));
+    for (const review of incoming.loanReviews) {
+      if (!validLoanReview(review) || reviews.has(review.id)) continue;
+      reviews.set(review.id, review);
+      lines.push(`К сверке: ${review.label} · ${money(review.amount)} · ${review.from}–${review.to}`);
+    }
+    if (reviews.size > (book.loanReviews?.length ?? 0)) book = { ...book, loanReviews: [...reviews.values()] };
   }
   const accountsById = new Set(accountOptions(book).map(a => a.id));
   if (incoming.paymentAccounts && typeof incoming.paymentAccounts === 'object') {

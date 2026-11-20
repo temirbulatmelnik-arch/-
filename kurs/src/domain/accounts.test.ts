@@ -53,3 +53,18 @@ describe('возврат и повторный импорт', () => {
     expect(book.operations[0].type).toBe('refund');
   });
 });
+
+it('выдачи к сверке не создают обязательств до подтверждения, а одинаковые суммы проверяются отдельно', async () => {
+  const { bookOperationAllowed } = await import('./accounts');
+  const review = [{ id: 'a', from: date, to: date, amount: 8500, label: 'Выдача на счёт' },
+    { id: 'b', from: date, to: date, amount: 8500, label: 'Вторая выдача' }];
+  const book = { ...EMPTY_BOOK, accounts: [account], loanReviews: review };
+  expect(debtProjection(debt, [], book, date).estimated).toBe(debt.balance);
+  expect(bookOperationAllowed({ ...loan, auditId: 'a' }, book, [debt], [])).toBe(false);
+  const a = { ...loan, auditId: 'a', debtBooked: true } as const;
+  const b = { ...a, id: 'b-op', auditId: 'b', externalId: 'y' };
+  expect(bookOperationAllowed(a, book, [debt], [])).toBe(true);
+  const operations = appendOperations([], [a, { ...a, id: 'repeat-a', externalId: 'z' }, b]);
+  expect(operations.map(op => op.id)).toEqual([a.id, b.id]);
+  expect(debtProjection(debt, [], { ...book, operations }, date).estimated).toBe(debt.balance);
+});

@@ -39,7 +39,7 @@ export interface PayrollProfile {
   vacationDaysRemaining?: number;
   taxBase?: Record<string, { asOf: string; base: number }>;
   deductions?: Record<string, number>;
-  actual?: Record<string, { gross?: number; tax?: number; otherWithheld?: number; verifiedBy?: string; asOf: string }>;
+  actual?: Record<string, { expectedNet?: number; gross?: number; tax?: number; otherWithheld?: number; verifiedBy?: string; asOf: string }>;
 }
 
 export interface WorkPay {
@@ -51,6 +51,7 @@ export interface WorkPay {
   expectedPayDate: string;
   actualPayDate?: string;
   actualNet?: number;
+  recordedForecast?: number;
   gross: number;
   tax: number;
   net: number;
@@ -62,6 +63,24 @@ export interface WorkPay {
 }
 
 export const UNIT_REFERENCE: Record<number, number> = { 2026: 2071, 2027: 2157, 2028: 2245 };
+export const UNIT_2027 = [
+  { id: 'law', unit: UNIT_REFERENCE[2027], label: 'Закон № 659-124' },
+  { id: 'proposal', unit: 2167, label: 'Проект бюджета' },
+] as const;
+
+export function with2027Unit(profile: PayrollProfile, unit: number): PayrollProfile {
+  const from = '2027-01-01';
+  const end = '2028-01-01';
+  const startRate = effectiveRate(profile.rates, from);
+  if (!startRate) return profile;
+  const rates = profile.rates.map(rate => rate.from >= from && rate.from < end ? { ...rate, unit, confidence: 'estimate' as const } : rate);
+  if (!rates.some(rate => rate.from === from)) rates.push({ ...startRate, from, unit, confidence: 'estimate' });
+  if (!rates.some(rate => rate.from === end)) {
+    const original = effectiveRate(profile.rates, end);
+    if (original) rates.push({ ...original, from: end });
+  }
+  return { ...profile, rates: rates.sort((a, b) => a.from.localeCompare(b.from)) };
+}
 const PAYMENTS = {
   advance: { day: 25, title: 'Аванс' }, salary: { day: 10, title: 'Зарплата' },
   bonusMonthly: { day: 15, title: 'Ежемесячная премия' },
@@ -124,7 +143,7 @@ export function validPayroll(profile: PayrollProfile): boolean {
   if (!Object.entries(taxBases).every(([y, t]) => t && validDate(t.asOf) && t.asOf.startsWith(y + '-') && validAmount(t.base) && t.base >= 0)) return false;
   return Object.values(profile.deductions ?? {}).every(d => validAmount(d) && d >= 0)
     && Object.values(profile.actual ?? {}).every(a => a && validDate(a.asOf)
-      && [a.gross, a.tax, a.otherWithheld].every(x => x == null || (validAmount(x) && x >= 0)));
+      && [a.expectedNet, a.gross, a.tax, a.otherWithheld].every(x => x == null || (validAmount(x) && x >= 0)));
 }
 
 const effectiveRate = (rates: PayRate[], date: string) => rates.filter(r => r.from <= date).reduce<PayRate | undefined>(
@@ -198,7 +217,7 @@ export function workPayments(profile: PayrollProfile, from: string, to: string, 
     if (v.to < profile.from) continue;
     const rate = effectiveRate(profile.rates, v.from);
     if (!rate) continue;
-    const nominalDate = addDays(v.from, -3);
+    const nominalDate = addDays(v.from, -10); // ст. 46 (ч. 10) № 79-ФЗ
     const payDate = v.payDate ?? workdayOnOrBefore(nominalDate, off);
     const common = {
       kind: 'vacation' as const, accrualPeriod: monthKey(v.from), nominalDate, expectedPayDate: payDate, vacationId: v.id,
@@ -235,7 +254,7 @@ export function workPayments(profile: PayrollProfile, from: string, to: string, 
     if (within) bases.set(year, before + taxable);
     if (date < from || date > to) return [];
     const net = Math.max(0, kopecks(gross - tax - (actual?.otherWithheld ?? 0)));
-    return [{ ...p, gross, tax, net, actualPayDate, actualNet: paid?.done ? paid.amount : undefined,
+    return [{ ...p, gross, tax, net, actualPayDate, actualNet: paid?.done ? paid.amount : undefined, recordedForecast: actual?.expectedNet,
       ...(known ? {} : { netRange: [kopecks(gross * 0.78), kopecks(gross * 0.87)] as [number, number] }) }];
   });
 }

@@ -6,6 +6,7 @@ import { activeBridge, bridgeState, type Bridge } from './bridge';
 import { eventsBetween, type CalendarInput } from './calendar';
 import { addDays, daysBetween, ddmm, lastDay, monthKey } from './dates';
 import { RESERVE_BUFFER, weeklyLimit } from './plan';
+import { UNIT_2027, with2027Unit } from './payroll';
 import type { Ledger } from './ledger';
 import type { CalEvent, Debt, EventMark, Expense } from './types';
 
@@ -249,6 +250,19 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
   return { start, from, to, steps, byDay, accountByDay: daily, accountRisk, bufferRisk, min };
 }
 
+/** Сравнение двух расчётных единиц с одинаковыми остатками, счетами и обязательствами. */
+export function compare2027Coverage(input: CoverageInput, from: string, scenario: Scenario = 'cautious') {
+  const work = input.cal.work;
+  if (!work || from > '2027-12-31') return [];
+  const horizon = addDays(from, HORIZON_DAYS);
+  const end = horizon < '2027-12-31' ? '2027-12-31' : horizon;
+  return UNIT_2027.map(unit => {
+    const model = { ...input, cal: { ...input.cal, work: with2027Unit(work, unit.unit) } };
+    const result = coverage(model, from, scenario, end);
+    return { ...unit, ...result };
+  });
+}
+
 export function safePrepayment(input: CoverageInput, from: string, accountId: string): number {
   const available = input.cash?.[accountId];
   if (available == null || available <= 0) return 0;
@@ -266,8 +280,9 @@ export function safePrepayment(input: CoverageInput, from: string, accountId: st
 }
 
 /** Прогноз резерва от сегодня: не меньше 150 дней и до первой крупной премии после самого тонкого места */
-export function coverage(input: CoverageInput, from: string, scenario: Scenario = 'base'): Coverage {
+export function coverage(input: CoverageInput, from: string, scenario: Scenario = 'base', until?: string): Coverage {
   let to = addDays(from, HORIZON_DAYS);
+  if (until && until > to) to = until;
   const runModel = (end: string) => input.cash ? runAccounts(input, from, end, scenario) : run(input, from, end);
   let base = runModel(to);
   const big = eventsBetween(input.cal, base.min?.date ?? from, addDays(from, 400)).find(e => e.kind === 'income' && e.amount >= 100_000 && (!input.cash || includeIncome(e, scenario)));

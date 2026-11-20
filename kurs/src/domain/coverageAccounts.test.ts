@@ -39,3 +39,18 @@ describe('платёжеспособность по счетам', () => {
     expect(coverage(state, date, 'stress').byDay[date]).toBe(cautious.byDay[date] - 1800);
   });
 });
+
+it('строит два независимых кассовых прогноза на весь 2027 год с одной и той же истории', async () => {
+  const { compare2027Coverage } = await import('./coverage');
+  const s = input([], { life: 200000, reserve: 350000, debit: 0 });
+  s.cal.work = { from: '2026-10-01', rates: [{ from: '2026-10-01', unit: 2071, positionUnits: 23, rankUnits: 6,
+    seniority: 0.25, conditions: 0.45, monthlyBonus: 0.45, confidence: 'estimate' }] };
+  const ranges = compare2027Coverage(s, date);
+  expect(ranges).toMatchObject([{ id: 'law', unit: 2157 }, { id: 'proposal', unit: 2167 }]);
+  expect(ranges.every(r => r.to >= '2027-12-31')).toBe(true);
+  const advance2026 = 'inc:advance:2026-12';
+  const advance2027 = 'inc:advance:2027-01';
+  expect(ranges[0].steps.find(e => e.key === advance2026)?.delta).toBe(ranges[1].steps.find(e => e.key === advance2026)?.delta);
+  expect(ranges[1].steps.find(e => e.key === advance2027)!.delta).toBeGreaterThan(ranges[0].steps.find(e => e.key === advance2027)!.delta);
+  expect(s.cal.work.rates).toMatchObject([{ from: '2026-10-01', unit: 2071 }]);
+});

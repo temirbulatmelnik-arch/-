@@ -248,7 +248,7 @@ function ReviewList({ review, onBack }: { review: Review; onBack: () => void }) 
       ...people.map(p => ({ date: p.date, amount: p.amount, category: p.category, note: p.name, source: 'life' as const, origin: 'text' as const, fingerprint: p.fingerprint })),
     ]);
     // та же трата уже внесена вручную или из чата — привязать отпечаток, чтобы следующий скриншот её узнал
-    for (const i of items) if (i.type === 'tx' && i.tx.linkId) store.updateExpense(i.tx.linkId, { fingerprint: i.tx.fingerprint });
+    for (const i of items) if (i.type === 'tx' && i.tx.linkId && !i.on) store.updateExpense(i.tx.linkId, { fingerprint: i.tx.fingerprint });
     // память продавцов: сменили категорию — запомнить
     for (const t of txs) if (t.nameKey && t.suggested && t.category !== t.suggested) store.remember(t.nameKey, t.category);
     for (const i of on) {
