@@ -157,20 +157,20 @@ export interface BonusSplit {
  * Правило премии: в день прихода оставить в резерве 20 000 + нехватку за месяцы до следующей премии,
  * всё остальное — досрочно в текущий целевой долг (и дальше по порядку, если он закрылся).
  */
-export function splitBonus(opts: { amount: number; reserve: number; date: string; debts: Debt[]; monthsOverride?: number }): BonusSplit {
+export function splitBonus(opts: { amount: number; reserve: number; date: string; debts: Debt[]; monthsOverride?: number; safeLimit?: number }): BonusSplit {
   const month = monthKey(opts.date);
   const rule = planConfig().bonusRules?.[month];
   const next = nextBonusMonth(month);
   const count = opts.monthsOverride ?? rule?.months ?? Math.max(0, monthsBetween(month, next) - 1);
   const months = Array.from({ length: count }, (_, i) => addMonths(month, i + 1));
   const keep = RESERVE_BUFFER + months.reduce((s, m) => s + shortfallFor(m, opts.debts), 0);
-  let free = Math.max(0, opts.reserve + opts.amount - (rule?.full ? RESERVE_BUFFER : keep));
+  let free = Math.min(opts.safeLimit ?? Infinity, Math.max(0, opts.reserve + opts.amount - keep));
   const allocations: BonusSplit['allocations'] = [];
   // решение плана на месяц ограничивает, какие долги гасим (например, премия месяца — только в один долг, остальное в резерв)
-  const queue = openDebts(opts.debts).filter(d => !d.noPrepay && (!rule?.targets || rule.targets.includes(d.id))).sort((a, b) => a.order - b.order);
+  const queue = openDebts(opts.debts).filter(d => !d.noPrepay && (!rule?.targets || rule.targets.includes(d.id))).sort((a, b) => b.rate - a.rate || a.order - b.order);
   for (const debt of queue) {
     if (free <= 0) break;
-    const amount = Math.min(free, Math.ceil(debt.balance));
+    const amount = Math.min(free, debt.balance);
     if (rule?.full && amount < debt.balance - 0.5) break; // закрыть целиком не хватает — не дробим
     allocations.push({ debt, amount, closes: amount >= debt.balance - 0.5 });
     free -= amount;

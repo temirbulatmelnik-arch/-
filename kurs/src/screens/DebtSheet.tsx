@@ -1,3 +1,7 @@
+import { accountOptions, RESERVE_ACCOUNT } from '../domain/accounts';
+import { safePrepayment } from '../domain/coverage';
+import { useCoverage } from '../components/Coverage';
+import { useLedger } from './Checkup';
 // Карточка долга: обновить остаток, внести досрочно, условия. И форма нового долга.
 import { Lock, Trash2 } from 'lucide-react';
 import { useState } from 'react';
@@ -31,11 +35,18 @@ const ruleText = (d: Debt) => {
 
 function Body({ d }: { d: Debt }) {
   const now = useToday();
-  const [updateDebt, prepay, removeDebt, reserve] = useStore(useShallow(s => [s.updateDebt, s.prepay, s.removeDebt, s.reserve] as const));
+  const [updateDebt, prepay, removeDebt, book] = useStore(useShallow(s => [s.updateDebt, s.prepay, s.removeDebt, s.accountBook] as const));
+  const projected = useLedger().debtBalances[d.id];
+  const { input } = useCoverage('cautious');
   const set = useUi(s => s.set);
   const [balance, setBalance] = useState(String(d.balance));
   const [extra, setExtra] = useState('');
-  const [fromReserve, setFromReserve] = useState(false);
+  const [account, setAccount] = useState(RESERVE_ACCOUNT);
+  const [principal, setPrincipal] = useState('');
+  const [interestPart, setInterestPart] = useState('');
+  const [fee, setFee] = useState('');
+  const safe = safePrepayment(input, now, account);
+  const principalValue = parseAmount(principal);
   const extraValue = parseAmount(extra) ?? 0;
   const interest = (d.balance * d.rate) / 12;
 
@@ -43,7 +54,7 @@ function Body({ d }: { d: Debt }) {
     <div className="space-y-4 pt-1">
       <div className="card p-5">
         <div className="text-[13px] font-medium text-muted">{d.name}</div>
-        <Money value={d.balance} className="figure mt-1 block text-[40px] leading-none" />
+        <Money value={projected.estimated} className="figure mt-1 block text-[40px] leading-none" />
         <div className="mt-2 flex flex-wrap gap-1.5 text-[12.5px]">
           <span className="rounded-full bg-surface-2 px-2.5 py-1 font-medium">ставка {pct(d.rate)}</span>
           {d.limit && <span className="rounded-full bg-surface-2 px-2.5 py-1 font-medium">лимит {rub(d.limit)}</span>}
@@ -57,6 +68,16 @@ function Body({ d }: { d: Debt }) {
         )}
         <p className="mt-3 text-[13.5px] leading-snug text-muted">{ruleText(d)}. Платёж {d.dueDay === 'last' ? 'до последнего дня месяца' : `${d.kind === 'card' ? 'до ' : ''}${d.dueDay}-го числа`}.</p>
         {d.note && <p className="mt-2 text-[13.5px] leading-snug">{d.note}</p>}
+        <p className="mt-2 text-[12px] text-muted">
+          {projected.confirmed == null ? 'Банковская сверка не подтверждена' : <>В банке <Money value={projected.confirmed} /> · операций после сверки <Money value={projected.delta} sign /></>}
+          {projected.unknownPrincipal > 0 && <> · требуется разбивка <Money value={projected.unknownPrincipal} /></>}
+        </p>
+        <Field label="Счёт списания по графику">
+          <select className="field" value={book.paymentAccounts[d.id] ?? ''} onChange={e => useStore.getState().setPaymentAccount(d.id, e.target.value)}>
+            <option value="">Не указан</option>
+            {accountOptions(book).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </Field>
         {d.updatedAt && <p className="mt-2 text-[12px] text-faint">Остаток обновлён {relDays(now, d.updatedAt.slice(0, 10))}</p>}
       </div>
 
@@ -70,15 +91,23 @@ function Body({ d }: { d: Debt }) {
               onClick={() => { updateDebt(d.id, { balance: parseAmount(balance)! }); toast('Остаток обновлён'); }}>Сохранить остаток</SecondaryButton>
           </div>
 
-          <div className="card space-y-3 p-4">
-            <Field label="Внести досрочно" hint={d.kind === 'split' ? 'При досрочном погашении выберите «уменьшить платёж».' : d.kind === 'loan' ? 'Выберите досрочное погашение с сокращением срока.' : 'Сначала внесите обязательный платёж, сверх него — досрочно.'}>
+          {!d.noPrepay && <div className="card space-y-3 p-4">
+            <Field label="Учесть досрочный платёж" hint={d.kind === 'split' ? 'При досрочном погашении выберите «уменьшить платёж».' : d.kind === 'loan' ? 'Выберите досрочное погашение с сокращением срока.' : 'Сначала внесите обязательный платёж, сверх него — досрочно.'}>
               <input value={extra} onChange={e => setExtra(e.target.value)} inputMode="decimal" placeholder="0" className="field text-[18px] font-medium" />
             </Field>
-            <Switch checked={fromReserve} onChange={setFromReserve} label="Деньги из резерва" hint={`Сейчас в резерве ${rub(reserve)}. Брать только сверх суммы, которую резерв должен держать.`} />
-            <PrimaryButton disabled={extraValue <= 0} onClick={() => { prepay(d.id, Math.min(extraValue, d.balance), fromReserve); setExtra(''); toast(extraValue >= d.balance - 0.5 ? `${d.short} закрыт!` : 'Досрочный платёж учтён'); }}>
-              Внёс {extraValue > 0 ? rub(extraValue) : ''}
-            </PrimaryButton>
-          </div>
+            <Field label="Счёт списания"><select className="field" value={account} onChange={e => setAccount(e.target.value)}>
+              {accountOptions(book).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select></Field>
+            <Field label="Погашено тела долга по выписке"><input className="field" inputMode="decimal" value={principal} onChange={e => setPrincipal(e.target.value)} /></Field>
+            <Field label="Проценты по выписке"><input className="field" inputMode="decimal" value={interestPart} onChange={e => setInterestPart(e.target.value)} /></Field>
+            <Field label="Комиссия по выписке"><input className="field" inputMode="decimal" value={fee} onChange={e => setFee(e.target.value)} /></Field>
+            <p className="text-[13px] text-muted">По осторожному прогнозу доступно до <Money value={safe} />. После использования всего лимита целевой запас может уменьшиться.</p>
+            <PrimaryButton disabled={extraValue <= 0 || extraValue > safe || principalValue == null} onClick={() => {
+              const ok = prepay(d.id, extraValue, account, { principal: principalValue!, interest: parseAmount(interestPart) ?? undefined, fee: parseAmount(fee) ?? undefined });
+              if (ok) { setExtra(''); setPrincipal(''); setInterestPart(''); setFee(''); }
+              toast(ok ? 'Досрочный платёж учтён' : 'Проверьте разбивку и обеспечение ближайших платежей');
+            }}>Подтвердить платёж</PrimaryButton>
+          </div>}
         </>
       )}
 

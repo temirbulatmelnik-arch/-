@@ -1,7 +1,8 @@
+import { accountOptions, LIFE_ACCOUNT, RESERVE_ACCOUNT } from '../domain/accounts';
 // Платёж, поступление или воскресное пополнение карты: отметить, поправить сумму и дату (у кредиток они плавают), распределить премию.
 import { CalendarDays, Undo2 } from 'lucide-react';
 import { useState } from 'react';
-import { AmountInput, Money, PrimaryButton, Row, SecondaryButton, Segmented, Sheet } from '../components/ui';
+import { AmountInput, Money, PrimaryButton, Row, SecondaryButton, Sheet } from '../components/ui';
 import { GROUP_LABEL, whenText } from '../components/rows';
 import { eventGroup } from '../domain/calendar';
 import { addDays, dayMonth, relDays, weekdayFull } from '../domain/dates';
@@ -42,6 +43,11 @@ function Body({ e }: { e: CalEvent }) {
   const [editing, setEditing] = useState(false);
   // деньги под платёж уже перевели на карту — по умолчанию «с карты»
   const [from, setFrom] = useState<'reserve' | 'card'>(() => mark?.paidFrom ?? (heldKeys(useStore.getState().reserveLog, useStore.getState().marks).has(e.key) ? 'card' : 'reserve'));
+  const book = useStore(s => s.accountBook);
+  const [account, setAccount] = useState(e.accountId ?? (from === 'card' ? LIFE_ACCOUNT : RESERVE_ACCOUNT));
+  const [principal, setPrincipal] = useState('');
+  const [interest, setInterest] = useState('');
+  const [fee, setFee] = useState('');
   const [newAmount, setNewAmount] = useState(String(e.amount));
   const [newDate, setNewDate] = useState(e.date);
   const value = parseAmount(amount) ?? 0;
@@ -49,8 +55,10 @@ function Body({ e }: { e: CalEvent }) {
 
   const done = () => {
     if (isBonus(e)) { set({ event: null, bonus: { event: { ...e, amount: value } } }); return; }
-    markEvent(e, true, value, from);
-    toast(e.kind === 'income' ? `Пришло на карту. В воскресной сверке приложение напомнит перевести ${rub(value)} в резерв` : e.kind === 'weekly' ? 'Отмечено: карта долита из резерва' : debt ? `Оплачено. Остаток ${debt.short} пересчитан` : 'Отмечено: оплачено');
+    markEvent(e, true, value, from, { accountId: account, principal: parseAmount(principal) ?? undefined,
+      interest: parseAmount(interest) ?? undefined, fee: parseAmount(fee) ?? undefined });
+    if (!useStore.getState().marks[e.key]?.done) { toast('Проверьте счёт и разбивку платежа'); return; }
+    toast(e.kind === 'income' ? `Пришло на карту. В воскресной сверке приложение напомнит перевести ${rub(value)} в резерв` : e.kind === 'weekly' ? 'Отмечено: карта долита из резерва' : debt ? `Оплачено. В учёте отражена подтверждённая часть тела долга` : 'Отмечено: оплачено');
     close();
   };
 
@@ -102,13 +110,23 @@ function Body({ e }: { e: CalEvent }) {
           {e.kind === 'payment' && (
             <div>
               <div className="mb-1.5 text-[12.5px] font-medium text-muted">Откуда оплачено</div>
-              <Segmented value={from} onChange={setFrom} options={[{ id: 'reserve', label: 'Из резерва' }, { id: 'card', label: 'С карты' }]} />
+              <select className="field" value={account} onChange={x => { setAccount(x.target.value); setFrom(x.target.value === LIFE_ACCOUNT ? 'card' : 'reserve'); }}>
+                {accountOptions(book).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              {account !== e.accountId && <button type="button" className="mt-2 text-[13px] text-sea" onClick={() => {
+                useStore.getState().setPaymentAccount(e.key, account);
+                toast('Счёт списания назначен');
+              }}>Назначить счёт для этого платежа</button>}
               {debt && <p className="mt-1.5 text-[12px] leading-snug text-muted">Платёж по долгу — только реальными деньгами: с кредитки его не гасим.</p>}
             </div>
           )}
-          {e.kind === 'payment' && debt && debt.rule.type !== 'schedule' && (
-            <p className="text-[12.5px] leading-snug text-muted">Долг уменьшится примерно на {rub(Math.max(0, value - (debt.balance * debt.rate) / 12))}: часть платежа съедают проценты ({rub((debt.balance * debt.rate) / 12)} в месяц). Точный остаток — из выписки или скриншота банка.</p>
-          )}
+          {e.kind === 'payment' && debt && <div className="space-y-2">
+            {([{ label: 'Тело долга по выписке', value: principal, set: setPrincipal }, { label: 'Проценты', value: interest, set: setInterest },
+              { label: 'Комиссия', value: fee, set: setFee }]).map(part => <label key={part.label} className="block text-[13px]">
+              {part.label}<input className="field mt-1" inputMode="decimal" value={part.value} onChange={x => part.set(x.target.value)} />
+            </label>)}
+            <p className="text-[12.5px] text-muted">Если разбивки нет, оставьте поля пустыми. Списание учтётся, тело долга уточняется по выписке.</p>
+          </div>}
           {isBonus(e) && <p className="text-[12.5px] leading-snug text-muted">Дальше — распределение премии: резерв до следующей премии, остальное сегодня же в долг.</p>}
           <PrimaryButton onClick={done} disabled={value <= 0}>
             {e.kind === 'income' ? (isBonus(e) ? 'Пришла — распределить' : 'Пришло') : e.kind === 'weekly' ? 'Долил' : 'Оплачено'}

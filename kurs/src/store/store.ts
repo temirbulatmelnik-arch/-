@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { accountOptions, appendOperations, bookOperationAllowed, cashAccount, EMPTY_BOOK, LIFE_ACCOUNT, RESERVE_ACCOUNT, validAmount, type AccountBook, type AccountOperation, type BankBalance, type CashAccount, type SplitDebit, type SplitPlan } from '../domain/accounts';
 import { DEFAULT_MODEL } from '../domain/models';
+import { coverageInput, safePrepayment } from '../domain/coverage';
 import { annuity } from '../domain/calendar';
 import { addDays, monthKey, monthsBetween, toKey, today } from '../domain/dates';
 import { setPlanSource, totalDebt, type PlanConfig } from '../domain/plan';
@@ -11,8 +12,7 @@ import { mergeSeed } from '../domain/planUpdate';
 import type { Bridge } from '../domain/bridge';
 import { fixDefaultCategories } from '../domain/categorize';
 import { dropChatTwins } from '../domain/exchange';
-import { freshReserve, heldKeys, type Checkup } from '../domain/ledger';
-import { salute } from './events';
+import { freshReserve, heldKeys, ledger, type Checkup } from '../domain/ledger';
 import type { CalEvent, CardBalance, ChecklistItem, Debt, DebtSnapshot, EventMark, Expense, FixedItem, IncomeTemplate, MemoryRule, PlanSeed, ReserveMove, Settings, StrategySection, WeekClosure, WeeklyOverride, WishItem } from '../domain/types';
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -113,9 +113,9 @@ interface Actions {
   addDebt: (d: Debt) => void;
   removeDebt: (id: string) => void;
   /** досрочное погашение; fromReserve — деньги взяты из резерва */
-  prepay: (id: string, amount: number, fromReserve: boolean, note?: string) => void;
+  prepay: (id: string, amount: number, accountId: string, parts: { principal: number; interest?: number; fee?: number }) => boolean;
   /** премия: резерв становится reserveAfter, остальное — досрочно по списку */
-  applyBonus: (opts: { amount: number; reserveAfter: number; allocations: { debtId: string; amount: number }[]; title: string; eventKey?: string }) => void;
+  applyBonus: (opts: { id: string; amount: number; accountId: string; title: string; eventKey?: string; date?: string }) => boolean;
   /** card — перевод между картой и резервом: на сколько изменилась карта */
   /** card — на сколько изменилась карта (перевод между картой и резервом); forKeys — платежи, под которые перевели */
   moveReserve: (amount: number, note: string, card?: number, forKeys?: string[]) => void;
@@ -430,33 +430,30 @@ export const useStore = create<State>()(
       addDebt: d => set(s => withSnapshot([...s.debts, d], s.snapshots)),
       removeDebt: id => set(s => withSnapshot(s.debts.filter(d => d.id !== id), s.snapshots)),
 
-      prepay: (id, amount, fromReserve, note) => set(s => {
+      prepay: (id, amount, accountId, parts) => {
+        const s = get();
         const debt = s.debts.find(d => d.id === id);
-        if (!debt) return {};
-        const debts = s.debts.map(d => (d.id === id ? patchDebt(d, d.balance - amount, true) : d));
-        return {
-          ...withSnapshot(debts, s.snapshots),
-          ...(fromReserve ? {
-            reserve: s.reserve - amount,
-            reserveLog: [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), amount: -amount, note: note ?? `Досрочно в ${debt.short}` }],
-          } : {}),
-        };
-      }),
+        const date = today();
+        const led = ledger({ ...s, now: date });
+        if (!debt || debt.closed || debt.noPrepay || parts.principal > led.debtBalances[id].estimated
+            || !validAmount(amount) || amount <= 0 || amount > safePrepayment(coverageInput(s, led), date, accountId)) return false;
+        return s.saveOperation({ ...parts, id: uid(), debtId: id, amount, accountId, type: 'debt_payment',
+          date, at: nowIso(), origin: 'manual', status: 'confirmed', fundingSource: 'unknown', note: 'Досрочное погашение' });
+      },
 
-      applyBonus: ({ amount, reserveAfter, allocations, title, eventKey }) => set(s => {
-        let debts = s.debts;
-        for (const a of allocations) debts = debts.map(d => (d.id === a.debtId ? patchDebt(d, d.balance - a.amount, true) : d));
-        if (debts.some(d => d.closed && !s.debts.find(x => x.id === d.id)?.closed)) salute('big');
-        const sent = allocations.reduce((t, a) => t + a.amount, 0);
-        const names = allocations.map(a => s.debts.find(d => d.id === a.debtId)?.short).filter(Boolean).join(', ');
-        const marks = eventKey ? { ...s.marks, [eventKey]: { done: true, amount, at: nowIso() } } : s.marks;
-        return {
-          ...withSnapshot(debts, s.snapshots),
-          marks,
-          reserve: reserveAfter,
-          reserveLog: [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), abs: true, amount: reserveAfter - s.reserve, note: `${title}: ${sent ? `в долг ${Math.round(sent)} (${names}), ` : ''}остальное в резерв` }],
-        };
-      }),
+      applyBonus: ({ id, amount, accountId, title, eventKey, date = today() }) => {
+        const s = get();
+        if (eventKey && s.marks[eventKey]?.done) return false;
+        const at = nowIso();
+        const op: AccountOperation = { id, amount, accountId, eventKey, date, at, type: 'income',
+          origin: 'manual', status: 'confirmed', fundingSource: 'own', note: title };
+        if (!bookOperationAllowed(op, s.accountBook, s.debts, s.expenses)) return false;
+        const operations = appendOperations(s.accountBook.operations, [op]);
+        if (operations === s.accountBook.operations) return false;
+        const marks = eventKey ? { ...s.marks, [eventKey]: { done: true, amount, at, paidDate: date } } : s.marks;
+        set({ marks, accountBook: { ...s.accountBook, operations } });
+        return true;
+      },
 
       moveReserve: (amount, note, card, forKeys) => set(s => ({ reserve: s.reserve + amount, reserveLog: [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), amount, note, ...(card ? { card } : {}), ...(forKeys?.length ? { forKeys } : {}) }] })),
       setReserve: (balance, note) => set(s => ({ reserve: balance, reserveLog: [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), abs: true, operationIds: operationIdsAt(s.accountBook, today()), amount: balance - s.reserve, note }] })),

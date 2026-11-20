@@ -130,7 +130,7 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
   const phase = currentPhase(s.debts, now);
   const need = reserveNeed(now, s.debts);
   const from = addDays(now, short ? -14 : -EXPENSE_DAYS);
-  const ledIn: LedgerInput = { checkups: s.checkups ?? [], cardBalance: s.cardBalance, reserve: s.reserve, reserveLog: s.reserveLog ?? [], marks: s.marks, expenses: s.expenses, oneOff: s.oneOff, debts: s.debts, bridge: s.bridge ?? null, now };
+  const ledIn: LedgerInput = { accountBook: s.accountBook, checkups: s.checkups ?? [], cardBalance: s.cardBalance, reserve: s.reserve, reserveLog: s.reserveLog ?? [], marks: s.marks, expenses: s.expenses, oneOff: s.oneOff, debts: s.debts, bridge: s.bridge ?? null, now };
   const led = ledger(ledIn);
   const day = dayBudget(s.expenses, s.debts, s.weeklyOverrides, now);
   // тот же вход прогноза, что у календаря и «Хватит ли» в приложении: остаток дня в календаре = status.coverage

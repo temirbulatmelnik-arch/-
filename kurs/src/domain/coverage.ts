@@ -1,9 +1,11 @@
 // Покрытие обязательных платежей: хватит ли резерва на кредиты, рассрочку, Сплит, минималки и обязательные платежи.
 // Платежи по долгам гасятся только реальными деньгами (резерв и поступления), кредитка никогда не источник платежа.
 // Регулировать можно только недельные деньги на жизнь: пополнение карты и мост на кредитке.
+import { accountMovement, cents, LIFE_ACCOUNT, RESERVE_ACCOUNT, rubles } from './accounts';
 import { activeBridge, bridgeState, type Bridge } from './bridge';
 import { eventsBetween, type CalendarInput } from './calendar';
 import { addDays, daysBetween, ddmm, lastDay, monthKey } from './dates';
+import { RESERVE_BUFFER, weeklyLimit } from './plan';
 import type { Ledger } from './ledger';
 import type { CalEvent, Debt, EventMark, Expense } from './types';
 
@@ -22,6 +24,8 @@ export interface CoverageStep {
   kind: CalEvent['kind'] | 'bridge';
   approx?: boolean;
   key?: string;
+  accountId?: string;
+  confidence?: CalEvent['confidence'];
 }
 
 export interface CoverageMonth {
@@ -48,6 +52,9 @@ export interface Coverage {
   narrow: CoverageStep[];
   months: CoverageMonth[];
   /** первая нехватка: день и сколько не хватает в самой глубокой точке после него */
+  accountRisk?: AccountRisk | null;
+  accountByDay?: Record<string, Record<string, number | null>>;
+  bufferRisk?: { date: string; amount: number } | null;
   shortage: { date: string; title: string; amount: number } | null;
 }
 
@@ -58,6 +65,7 @@ export interface CoverageInput {
   debts: Debt[];
   expenses: Expense[];
   bridge?: Bridge | null;
+  cash?: Record<string, number | null>;
 }
 
 /**
@@ -67,8 +75,10 @@ export interface CoverageInput {
  * потраченными до нуля: из резерва уходит только воскресное пополнение карты (в неделю моста — fromReserve), траты с
  * кредитки моста резерв не уменьшают — они растят долг по кредитке.
  */
-export function coverageInput(s: CalendarInput & { marks: Record<string, EventMark>; expenses: Expense[] }, led: Pick<Ledger, 'reserve' | 'incomeOnCard' | 'heldOnCard'>): CoverageInput {
-  return { cal: s, marks: s.marks, reserve: led.reserve + led.incomeOnCard + led.heldOnCard, debts: s.debts, expenses: s.expenses, bridge: s.bridge ?? null };
+export function coverageInput(s: CalendarInput & { marks: Record<string, EventMark>; expenses: Expense[] }, led: Pick<Ledger, 'reserve' | 'incomeOnCard' | 'heldOnCard'> & Partial<Pick<Ledger, 'card' | 'reserveVerified' | 'cashAccounts'>>): CoverageInput {
+  return { cal: s, marks: s.marks, reserve: led.reserve + led.incomeOnCard + led.heldOnCard, debts: s.debts, expenses: s.expenses, bridge: s.bridge ?? null,
+    cash: s.accountBook ? { [LIFE_ACCOUNT]: led.card ?? null, [RESERVE_ACCOUNT]: led.reserveVerified ? led.reserve : null,
+      ...Object.fromEntries((led.cashAccounts ?? []).map(a => [a.id, a.expected])) } : undefined };
 }
 
 /** Погашение моста и рост минималок по кредитке моста — как события прогноза */
@@ -120,12 +130,148 @@ function run(input: CoverageInput, from: string, to: string, shift?: { key: stri
   return { start: input.reserve, from, to, steps: list, byDay, min };
 }
 
+export type Scenario = 'base' | 'cautious' | 'stress';
+export interface AccountRisk {
+  date: string;
+  title: string;
+  accountId?: string;
+  amount: number | null;
+  reason: 'unassigned' | 'unverified' | 'insufficient';
+}
+
+const REGULAR = new Set(['salary', 'advance', 'bonusMonthly']);
+const OPTIONAL_BONUS = new Set(['bonusQuarter', 'bonusYear', 'vacation', 'thirteenth']);
+function includeIncome(e: CalEvent, scenario: Scenario): boolean {
+  if (e.economicType === 'loan_disbursement') return false;
+  if (e.confidence === 'confirmed' || e.confidence === 'regular' || (e.incomeKind && REGULAR.has(e.incomeKind))) return true;
+  if (e.confidence === 'estimate') return scenario === 'base' || !e.incomeKind || !OPTIONAL_BONUS.has(e.incomeKind);
+  return scenario === 'base' && !e.approx && e.dateMode === 'exact' && e.confidence !== 'tentative';
+}
+
+interface Deduction { accountId: string; amount: number }
+type Projection = ReturnType<typeof run>;
+
+function runAccounts(input: CoverageInput, from: string, to: string, scenario: Scenario, deduction?: Deduction): Projection {
+  const balances = new Map(Object.entries(input.cash ?? {}).map(([id, amount]) => [id, amount === null ? null : cents(amount)]));
+  let total = [...balances.values()].reduce<number>((sum, value) => sum + (value ?? 0), 0);
+  const balanceOn = (id?: string) => id ? balances.get(id) ?? null : null;
+  const start = rubles(total);
+  const daily: NonNullable<Coverage['accountByDay']> = {};
+  const steps: CoverageStep[] = [];
+  const byDay: Record<string, number> = {};
+  let accountRisk: AccountRisk | null = null;
+  let bufferRisk: Coverage['bufferRisk'] = null;
+  const move = (id: string | undefined, delta: number) => {
+    const value = balanceOn(id);
+    if (id && value != null) balances.set(id, value + delta);
+  };
+  const requireMoney = (id: string | undefined, amount: number, date: string, title: string) => {
+    const available = balanceOn(id);
+    if (!accountRisk && (available == null || available < amount)) {
+      accountRisk = { accountId: id, date, title, amount: available == null ? null : rubles(amount - available),
+        reason: !id ? 'unassigned' : available == null ? 'unverified' : 'insufficient' };
+    }
+  };
+  const push = (step: Omit<CoverageStep, 'balance' | 'delta'>, delta: number) => {
+    total += delta;
+    steps.push({ ...step, delta: rubles(delta), balance: rubles(total) });
+    if (total < cents(RESERVE_BUFFER) && !bufferRisk) bufferRisk = { date: step.date, amount: rubles(cents(RESERVE_BUFFER) - total) };
+  };
+  if (total < cents(RESERVE_BUFFER)) bufferRisk = { date: from, amount: rubles(cents(RESERVE_BUFFER) - total) };
+  if (deduction) {
+    const amount = cents(deduction.amount);
+    requireMoney(deduction.accountId, amount, from, 'Досрочное погашение');
+    move(deduction.accountId, -amount);
+    push({ date: from, title: 'Досрочное погашение', kind: 'payment', accountId: deduction.accountId }, -amount);
+  }
+  const byDate = new Map<string, CalEvent[]>();
+  const { extra, minUp } = bridgeEvents(input, from, to);
+  for (const e of eventsBetween(input.cal, addDays(from, -45), to)) {
+    if (input.marks[e.key]?.done) continue;
+    if (e.kind === 'income' && (e.date < from || !includeIncome(e, scenario))) continue;
+    if (e.kind === 'weekly' && e.date < from) continue;
+    const delayed = e.kind === 'income' && scenario !== 'base' && e.confidence === 'estimate'
+      && (!e.incomeKind || !REGULAR.has(e.incomeKind)) ? addDays(e.date, 10) : e.date;
+    const date = delayed < from ? from : delayed;
+    if (!byDate.has(date)) byDate.set(date, []);
+    byDate.get(date)!.push(e);
+  }
+  const book = input.cal.accountBook;
+  const stress = scenario === 'stress' ? book?.stress : undefined;
+  const transfers = (book?.operations ?? []).filter(op => op.type === 'transfer' && op.status === 'planned' && op.date >= from && op.date <= to);
+  for (let date = from; date <= to; date = addDays(date, 1)) {
+    const day = byDate.get(date) ?? [];
+    const repayments = extra.filter(x => x.date === date);
+    for (const step of repayments) {
+      const accountId = input.cal.accountBook?.paymentAccounts['bridge-repayment'];
+      requireMoney(accountId, cents(-step.delta), date, step.title);
+      move(accountId, cents(step.delta));
+      push({ date, title: step.title, kind: 'bridge', accountId }, cents(step.delta));
+    }
+    if (stress?.date === date) {
+      requireMoney(stress.accountId, cents(stress.amount), date, 'Непредвиденный необходимый расход');
+      move(stress.accountId, -cents(stress.amount));
+      push({ date, title: 'Непредвиденный необходимый расход', kind: 'payment', accountId: stress.accountId }, -cents(stress.amount));
+    }
+    // Утренний автоплатёж должен быть обеспечен до зачислений и плановых переводов этого же дня.
+    for (const e of day.filter(x => x.kind !== 'income')) {
+      if (e.kind === 'weekly') {
+        const target = cents(weeklyLimit(input.debts, addDays(date, 1), input.cal.weeklyOverrides));
+        const existing = Math.min(target, Math.max(0, balanceOn(LIFE_ACCOUNT) ?? 0));
+        const topUp = target - existing;
+        if (topUp > 0) requireMoney(RESERVE_ACCOUNT, topUp, date, e.title);
+        move(RESERVE_ACCOUNT, -topUp);
+        move(LIFE_ACCOUNT, -existing);
+        push({ date, title: 'Необходимые расходы недели', kind: 'weekly', key: e.key, accountId: RESERVE_ACCOUNT }, -target);
+        continue;
+      }
+      const amount = cents(e.amount + (minUp[e.key] ?? 0));
+      if (amount <= 0) continue;
+      requireMoney(e.accountId, amount, date, e.title);
+      move(e.accountId, -amount);
+      push({ date, title: e.title, kind: e.kind, key: e.key, accountId: e.accountId, approx: e.approx, confidence: e.confidence }, -amount);
+    }
+    for (const op of transfers.filter(op => op.date === date)) {
+      if (op.type !== 'transfer') continue;
+      requireMoney(op.accountId, cents(op.amount), date, 'Перевод между счетами');
+      move(op.accountId, accountMovement(op, op.accountId));
+      move(op.toAccountId, accountMovement(op, op.toAccountId));
+    }
+    for (const e of day.filter(x => x.kind === 'income')) {
+      const accountId = e.accountId ?? LIFE_ACCOUNT;
+      move(accountId, cents(e.amount));
+      push({ date, title: e.title, kind: 'income', key: e.key, accountId, approx: e.approx, confidence: e.confidence }, cents(e.amount));
+    }
+    byDay[date] = rubles(total);
+    daily[date] = Object.fromEntries([...balances].map(([id, value]) => [id, value === null ? null : rubles(value)]));
+  }
+  const min = steps.reduce<CoverageStep | null>((m, s) => (!m || s.balance < m.balance ? s : m), null);
+  return { start, from, to, steps, byDay, accountByDay: daily, accountRisk, bufferRisk, min };
+}
+
+export function safePrepayment(input: CoverageInput, from: string, accountId: string): number {
+  const available = input.cash?.[accountId];
+  if (available == null || available <= 0) return 0;
+  const baseline = coverage(input, from, 'cautious');
+  if (baseline.accountRisk || baseline.shortage) return 0;
+  let low = 0;
+  let high = cents(Math.min(available, Math.max(0, baseline.min?.balance ?? baseline.start)));
+  while (low < high) {
+    const attempt = Math.ceil((low + high) / 2);
+    const result = runAccounts(input, from, baseline.to, 'cautious', { accountId, amount: rubles(attempt) });
+    if (result.accountRisk || (result.min?.balance ?? result.start) < 0) high = attempt - 1;
+    else low = attempt;
+  }
+  return rubles(low);
+}
+
 /** Прогноз резерва от сегодня: не меньше 150 дней и до первой крупной премии после самого тонкого места */
-export function coverage(input: CoverageInput, from: string): Coverage {
+export function coverage(input: CoverageInput, from: string, scenario: Scenario = 'base'): Coverage {
   let to = addDays(from, HORIZON_DAYS);
-  let base = run(input, from, to);
-  const big = eventsBetween(input.cal, base.min?.date ?? from, addDays(from, 400)).find(e => e.kind === 'income' && e.amount >= 100_000);
-  if (big && big.date > to) { to = big.date; base = run(input, from, to); }
+  const runModel = (end: string) => input.cash ? runAccounts(input, from, end, scenario) : run(input, from, end);
+  let base = runModel(to);
+  const big = eventsBetween(input.cal, base.min?.date ?? from, addDays(from, 400)).find(e => e.kind === 'income' && e.amount >= 100_000 && (!input.cash || includeIncome(e, scenario)));
+  if (big && big.date > to) { to = big.date; base = runModel(to); }
   const { steps, min } = base;
 
   // узкие места: по дню — последний платёж, после которого остаток ниже запаса
@@ -145,8 +291,8 @@ export function coverage(input: CoverageInput, from: string): Coverage {
     months.set(m, r);
   }
 
-  const firstNeg = steps.find(s => s.balance < 0);
-  const shortage = firstNeg ? { date: firstNeg.date, title: firstNeg.title, amount: -Math.min(...steps.filter(s => s.date >= firstNeg.date).map(s => s.balance)) } : null;
+  const firstNeg = base.start < 0 ? { balance: base.start, date: from, title: 'Остатки на начало прогноза' } : steps.find(s => s.balance < 0);
+  const shortage = firstNeg ? { date: firstNeg.date, title: firstNeg.title, amount: -Math.min(firstNeg.balance, ...steps.filter(s => s.date >= firstNeg.date).map(s => s.balance)) } : null;
   return { ...base, narrow, months: [...months.values()], shortage, to, min };
 }
 
@@ -158,6 +304,13 @@ export interface CoverageHint {
 
 /** Что можно сделать с нехваткой — только недельными деньгами; кредитка для платежа по долгу не предлагается */
 export function coverageHints(input: CoverageInput, from: string, cov: Coverage): CoverageHint[] {
+  if (input.cash) {
+    const risk = cov.accountRisk;
+    if (!risk) return cov.shortage ? [{ text: 'Уточните даты поступлений и пересмотрите необязательные расходы до первой нехватки.', closes: false }] : [];
+    return [{ text: risk.reason === 'unassigned' ? 'Укажите карту списания в платеже.'
+      : risk.reason === 'unverified' ? 'Сверьте остаток на счёте списания.'
+      : 'Подготовьте деньги на счёте списания заранее и проверьте, хватит ли их на остальных счетах.', closes: false }];
+  }
   const s = cov.shortage;
   if (!s) return [];
   const hints: CoverageHint[] = [];

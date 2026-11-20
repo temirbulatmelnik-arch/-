@@ -157,7 +157,7 @@ describe('прогноз', () => {
     });
     expect(f.freeMonth).not.toBeNull();
     expect(f.freeMonth! <= '2029-06').toBe(true);
-    expect(f.closeMonth.alfa).toBe('2026-12'); // декабрьская — Альфа целиком
+    expect(f.closeMonth.alfa).toBe('2027-04'); // раннее закрытие нарушает плановый запас
     expect(f.closeMonth.alfa! <= f.closeMonth.tbank!).toBe(true);
     expect(f.closeMonth.tbank! <= f.closeMonth.loan!).toBe(true);
   });

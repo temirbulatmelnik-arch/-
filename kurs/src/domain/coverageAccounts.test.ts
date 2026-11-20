@@ -1,0 +1,41 @@
+import { describe, expect, it } from 'vitest';
+import { EMPTY_BOOK } from './accounts';
+import { coverage, safePrepayment, type CoverageInput } from './coverage';
+import type { CalEvent } from './types';
+
+const date = '2026-11-23';
+const payment: CalEvent = { key: 'bill', title: 'Автоплатёж', kind: 'payment', date: '2026-11-24', dateMode: 'exact', amount: 8000, accountId: 'debit' };
+const salary: CalEvent = { key: 'salary', title: 'Оплата труда', kind: 'income', incomeKind: 'salary', date: payment.date,
+  dateMode: 'exact', amount: 10000, confidence: 'regular', accountId: 'debit' };
+const bonus: CalEvent = { ...salary, key: 'year', incomeKind: 'bonusYear', date: '2026-12-01', amount: 120000, confidence: 'estimate' };
+function input(events: CalEvent[], cash: CoverageInput['cash']): CoverageInput {
+  return { marks: {}, reserve: 0, debts: [], expenses: [], cash, cal: { debts: [], incomes: [], fixed: [],
+    templateFrom: date.slice(0, 7), weeklyOverrides: [], oneOff: events, accountBook: EMPTY_BOOK } };
+}
+
+describe('платёжеспособность по счетам', () => {
+  it('показывает кассовый риск на карте при достаточной сумме всех счетов и зарплате в тот же день', () => {
+    const cov = coverage(input([payment, salary], { debit: 2000, reserve: 380000, life: 1000 }), date, 'cautious');
+    expect(cov.shortage).toBeNull();
+    expect(cov.accountRisk).toMatchObject({ date: payment.date, accountId: 'debit', amount: 6000 });
+    expect(cov.accountByDay?.[payment.date].debit).toBe(4000);
+    expect(cov.to >= '2027-04-22').toBe(true);
+  });
+
+  it('повторно прогоняет все дни после досрочки; реальный лимит ограничен конкретным счётом', () => {
+    expect(safePrepayment(input([payment, salary], { debit: 9000, reserve: 380000, life: 1000 }), date, 'debit')).toBe(1000);
+    expect(safePrepayment(input([payment, salary], { debit: 2000, reserve: 380000, life: 1000 }), date, 'debit')).toBe(0);
+    expect(safePrepayment(input([{ ...payment, accountId: undefined }], { debit: 60000, reserve: 380000, life: 1000 }), date, 'debit')).toBe(0);
+  });
+
+  it('учитывает ежемесячную премию в осторожном режиме, годовую только в базовом, стресс как расход', () => {
+    const regular = { ...salary, incomeKind: 'bonusMonthly' as const };
+    const state = input([regular, bonus], { debit: 0, reserve: 380000, life: 0 });
+    state.cal.accountBook = { ...EMPTY_BOOK, stress: { date, amount: 1800, accountId: 'reserve' } };
+    expect(coverage(state, date).steps.map(s => s.key)).toContain(bonus.key);
+    const cautious = coverage(state, date, 'cautious');
+    expect(cautious.steps.map(s => s.key)).not.toContain(bonus.key);
+    expect(cautious.steps.map(s => s.key)).toContain(regular.key);
+    expect(coverage(state, date, 'stress').byDay[date]).toBe(cautious.byDay[date] - 1800);
+  });
+});
