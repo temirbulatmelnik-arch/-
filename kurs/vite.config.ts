@@ -62,8 +62,7 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      // новая версия ставится, когда приложение уходит в фон (main.tsx), а не перезагружает его на глазах
-      registerType: 'prompt',
+      // Воркер активируется сразу после подготовки кеша. Текущий экран обновляется при следующей навигации.
       injectRegister: false,
       includeAssets: ['favicon.svg', 'apple-touch-icon-180x180.png'],
       manifest: {
@@ -85,7 +84,7 @@ export default defineConfig({
         ],
       },
       // seed.enc.json кешируется тоже: план открывается и без интернета
-      workbox: { globPatterns: ['**/*.{js,css,html,svg,png,woff2,json}'], globIgnores: ['**/assets/main-{' + OLD_TONUS_SCRIPTS.join(',') + '}.js'] },
+      workbox: { skipWaiting: true, clientsClaim: true, globPatterns: ['**/*.{js,css,html,svg,png,woff2,json}'], globIgnores: ['**/assets/main-{' + OLD_TONUS_SCRIPTS.join(',') + '}.js'] },
     }),
   ],
   test: { environment: 'node' },

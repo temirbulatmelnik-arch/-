@@ -75,6 +75,7 @@ interface Ui {
   checkup: string | null;
   /** раскрытая карточка в стопке «Недели»; null — выбрать по обстановке */
   stackOpen: string | null;
+  pwaUpdateReady: boolean;
   toast: string | null;
   /** «Отменить» в сообщении: вернуть как было (5 секунд после записи или отметки) */
   undo: (() => void) | null;
@@ -84,7 +85,7 @@ interface Ui {
 
 export const useUi = create<Ui>()(set => ({
   tab: 'week', add: null, scan: false, settings: false, event: null, bonus: null, debt: null, reserve: false,
-  week: null, savings: false, sync: false, fixed: false, card: false, loan: false, transfer: null, unlock: false, planView: 'debts', focus: null, settingsFocus: null, inbox: null, checkup: null, hub: false, finance: false, workSheet: false, tour: false, payView: 'list', scenario: 'base', today: false, stackOpen: null, toast: null, undo: null,
+  week: null, savings: false, sync: false, fixed: false, card: false, loan: false, transfer: null, unlock: false, planView: 'debts', focus: null, settingsFocus: null, inbox: null, checkup: null, hub: false, finance: false, workSheet: false, tour: false, payView: 'list', scenario: 'base', today: false, stackOpen: null, pwaUpdateReady: false, toast: null, undo: null,
   // прокрутку каждой вкладки помнит App (useTabScroll)
   setTab: tab => set({ tab }),
   set: p => set(p),

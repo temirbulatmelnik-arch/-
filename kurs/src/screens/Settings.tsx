@@ -42,6 +42,7 @@ function Section({ title, id, children }: { title: string; id?: string; children
 function Body() {
   const s = useStore();
   const st = s.settings;
+  const pwaUpdateReady = useUi(s => s.pwaUpdateReady);
   const [key, setKey] = useState(st.apiKey);
   const file = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<Record<string, unknown> | null>(null);
@@ -181,6 +182,7 @@ function Body() {
       </Section>
 
       <Section title="Приложение">
+        {pwaUpdateReady && <PrimaryButton onClick={() => window.location.reload()}>Открыть обновлённую версию</PrimaryButton>}
         <a href={INSTALL_URL} className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-surface-2 text-[15px] font-medium"><Smartphone size={18} /> Установка на iPhone</a>
         <button type="button" onClick={() => useUi.getState().set({ settings: false, tour: true })} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-surface-2 text-[15px] font-medium">Что где в приложении</button>
         <button type="button" onClick={() => { if (confirm('Стереть все данные «Курса» на этом телефоне? Сначала сохраните копию.')) { s.reset(); useUi.getState().set({ settings: false }); } }}
