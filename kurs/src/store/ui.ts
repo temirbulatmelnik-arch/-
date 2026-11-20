@@ -110,6 +110,6 @@ export function useToday(): string {
 }
 
 export function useCal(): CalendarInput {
-  const [debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge, accountBook] = useStore(useShallow(s => [s.debts, s.incomes, s.fixed, s.oneOff, s.templateFrom, s.weeklyOverrides, s.overrides, s.bridge, s.accountBook] as const));
-  return useMemo(() => ({ debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge, accountBook }), [debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge, accountBook]);
+  const [debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge, accountBook, work, marks] = useStore(useShallow(s => [s.debts, s.incomes, s.fixed, s.oneOff, s.templateFrom, s.weeklyOverrides, s.overrides, s.bridge, s.accountBook, s.work, s.marks] as const));
+  return useMemo(() => ({ debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge, accountBook, work, marks }), [debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge, accountBook, work, marks]);
 }

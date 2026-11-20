@@ -4,6 +4,7 @@ import { addDays, dayIn, monthKey, weekStart } from './dates';
 import type { CalEvent, Debt, EventMark, FixedItem, IncomeTemplate, WeeklyOverride } from './types';
 import { bridgeWeek, type Bridge } from './bridge';
 import { weeklyLimit } from './plan';
+import { isRegularWork, workEvents, type PayrollProfile } from './payroll';
 import { workdayOnOrBefore } from './workdays';
 
 /** Ориентировочный обязательный платёж по долгу в месяце */
@@ -31,6 +32,8 @@ export function annuity(balance: number, rate: number, months: number): number {
 export interface CalendarInput {
   debts: Debt[];
   accountBook?: AccountBook;
+  work?: PayrollProfile | null;
+  marks?: Record<string, EventMark>;
   incomes: IncomeTemplate[];
   fixed: FixedItem[];
   oneOff: CalEvent[];
@@ -110,6 +113,36 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
       title: plan.name, amount: payment.amount, debtId: plan.debtId,
     }));
   }
+  if (input.work) {
+    const sourceMarks = input.marks ?? {};
+    const work = input.work;
+    // Сначала выбираем однозначные прежние события, затем используем их отметки при расчёте НДФЛ.
+    const candidates = workEvents(work, from, to, sourceMarks);
+    const aliases = new Map<string, CalEvent>();
+    const used = new Set<string>();
+    for (const e of candidates) {
+      const found = out.filter(old => old.kind === 'income' && !used.has(old.key) && old.incomeKind === e.incomeKind &&
+        (old.key === e.key || (isRegularWork(e.incomeKind) && (old.date === e.nominalDate || old.date === e.expectedPayDate))));
+      const old = found.find(old => old.key === e.key) ?? (found.length === 1 ? found[0] : undefined);
+      if (old) { aliases.set(e.key, old); used.add(old.key); }
+    }
+    const canonicalMarks = { ...sourceMarks };
+    for (const [key, old] of aliases) if (sourceMarks[old.key]?.done) canonicalMarks[key] = sourceMarks[old.key];
+    const modelled = workEvents(work, from, to, canonicalMarks);
+    const recognised = new Set(modelled.map(e => e.key));
+    const remaining = out.filter(e => !used.has(e.key) && !(recognised.has(e.key) && e.kind === 'income'));
+    out.length = 0;
+    out.push(...remaining, ...modelled.map(e => {
+      const old = aliases.get(e.key);
+      if (!old) return e;
+      const mark = sourceMarks[old.key];
+      return { ...e, key: old.key,
+        date: mark?.done ? mark.paidDate ?? e.date : old.dateMode === 'exact' && !old.approx ? old.date : e.date,
+        amount: old.dateMode === 'exact' && !old.approx ? old.amount : e.amount,
+        ...(old.dateMode === 'exact' && !old.approx ? { approx: false } : {}),
+      };
+    }));
+  }
   const splitDebits = input.accountBook?.splitDebits ?? [];
   const replaced = new Set(splitDebits.flatMap(d => d.replacesKeys));
   for (const debit of splitDebits) out.push({
@@ -131,11 +164,11 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
     })
     // деньги приходят только в рабочий день: выходной или праздник — значит, накануне
     .map(e => {
-      if (e.kind !== 'income' || e.economicType === 'loan_disbursement' || e.dateMode === 'month' || ov[e.key]?.date) return e;
+      if (e.kind !== 'income' || e.economicType === 'loan_disbursement' || e.nominalDate || e.dateMode === 'month' || ov[e.key]?.date) return e;
       const date = workdayOnOrBefore(e.date);
       return date === e.date ? e : { ...e, date, planned: e.date };
     })
-    .map(e => (ov[e.key] ? { ...e, amount: ov[e.key].amount ?? e.amount, date: ov[e.key].date ?? e.date, approx: ov[e.key].amount != null ? false : e.approx, moved: ov[e.key].date != null && ov[e.key].date !== e.date } : e))
+    .map(e => (ov[e.key] ? { ...e, amount: ov[e.key].amount ?? e.amount, date: (e.nominalDate && input.marks?.[e.key]?.done ? undefined : ov[e.key].date) ?? e.date, approx: ov[e.key].amount != null ? false : e.approx, moved: ov[e.key].date != null && ov[e.key].date !== e.date } : e))
     .filter(e => e.date >= rangeFrom && e.date <= rangeTo)
     .sort((a, b) => a.date.localeCompare(b.date) || rank[a.kind] - rank[b.kind] || a.title.localeCompare(b.title));
 }

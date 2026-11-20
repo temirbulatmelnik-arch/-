@@ -2,12 +2,13 @@
 // Резервная копия — файл JSON (Настройки → Данные), календарь — файл .ics.
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { accountOptions, appendOperations, bookOperationAllowed, cashAccount, EMPTY_BOOK, LIFE_ACCOUNT, RESERVE_ACCOUNT, validAmount, type AccountBook, type AccountOperation, type BankBalance, type CashAccount, type SplitDebit, type SplitPlan } from '../domain/accounts';
+import { accountOptions, appendOperations, bookOperationAllowed, cashAccount, EMPTY_BOOK, LIFE_ACCOUNT, RESERVE_ACCOUNT, validAmount, validDate, type AccountBook, type AccountOperation, type BankBalance, type CashAccount, type SplitDebit, type SplitPlan } from '../domain/accounts';
 import { DEFAULT_MODEL } from '../domain/models';
 import { coverageInput, safePrepayment } from '../domain/coverage';
 import { annuity } from '../domain/calendar';
 import { addDays, monthKey, monthsBetween, toKey, today } from '../domain/dates';
 import { setPlanSource, totalDebt, type PlanConfig } from '../domain/plan';
+import { validPayroll, type PayrollProfile } from '../domain/payroll';
 import { mergeSeed } from '../domain/planUpdate';
 import type { Bridge } from '../domain/bridge';
 import { fixDefaultCategories } from '../domain/categorize';
@@ -67,6 +68,7 @@ interface Data {
   /** воскресные сверки с банком: журнал и точка отсчёта учёта по счетам */
   checkups: Checkup[];
   accountBook: AccountBook;
+  work: PayrollProfile | null;
   /** последние импорты из чата со снимком данных до них — чтобы откатить неверный блок */
   imports: ImportRecord[];
   settings: Settings;
@@ -85,6 +87,7 @@ interface Actions {
   setPaymentAccount: (key: string, accountId: string) => void;
   saveSplitPlan: (plan: SplitPlan) => void;
   saveSplitDebit: (debit: SplitDebit) => void;
+  saveWork: (work: PayrollProfile) => boolean;
   setStress: (stress: AccountBook['stress']) => void;
   /** запомнить снимок данных до импорта из банка — откатить можно так же, как импорт из чата */
   beginImport: (summary: string) => void;
@@ -106,7 +109,7 @@ interface Actions {
   updateExpense: (id: string, patch: Partial<Expense>) => void;
   removeExpense: (id: string) => void;
   /** отметить событие календаря; для платежа по долгу остаток уменьшается на оценку погашения */
-  markEvent: (e: CalEvent, done: boolean, amount?: number, paidFrom?: EventMark['paidFrom'], details?: { accountId?: string; principal?: number; interest?: number; fee?: number }) => void;
+  markEvent: (e: CalEvent, done: boolean, amount?: number, paidFrom?: EventMark['paidFrom'], details?: { accountId?: string; principal?: number; interest?: number; fee?: number; paidDate?: string }) => void;
   updateDebt: (id: string, patch: Partial<Debt>) => void;
   /** точная сумма/дата платежа из банка */
   setOverride: (key: string, o: { amount?: number; date?: string }) => void;
@@ -168,7 +171,7 @@ const EMPTY: Data = {
   ready: false, asOf: today(), debts: [], incomes: [], fixed: [], oneOff: [], templateFrom: monthKey(today()),
   weeklyOverrides: [], planTrajectory: [], baselineTrajectory: [], reserve: 0, reserveLog: [], expenses: [], marks: {}, wishes: [], snapshots: [], overrides: {}, plan: null,
   planRev: 0, planCode: '', checklist: [], strategy: [], rules: [], checks: {}, savings: 0, savingsLog: [], closures: {}, cardBalance: null, bridge: null, checkups: [], merchantMemory: {}, imports: [],
-  settings: DEFAULT_SETTINGS, accountBook: EMPTY_BOOK,
+  settings: DEFAULT_SETTINGS, accountBook: EMPTY_BOOK, work: null,
 };
 
 /** Снимок общего долга за текущий месяц — для графика «план против факта» */
@@ -288,6 +291,11 @@ export const useStore = create<State>()(
       saveSplitDebit: debit => set(s => ({
         accountBook: { ...s.accountBook, splitDebits: [...s.accountBook.splitDebits.filter(d => d.id !== debit.id), debit] },
       })),
+      saveWork: work => {
+        if (!validPayroll(work) || (work.accountId && !accountOptions(get().accountBook).some(a => a.id === work.accountId))) return false;
+        set({ work });
+        return true;
+      },
       setStress: stress => set(s => ({ accountBook: { ...s.accountBook, stress } })),
       beginImport: summary => set(s => {
         const { imports, settings, planCode, ready, ...snapshot } = pickData(s);
@@ -304,7 +312,7 @@ export const useStore = create<State>()(
         if (i < 0) return {};
         const snapshot = s.imports[i].snapshot;
         const imports = s.imports.slice(0, i);
-        return { ...snapshot, imports, accountBook: snapshot.accountBook ?? EMPTY_BOOK, cardBalance: restoreCardTime(snapshot.cardBalance, imports) };
+        return { ...snapshot, imports, accountBook: snapshot.accountBook ?? EMPTY_BOOK, work: snapshot.work ?? null, cardBalance: restoreCardTime(snapshot.cardBalance, imports) };
       }),
       toggleCheck: id => set(s => {
         const base = s.checklist.find(c => c.id === id)?.done ?? false;
@@ -391,7 +399,8 @@ export const useStore = create<State>()(
           const paid = amount ?? e.amount;
           if (!validAmount(paid) || paid < 0) return {};
           const at = nowIso();
-          const date = today();
+          const date = details?.paidDate ?? today();
+          if (!validDate(date) || date > today()) return {};
           const from = paidFrom ?? (heldKeys(s.reserveLog, s.marks).has(e.key) ? 'card' : 'reserve');
           marks[e.key] = { done: true, amount: paid, at, paidDate: date, ...(e.kind === 'payment' ? { paidFrom: from } : {}) };
           if (e.kind === 'weekly') return { marks, ...topUpMove(s, e.key, paid) };
@@ -402,6 +411,12 @@ export const useStore = create<State>()(
               date, at, origin: 'manual', status: 'confirmed', fundingSource: 'unknown',
               principal: details?.principal, interest: details?.interest, fee: details?.fee,
             };
+            if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
+            accountBook = { ...accountBook, operations: appendOperations(accountBook.operations, [op]) };
+          }
+          if (e.kind === 'income' && (e.accountId || e.nominalDate)) {
+            const op: AccountOperation = { id: uid(), eventKey: e.key, type: 'income', amount: paid,
+              accountId: e.accountId ?? LIFE_ACCOUNT, date, at, origin: 'manual', status: 'confirmed', fundingSource: 'own' };
             if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
             accountBook = { ...accountBook, operations: appendOperations(accountBook.operations, [op]) };
           }

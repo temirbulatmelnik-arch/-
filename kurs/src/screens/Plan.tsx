@@ -56,15 +56,17 @@ export function Plan() {
 let fcCache: { key: unknown[]; value: Forecast } | null = null;
 function useDebtForecast(): Forecast {
   const now = useToday();
-  const [debts, incomes, reserve, oneOff, templateFrom] = useStore(useShallow(s => [s.debts, s.incomes, s.reserve, s.oneOff, s.templateFrom] as const));
+  const cal = useCal();
+  const { debts, incomes, oneOff, templateFrom } = cal;
+  const reserve = useStore(s => s.reserve);
   return useMemo(() => {
     const from = `${addMonths(monthKey(now), 1)}-01`;
-    const key = [debts, incomes, reserve, oneOff, templateFrom, from];
+    const key = [cal, reserve, from];
     if (fcCache && fcCache.key.every((k, i) => k === key[i])) return fcCache.value;
-    const value = forecast({ debts, incomes, reserve, from, oneOff, templateFrom });
+    const value = forecast({ debts, incomes, reserve, from, oneOff, templateFrom, cal });
     fcCache = { key, value };
     return value;
-  }, [debts, incomes, reserve, oneOff, templateFrom, now]);
+  }, [cal, debts, incomes, reserve, oneOff, templateFrom, now]);
 }
 
 /** Общий долг досчитывает вниз от начального и фарватер: долги буями по порядку закрытия, судно у текущей цели */

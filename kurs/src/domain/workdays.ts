@@ -4,6 +4,7 @@ import { addDays, fromKey } from './dates';
 
 /** Нерабочие праздничные дни и переносы по постановлениям правительства */
 const HOLIDAYS: Record<number, string[]> = {
+  2027: ['01-01', '01-04', '01-05', '01-06', '01-07', '01-08', '02-22', '02-23', '03-08', '05-03', '05-10', '06-14', '11-04', '11-05', '12-31'],
   2026: ['01-01', '01-02', '01-05', '01-06', '01-07', '01-08', '01-09', '02-23', '03-09', '05-01', '05-11', '06-12', '11-04', '12-31'],
 };
 
@@ -28,16 +29,26 @@ function holidays(year: number): Set<string> {
 
 const isWeekend = (k: string) => { const dow = fromKey(k).getDay(); return dow === 0 || dow === 6; };
 
+const WORKING_WEEKEND = new Set(['2027-02-20']);
+const SHORTENED = new Set(['2026-04-30', '2026-05-08', '2026-06-11', '2026-11-03',
+  '2027-02-20', '2027-04-30', '2027-06-11', '2027-11-03']);
+export const calendarApproved = (year: number) => !!HOLIDAYS[year];
+export const federalHoliday = (date: string) => FIXED.includes(date.slice(5));
+
 const cache = new Map<number, Set<string>>();
 export function isWorkday(k: string): boolean {
   const year = Number(k.slice(0, 4));
   if (!cache.has(year)) cache.set(year, holidays(year));
-  return !isWeekend(k) && !cache.get(year)!.has(k.slice(5));
+  return WORKING_WEEKEND.has(k) || (!isWeekend(k) && !cache.get(year)!.has(k.slice(5)));
 }
 
 /** Ближайший рабочий день не позже даты: 25.10.2026 (вс) → 23.10 (пт) */
-export function workdayOnOrBefore(k: string): string {
+export function workHours(k: string, hours?: Record<string, number>): number {
+  return hours?.[k] ?? (isWorkday(k) ? (SHORTENED.has(k) ? 7 : 8) : 0);
+}
+
+export function workdayOnOrBefore(k: string, hours?: Record<string, number>): string {
   let d = k;
-  for (let i = 0; i < 20 && !isWorkday(d); i++) d = addDays(d, -1);
+  for (let i = 0; i < 20 && workHours(d, hours) <= 0; i++) d = addDays(d, -1);
   return d;
 }

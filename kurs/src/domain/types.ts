@@ -92,6 +92,9 @@ export interface CalEvent {
   accountId?: string;
   economicType?: 'income' | 'loan_disbursement' | 'debt_payment';
   confidence?: 'confirmed' | 'regular' | 'estimate' | 'tentative';
+  accrualPeriod?: string;
+  nominalDate?: string;
+  expectedPayDate?: string;
   note?: string;
   /** дата перенесена вручную */
   moved?: boolean;

@@ -125,6 +125,7 @@ type MarkKind = 'weekly' | 'payment' | 'income' | 'bonus' | null;
 function kindOf(key: string, oneOff: CalEvent[]): MarkKind {
   if (key.startsWith('wk:')) return 'weekly';
   if (key.startsWith('pay:') || key.startsWith('fix:')) return 'payment';
+  if (key.startsWith('work:')) return 'bonus';
   if (key.startsWith('inc:')) return BONUS.has(key.split(':')[1]) ? 'bonus' : 'income';
   const e = oneOff.find(o => o.key === key);
   if (!e) return null;
