@@ -1,7 +1,7 @@
 // Сводки для экранов: неделя, месяц по категориям, что требует внимания сегодня.
 import { bridgeWeek, onBridgeCard, type Bridge } from './bridge';
 import { addDays, daysBetween, ddmm, monthKey, weekStart } from './dates';
-import { eventsBetween, urgency, type CalendarInput } from './calendar';
+import { actionableEvent, eventsBetween, urgency, type CalendarInput } from './calendar';
 import { baselineOf, BIG_PURCHASE_HOURS, CATEGORIES, categoryLimit, currentPhase, weeklyLimit } from './plan';
 import { checklistDue } from './planUpdate';
 import type { CalEvent, CategoryId, ChecklistItem, Debt, EventMark, Expense, WeeklyOverride, WishItem } from './types';
@@ -126,6 +126,7 @@ export function alerts(opts: {
   const out: Alert[] = [];
   const events = eventsBetween(opts.cal, addDays(opts.now, -45), addDays(opts.now, 3));
   for (const e of events) {
+    if (!actionableEvent(e)) continue;
     const u = urgency(e, opts.marks[e.key], opts.now);
     if (e.kind === 'payment' && (u === 'overdue' || u === 'soon')) {
       out.push({

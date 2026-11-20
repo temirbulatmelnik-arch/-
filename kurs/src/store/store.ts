@@ -14,7 +14,7 @@ import type { Bridge } from '../domain/bridge';
 import { fixDefaultCategories } from '../domain/categorize';
 import { dropChatTwins } from '../domain/exchange';
 import { freshReserve, heldKeys, ledger, type Checkup } from '../domain/ledger';
-import type { CalEvent, CardBalance, ChecklistItem, Debt, DebtSnapshot, EventMark, Expense, FixedItem, IncomeTemplate, MemoryRule, PlanSeed, ReserveMove, Settings, StrategySection, WeekClosure, WeeklyOverride, WishItem } from '../domain/types';
+import type { CalEvent, CalendarOverride, CardBalance, ChecklistItem, Debt, DebtSnapshot, EventMark, Expense, FixedItem, IncomeTemplate, MemoryRule, PlanSeed, ReserveMove, Settings, StrategySection, WeekClosure, WeeklyOverride, WishItem } from '../domain/types';
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
@@ -43,7 +43,7 @@ interface Data {
   marks: Record<string, EventMark>;
   wishes: WishItem[];
   snapshots: DebtSnapshot[];
-  overrides: Record<string, { amount?: number; date?: string }>;
+  overrides: Record<string, CalendarOverride>;
   /** цифры плана из зашифрованного файла; null — нейтральные по умолчанию */
   plan: PlanConfig | null;
   /** редакция загруженного плана и код к нему — чтобы подтягивать новые редакции без потери данных */
@@ -390,7 +390,8 @@ export const useStore = create<State>()(
       markEvent: (e, done, amount, paidFrom, details) => set(s => {
         const prev = s.marks[e.key];
         const linked = s.accountBook.operations.find(op => op.eventKey === e.key);
-        if (linked?.type === 'loan_disbursement') return {};
+        if (linked?.type === 'loan_disbursement' || s.accountBook.historicalLoans?.some(loan => loan.eventKey === e.key) ||
+            (done && (e.payroll?.documented || e.projection === 'internal_transfer'))) return {};
         const marks = { ...s.marks };
         let debts = s.debts;
         let accountBook = s.accountBook;
@@ -431,7 +432,7 @@ export const useStore = create<State>()(
             if (work && e.nominalDate) {
               const key = e.incomeKind === 'salary' || e.incomeKind === 'advance' || e.incomeKind === 'bonusMonthly'
                 ? `inc:${e.incomeKind}:${monthKey(e.nominalDate)}` : e.key;
-              const updated = { ...work, actual: { ...work.actual, [key]: { ...details?.payrollActual, expectedNet: e.amount, asOf: date,
+              const updated = { ...work, actual: { ...work.actual, [key]: { ...work.actual?.[key], ...details?.payrollActual, expectedNet: e.amount, asOf: date,
                 verifiedBy: details?.payrollActual ? 'Расчётный листок' : undefined } } };
               if (!validPayroll(updated)) return {};
               work = updated;

@@ -164,7 +164,7 @@ export interface TransferPlan {
 export function transferPlan(o: { events: CalEvent[]; marks: Record<string, EventMark>; log: ReserveMove[]; incomeOnCard: number; now: string; hour: number }): TransferPlan | null {
   const held = heldKeys(o.log, o.marks);
   const tomorrow = addDays(o.now, 1);
-  const events = o.events.filter(e => e.kind === 'payment' && !o.marks[e.key]?.done && !held.has(e.key) && (e.date === o.now || (e.date === tomorrow && o.hour >= 18)));
+  const events = o.events.filter(e => e.kind === 'payment' && !e.projection && !o.marks[e.key]?.done && !held.has(e.key) && (e.date === o.now || (e.date === tomorrow && o.hour >= 18)));
   if (!events.length) return null;
   const total = Math.round(events.reduce((t, e) => t + e.amount, 0) * 100) / 100;
   const onCard = Math.min(total, Math.max(0, o.incomeOnCard));

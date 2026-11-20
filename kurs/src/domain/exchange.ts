@@ -1,4 +1,4 @@
-import { accountOptions, appendOperations, bookOperationAllowed, budgetExpenses, EMPTY_BOOK, LIFE_ACCOUNT, monthDebtActivity, RESERVE_ACCOUNT, validAmount, validBankBalance, validDate, validLoanReview, validSplitDebit, validSplitPlan, type AccountBook, type CashAccount } from './accounts';
+import { accountOptions, appendOperations, bookOperationAllowed, budgetExpenses, cents, EMPTY_BOOK, LIFE_ACCOUNT, monthDebtActivity, RESERVE_ACCOUNT, validAmount, validBankBalance, validDate, validLoanReview, validSplitDebit, validSplitPlan, type AccountBook, type CashAccount } from './accounts';
 import { validPayroll, type PayrollProfile } from './payroll';
 // Файл обмена с чатом «Финансы»: один формат в обе стороны.
 // Приложение выгружает всё, что знает (status — сводка только для чтения); чат возвращает тот же формат,
@@ -15,7 +15,7 @@ import { rub } from './money';
 import { CATEGORIES, CATEGORY, currentPhase, DEFAULT_PLAN, reserveNeed, type BonusRule, type PlanConfig } from './plan';
 import { dayBudget, weekSummary } from './summary';
 import type {
-  CalEvent, CardBalance, CategoryId, ChecklistItem, Debt, DebtKind, EventMark, Expense, FixedItem, IncomeTemplate, Phase, ReserveMove, Source,
+  CalEvent, CalendarOverride, CardBalance, CategoryId, ChecklistItem, Debt, DebtKind, EventMark, Expense, FixedItem, IncomeTemplate, Phase, ReserveMove, Source,
   StrategySection, WeekClosure, WeeklyOverride,
 } from './types';
 
@@ -25,7 +25,7 @@ export const EXPENSE_DAYS = 90;
 
 /** Что приложение отдаёт в файл и что файл может поменять */
 export interface ExchangeState extends CalendarInput {
-  overrides: Record<string, { amount?: number; date?: string }>;
+  overrides: Record<string, CalendarOverride>;
   marks: Record<string, EventMark>;
   plan: PlanConfig | null;
   expenses: Expense[];
@@ -75,7 +75,7 @@ export interface ExchangeFile {
   incomes?: IncomeTemplate[];
   /** события календаря по key: amount и date — плановые, paid — фактически оплачено или пришло */
   /** событие ищется по key, а без него — по названию, дате (±7 дней) и сумме */
-  calendar?: { key?: string; date?: string; title?: string; kind?: string; amount?: number; done?: boolean; paid?: number; paidFrom?: string; paidDate?: string; reset?: boolean; approx?: boolean; exact?: boolean; planned?: string; dateMode?: string; accountId?: string; economicType?: CalEvent['economicType']; accrualPeriod?: string; nominalDate?: string; expectedPayDate?: string; actualPayDate?: string; confidence?: CalEvent['confidence'] }[];
+  calendar?: { key?: string; date?: string; title?: string; kind?: string; amount?: number; done?: boolean; paid?: number; paidFrom?: string; paidDate?: string; reset?: boolean; resetAmount?: boolean; approx?: boolean; exact?: boolean; planned?: string; dateMode?: string; accountId?: string; economicType?: CalEvent['economicType']; projection?: CalEvent['projection']; accrualPeriod?: string; nominalDate?: string; expectedPayDate?: string; actualPayDate?: string; confidence?: CalEvent['confidence'] }[];
   /** разовые платежи и поступления */
   events?: ({ key?: string; date?: string; title?: string; amount?: number; kind?: 'payment' | 'income'; dateMode?: CalEvent['dateMode']; note?: string; debtId?: string } & Del)[];
   expensesFrom?: string;
@@ -212,8 +212,10 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
         // сумма или дата внесены в приложении вручную — это не оценка
         ...(s.overrides[e.key] ? { exact: true } : {}), ...(e.planned ? { planned: e.planned } : {}),
         ...(e.accountId ? { accountId: e.accountId } : {}), ...(e.economicType ? { economicType: e.economicType } : {}),
+        ...(e.projection ? { projection: e.projection } : {}),
         ...(e.confidence ? { confidence: e.confidence } : {}),
-        ...(e.accrualPeriod ? { accrualPeriod: e.accrualPeriod, nominalDate: e.nominalDate, expectedPayDate: e.expectedPayDate, actualPayDate: m?.done ? paidOn(e, m) : undefined } : {}),
+        ...(e.accrualPeriod ? { accrualPeriod: e.accrualPeriod, nominalDate: e.nominalDate, expectedPayDate: e.expectedPayDate,
+          actualPayDate: m?.done ? paidOn(e, m) : e.payroll?.actualPayDate } : {}),
         done: !!m?.done, ...(m?.done && m.amount != null ? { paid: m.amount } : {}), ...(m?.paidFrom ? { paidFrom: m.paidFrom } : {}),
         ...(m?.done ? { paidDate: paidOn(e, m) } : {}),
       };
@@ -575,6 +577,10 @@ const stepCalendar: Step = (f, s, ctx) => {
   const overrides = { ...s.overrides };
   let mc = false, oc = false;
   for (const p of f.calendar) {
+    if ((p.resetAmount || p.projection || p.economicType === 'non_income') && (!p.key || !known.has(p.key))) {
+      lines.push(`Не найден точный ключ ${p.key ?? ''}, изменение пропущено`);
+      continue;
+    }
     const e = findEvent(p, list, known);
     if (!e) {
       if (p.key || p.title) lines.push(`Не нашёл в календаре: ${p.title ?? p.key}${isDate(p.date) ? ` ${ddmm(p.date)}` : ''}, пропускаю`);
@@ -587,8 +593,14 @@ const stepCalendar: Step = (f, s, ctx) => {
     }
     const mark = marks[e.key];
     const recorded = s.accountBook?.operations.find(op => op.eventKey === e.key && op.status === 'confirmed');
-    if (recorded && (p.done === false || (p.done === true && ((p.paid != null && p.paid !== recorded.amount) || (p.paidDate && p.paidDate !== recorded.date))))) {
+    const historical = s.accountBook?.historicalLoans?.find(op => op.eventKey === e.key);
+    if ((recorded || historical) && (p.done === false || (p.done === true &&
+        ((p.paid != null && p.paid !== (recorded ?? historical)?.amount) || (p.paidDate && p.paidDate !== (recorded ?? historical)?.date))))) {
       lines.push(`${name}: даты и суммы подтверждённой операции меняются в журнале`);
+      continue;
+    }
+    if (p.done === true && !mark?.done && (e.payroll?.documented || e.projection === 'internal_transfer')) {
+      lines.push(`${name}: эта строка не создаёт движения денег`);
       continue;
     }
     if (p.done === true) {
@@ -608,11 +620,22 @@ const stepCalendar: Step = (f, s, ctx) => {
       lines.push(`${name}: снять отметку`);
     }
     if (p.done !== true) {
-      const o: { amount?: number; date?: string } = { ...overrides[e.key] };
+      const o = { ...overrides[e.key] };
       const changes: string[] = [];
-      if (isNum(p.amount) && Math.abs(p.amount - e.amount) >= 1) { o.amount = p.amount; changes.push(`сумма ${arrow(money(e.amount), money(p.amount))}`); }
+      if (p.resetAmount && !mark?.done && o.amount != null) { delete o.amount; changes.push('вернуть расчётную сумму'); }
+      if (!p.resetAmount && isNum(p.amount) && Math.abs(p.amount - e.amount) >= 1) { o.amount = p.amount; changes.push(`сумма ${arrow(money(e.amount), money(p.amount))}`); }
       if (isDate(p.date) && p.date !== e.date) { o.date = p.date; changes.push(`дата ${arrow(ddmm(e.date), ddmm(p.date))}`); }
-      if (changes.length) { overrides[e.key] = o; oc = true; lines.push(`${name}: ${changes.join(', ')}`); }
+      if (['conditional', 'internal_transfer', 'review'].includes(p.projection ?? '') && o.projection !== p.projection) {
+        o.projection = p.projection; changes.push(p.projection === 'conditional' ? 'только при подтверждении условий' :
+          p.projection === 'internal_transfer' ? 'внутренний перевод без расхода' : 'предварительно, нужна сверка');
+      }
+      if (p.economicType === 'non_income' && e.kind === 'income' && o.economicType !== 'non_income') {
+        o.economicType = 'non_income'; changes.push('исключить из доходов, сохранить денежную историю');
+      }
+      if (changes.length) {
+        if (Object.keys(o).length) overrides[e.key] = o; else delete overrides[e.key];
+        oc = true; lines.push(`${name}: ${changes.join(', ')}`);
+      }
     }
   }
   return { lines, patch: { ...(mc ? { marks } : {}), ...(oc ? { overrides } : {}) } };
@@ -762,6 +785,36 @@ const stepAccountBook: Step = (f, s, ctx) => {
     lines.push(`Счёт ${next.name}${balance ? ` · сверка ${balance.date}, ${money(balance.amount)}` : ''}`);
   }
   let book = { ...base, accounts };
+  if (Array.isArray(incoming.historicalLoans)) {
+    const history = new Map((book.historicalLoans ?? []).map(loan => [loan.eventKey, loan]));
+    for (const loan of incoming.historicalLoans) {
+      if (!loan || typeof loan.eventKey !== 'string' || history.has(loan.eventKey) ||
+          !validDate(loan.date) || loan.date > ctx.now || !validAmount(loan.amount) || loan.amount <= 0 ||
+          !s.debts.some(d => d.id === loan.debtId)) continue;
+      const event = s.oneOff.find(e => e.key === loan.eventKey && e.kind === 'income');
+      const mark = s.marks[loan.eventKey];
+      const recorded = book.operations.find(op => op.eventKey === loan.eventKey);
+      if (recorded || !event || !mark?.done || paidOn(event, mark) !== loan.date ||
+          cents(mark.amount ?? event.amount) !== cents(loan.amount)) {
+        lines.push(`Классификация ${loan.eventKey} пропущена: сверьте отметку или существующую операцию`);
+        continue;
+      }
+      history.set(loan.eventKey, { eventKey: loan.eventKey, debtId: loan.debtId, date: loan.date, amount: loan.amount });
+      lines.push(`Полученный заём ${ddmm(loan.date)} · ${money(loan.amount)} · категория без движения денег`);
+    }
+    if (history.size !== (base.historicalLoans?.length ?? 0)) book = { ...book, historicalLoans: [...history.values()] };
+  }
+  if (incoming.creditChargeKinds && typeof incoming.creditChargeKinds === 'object') {
+    const creditChargeKinds = { ...book.creditChargeKinds };
+    for (const expense of s.expenses) {
+      if (expense.source !== 'credit') continue;
+      const kind = incoming.creditChargeKinds[expense.id];
+      if ((kind !== 'fee' && kind !== 'interest') || creditChargeKinds[expense.id] === kind) continue;
+      creditChargeKinds[expense.id] = kind;
+      lines.push(`Списание по кредитке ${ddmm(expense.date)} · ${money(expense.amount)} · ${kind === 'fee' ? 'комиссия' : 'проценты'}`);
+    }
+    if (!same(creditChargeKinds, book.creditChargeKinds ?? {})) book = { ...book, creditChargeKinds };
+  }
   if (Array.isArray(incoming.splitPlans)) for (const p of incoming.splitPlans) {
     if (!validSplitPlan(p, s.debts) || same(book.splitPlans.find(x => x.id === p.id), p)) continue;
     book = { ...book, splitPlans: [...book.splitPlans.filter(x => x.id !== p.id), p] };
@@ -824,21 +877,32 @@ const stepWork: Step = (f, s) => {
     if (old?.status === 'taken' || (old?.status === 'approved' && v.status === 'planned')) continue;
     vacations.set(v.id, { ...old, ...v });
   }
+  const actual = { ...base?.actual };
+  for (const [key, record] of Object.entries(incoming.actual ?? {})) {
+    const former = actual[key];
+    actual[key] = { ...record, ...Object.fromEntries(Object.entries(former ?? {}).filter(([, value]) => value != null)) };
+  }
   const next: PayrollProfile = {
     from: incoming.from ?? base?.from ?? '',
     rates: [...rates.values()].sort((a, b) => a.from.localeCompare(b.from)),
     accountId: incoming.accountId ?? base?.accountId,
     advancesBy: incoming.advancesBy ?? base?.advancesBy,
+    cautiousUnit2027: incoming.cautiousUnit2027 ?? base?.cautiousUnit2027,
     workingHours: { ...base?.workingHours, ...incoming.workingHours },
     absenceHours: { ...base?.absenceHours, ...incoming.absenceHours },
+    attendance: { ...base?.attendance, ...incoming.attendance },
     vacations: [...vacations.values()], vacationDaysRemaining: incoming.vacationDaysRemaining ?? base?.vacationDaysRemaining,
-    taxBase: { ...base?.taxBase, ...incoming.taxBase }, deductions: { ...base?.deductions, ...incoming.deductions },
-    actual: { ...incoming.actual, ...base?.actual },
+    taxBase: { ...base?.taxBase, ...Object.fromEntries(Object.entries(incoming.taxBase ?? {})
+      .filter(([year, tax]) => tax && (!base?.taxBase?.[year] || tax.asOf >= base.taxBase[year].asOf))) },
+    deductions: { ...base?.deductions, ...incoming.deductions }, actual,
+    extras: { ...base?.extras, ...incoming.extras }, payDates: { ...base?.payDates, ...incoming.payDates },
+    aliases: { ...base?.aliases, ...incoming.aliases },
   };
   if (!validPayroll(next) || (next.accountId && !accountOptions(s.accountBook ?? EMPTY_BOOK).some(a => a.id === next.accountId))
       || same(base, next)) return { lines: [], patch: {} };
   const details = [
     `Модель начисления с ${next.from}`,
+    ...(same(base?.actual ?? {}, actual) ? [] : [`Сверенных сведений о выплатах: ${Object.keys(actual).length}. Остатки не меняются.`]),
     ...next.rates.filter(r => !same(base?.rates.find(a => a.from === r.from), r)).map(r =>
       `Ставка с ${r.from} · расчётная единица ${money(r.unit)} · ${r.confidence === 'confirmed' ? 'сверена' : 'оценка'}`),
     ...(next.vacations ?? []).filter(v => !same(base?.vacations?.find(a => a.id === v.id), v)).map(v =>

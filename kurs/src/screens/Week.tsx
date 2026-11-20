@@ -15,7 +15,7 @@ import { haptic } from '../components/haptics';
 import { Roll, spring } from '../components/motion';
 import { QUICK_COLOR, runQuick } from '../components/TabBar';
 import { CAT_COLOR, Money } from '../components/ui';
-import { eventsBetween } from '../domain/calendar';
+import { actionableEvent, eventsBetween } from '../domain/calendar';
 import { activeBridge, bridgeState, weekMoney } from '../domain/bridge';
 import { addDays, dayMonth, ddmm, fromKey, monthKey, plural, weekday, weekdayFull, weekRange, weekStart } from '../domain/dates';
 import { heldKeys, transferPlan } from '../domain/ledger';
@@ -212,7 +212,7 @@ export function Week() {
       });
     }
     const held = heldKeys(reserveLog, marks);
-    const due = eventsBetween(cal, addDays(now, -45), now).filter(e => !marks[e.key]?.done);
+    const due = eventsBetween(cal, addDays(now, -45), now).filter(e => !marks[e.key]?.done && actionableEvent(e));
     for (const e of due) {
       const old = e.date < now;
       if (e.kind === 'payment') {

@@ -1,12 +1,13 @@
 import { useCoverage } from '../components/Coverage';
+import { annualIncome, INCOME_GROUPS } from '../domain/annualIncome';
 import { compare2027Coverage } from '../domain/coverage';
 import { useMemo, useState } from 'react';
 import { Field, Money, PrimaryButton, SecondaryButton, Segmented, Sheet } from '../components/ui';
 import { accountOptions, LIFE_ACCOUNT, validDate } from '../domain/accounts';
-import { eventsBetween } from '../domain/calendar';
-import { addDays, ddmmyyyy, monthKey } from '../domain/dates';
+import { cashIncomeEvent, eventsBetween } from '../domain/calendar';
+import { ddmmyyyy } from '../domain/dates';
 import { parseAmount } from '../domain/money';
-import { accrual, payComponents, UNIT_REFERENCE, vacationDays, vacationGross, workPayments, type PayrollProfile, type PayRate, type Vacation } from '../domain/payroll';
+import { payComponents, payRateOn, progressiveTax, UNIT_2027, UNIT_REFERENCE, vacationDays, vacationGross, with2027Unit, type PayrollProfile, type PayRate, type Vacation } from '../domain/payroll';
 import { uid, useStore } from '../store/store';
 import { toast, useCal, useToday, useUi } from '../store/ui';
 
@@ -44,37 +45,103 @@ function UnitCoverage() {
 function Income({ profile, now, calendar }: { profile: PayrollProfile; now: string; calendar: boolean }) {
   const set = useUi(s => s.set);
   const cal = useCal();
-  const from = addDays(now, -45);
-  const to = addDays(now, 120);
-  const events = useMemo(() => eventsBetween(cal, from, to).filter(e => e.kind === 'income'), [cal, from, to]);
-  const payments = useMemo(() => workPayments(profile, from, to, cal.marks), [profile, from, to, cal.marks]);
-  const upcoming = events.find(e => !cal.marks?.[e.key]?.done && e.date >= now && e.accrualPeriod);
-  const relevant = calendar ? events : [...events.filter(e => cal.marks?.[e.key]?.done && e.accrualPeriod).slice(-3), ...(upcoming ? [upcoming] : [])];
-  const summary = accrual(profile, monthKey(now));
+  const [year, setYear] = useState<'2026' | '2027'>(now.startsWith('2026') ? '2026' : '2027');
+  const [unit, setUnit] = useState<'proposal' | 'law'>('proposal');
+  const law = useMemo(() => ({ ...cal, work: with2027Unit(profile, UNIT_2027[0].unit) }), [cal, profile]);
+  const historical = useMemo(() => annualIncome(cal, 2026, now, 'base'), [cal, now]);
+  const main = useMemo(() => annualIncome(cal, 2027, now, 'base'), [cal, now]);
+  const cautious = useMemo(() => annualIncome(law, 2027, now, 'cautious'), [law, now]);
+  const events = useMemo(() => eventsBetween(year === '2027' && unit === 'law' ? law : cal, year + '-01-01', year + '-12-31')
+    .filter(cashIncomeEvent), [cal, law, year, unit]);
+  const upcoming = events.find(e => !cal.marks?.[e.key]?.done && !e.payroll?.documented && e.date >= now);
+  const relevant = calendar ? events : upcoming ? [upcoming] : [];
+  const firstRate = payRateOn(profile, '2026-12-31');
+  const nextRate = payRateOn(profile, '2027-01-01');
+  const result = year === '2026' ? historical : main;
+  const fmtMonth = (key: string) => new Intl.DateTimeFormat('ru', { month: 'long', timeZone: 'UTC' }).format(new Date(key + '-01'));
+  const amount = (value: number | null) => value == null ? '—' : <Money value={value} />;
+
   return <>
-    <p className="px-1 text-[13px] text-muted">{summary.days} рабочих дней в текущем месяце · {summary.firstDays} в первой половине.</p>
-    {relevant.length === 0 && <p className="px-1 text-[14px] text-muted">В этом периоде выплат по модели нет.</p>}
-    <div className="card divide-y divide-line">
+    <Segmented value={year} onChange={setYear} options={[{ id: '2026', label: '2026' }, { id: '2027', label: '2027' }]} />
+    {calendar && year === '2027' && <Segmented value={unit} onChange={setUnit} options={[
+      { id: 'proposal', label: 'Основной' }, { id: 'law', label: 'По закону' },
+    ]} />}
+    {!calendar && <>
+      <div className="card space-y-3 p-4">
+        <h3 className="font-medium">Доходы в {year}</h3>
+        <div className="grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 text-[13px]">
+          <span>Фактически зачислено</span><b className="text-right">{amount(result.actual)}</b>
+          <span>Ожидается до конца года</span><b className="text-right">{amount(result.expected || null)}</b>
+          <span>{year === '2026' ? 'Известные суммы и остаток года' : 'Основной прогноз за год'}</span><b className="text-right">{amount(result.total)}</b>
+          {year === '2027' && <><span>Осторожный прогноз за год</span><b className="text-right">{amount(cautious.total)}</b></>}
+        </div>
+        <p className="text-[12.5px] text-muted">{year === '2026' ? 'Частичные подтверждённые данные. Пропущенные листки и банковские зачисления не реконструированы как факт.'
+          : 'Цифры по году получения денег. Основной сценарий включает условные премии. Осторожный использует расчётную единицу по закону и 80% оценки запланированных отпускных, без неподтверждённых дополнительных премий.'}</p>
+        {year === '2026' && result.missingEstimate > 0 && <p className="text-[12.5px] text-muted">
+          Оценка регулярных выплат за прошедшие месяцы без факта · <Money value={result.missingEstimate} approx />. В итог не включена.
+        </p>}
+        <details className="text-[13px]">
+          <summary className="text-sea">Из чего складываются доходы</summary>
+          <div className="mt-2 divide-y divide-line">
+            {result.breakdown.filter(row => row.total != null).map(row => <div className="py-2" key={row.group}>
+              <p>{INCOME_GROUPS[row.group]}</p>
+              <p className="text-muted">Факт {amount(row.actual)} · ожидается {amount(row.expected || null)}</p>
+            </div>)}
+          </div>
+        </details>
+      </div>
+      {year === '2026' && firstRate && <RateCard rate={firstRate} label="Полный отработанный месяц" />}
+      {year === '2027' && nextRate && <>
+        <RateCard rate={nextRate} label="Основной сценарий 2027" />
+        {nextRate.unit !== UNIT_2027[0].unit && <RateCard rate={{ ...nextRate, unit: UNIT_2027[0].unit }} label="Действующая единица по закону" />}
+      </>}
+      <div className="card overflow-hidden p-3">
+        <table className="w-full text-[12px] tabular-nums">
+          <caption className="pb-2 text-left text-[14px] font-medium">Зачисления по месяцам</caption>
+          <thead><tr className="text-muted"><th className="text-left font-medium">Месяц</th>
+            <th className="text-right font-medium">{year === '2026' ? 'Факт' : 'Основной'}</th>
+            <th className="text-right font-medium">{year === '2026' ? 'Ожидается' : 'Осторожный'}</th></tr></thead>
+          <tbody>{result.months.map((row, index) => <tr className="border-t border-line" key={row.month}>
+            <th className="py-1.5 text-left font-normal">{fmtMonth(row.month)}</th>
+            <td className="pl-2 text-right">{amount(year === '2026' ? row.actual : row.total)}</td>
+            <td className="pl-2 text-right">{amount(year === '2026' ? row.expected || null : cautious.months[index].total)}</td>
+          </tr>)}</tbody>
+        </table>
+      </div>
+    </>}
+    {calendar && relevant.length === 0 && <p className="px-1 text-[14px] text-muted">В этом периоде выплат нет.</p>}
+    {relevant.length > 0 && <div className="card divide-y divide-line">
       {relevant.map(e => {
-        const pay = payments.find(p => p.key === e.key || (p.accrualPeriod === e.accrualPeriod && p.kind === e.incomeKind));
+        const pay = e.payroll;
         const mark = cal.marks?.[e.key];
-        const actual = mark?.done ? mark.amount : undefined;
-        const expected = pay?.recordedForecast ?? pay?.net ?? e.amount;
+        const actual = mark?.done ? mark.amount ?? e.amount : pay?.actualNet;
         return <button type="button" key={e.key} className="block w-full px-4 py-3 text-left" onClick={() => set({ workSheet: false, event: e })}>
           <div className="flex justify-between gap-2"><span className="font-medium">{e.title}</span><Money value={actual ?? e.amount} approx={actual == null} /></div>
-          <div className="mt-1 text-[13px] text-muted">{ddmmyyyy(e.date)}
-            {e.accrualPeriod && <> · период {e.accrualPeriod}</>}{e.nominalDate && e.nominalDate !== e.date && <> · по графику {ddmmyyyy(e.nominalDate)}</>}
-            {' · '}{mark?.done ? 'поступление отмечено' : e.economicType === 'loan_disbursement' ? 'заём' : e.confidence === 'tentative' ? 'предварительно' : 'прогноз'}
+          <div className="mt-1 text-[13px] text-muted">
+            {e.dateMode === 'month' ? fmtMonth(e.date.slice(0, 7)) : ddmmyyyy(e.date)}
+            {e.accrualPeriod && <> · расчётный период {e.accrualPeriod}</>}
+            {' · '}{mark?.done ? 'поступление отмечено' : pay?.documented ? 'по документу' : 'прогноз'}
           </div>
-          {pay && <p className="mt-1 text-[12px] text-muted">Начислено <Money value={pay.gross} /> · НДФЛ <Money value={pay.tax} />
-            {actual != null && <> · отклонение <Money value={actual - expected} sign /></>}
-            {pay.netRange && <> · без сверки базы ориентир на руки <Money value={pay.netRange[0]} />–<Money value={pay.netRange[1]} /></>}
+          {pay && <p className="mt-1 text-[12px] text-muted">
+            {(!pay.documented || pay.actualGrossKnown) && <>Начислено <Money value={pay.gross} /> · </>}
+            {(!pay.documented || pay.actualTaxKnown) && <>НДФЛ <Money value={pay.tax} /> · </>}
+            {pay.documentarySource ?? pay.source}
           </p>}
         </button>;
       })}
-    </div>
-    <p className="px-1 text-[13px] text-muted">Аванс 25-го, окончательный расчёт 10-го, ежемесячная премия 15-го. При выходном дата сдвигается на предыдущий рабочий день.</p>
+    </div>}
   </>;
+}
+
+function RateCard({ rate, label }: { rate: PayRate; label: string }) {
+  const components = payComponents(rate);
+  return <div className="card space-y-1 p-4 text-[13px]">
+    <h3 className="font-medium">{label}</h3>
+    <p>Единица <Money value={rate.unit} /> · должностной оклад <Money value={components.position} /> · чин <Money value={components.rank} /></p>
+    <p>Выслуга <Money value={components.seniority} /> · особые условия <Money value={components.conditions} /> · премия <Money value={components.bonus} /></p>
+    <p><b><Money value={components.total} /> начислено</b> · <Money value={components.total - progressiveTax(components.total)} approx /> при 13%</p>
+    <p className="text-[12.5px] text-muted">Аванс 25-го · остаток оклада 10-го · премия 15-го. НДФЛ в прогнозе считается по накопленной базе года выплаты.</p>
+  </div>;
 }
 
 const fields = [
@@ -180,7 +247,11 @@ function Vacations({ profile }: { profile: PayrollProfile }) {
   const update = (patch: Partial<Vacation>) => setV(old => old ? { ...old, ...patch } : old);
   const vacations = profile.vacations ?? [];
   const formulaGross = v && validDate(v.from) && validDate(v.to) && v.to >= v.from ? vacationGross(v, profile) : null;
-  const total = vacations.reduce((sum, row) => sum + vacationDays(row, profile.workingHours).calendar, 0);
+  const daysByYear = new Map<string, number>();
+  for (const row of vacations) {
+    const year = row.from.slice(0, 4);
+    daysByYear.set(year, (daysByYear.get(year) ?? 0) + vacationDays(row, profile.workingHours).calendar);
+  }
   const save = () => {
     const list = v ? [...vacations.filter(r => r.id !== v.id), v] : vacations;
     if (!saveWork({ ...profile, vacations: list, vacationDaysRemaining: parseAmount(remaining) ?? undefined })) { toast('Проверьте даты и пересечения'); return; }
@@ -188,12 +259,17 @@ function Vacations({ profile }: { profile: PayrollProfile }) {
   };
   return <>
     <div className="card space-y-3 p-4">
-      <p>В плане <b>{total} дн.</b>{profile.vacationDaysRemaining != null && <> · остаток по кадровым данным {profile.vacationDaysRemaining} дн.</>}</p>
+      <p>{[...daysByYear].map(([year, days]) => <span className="mr-3" key={year}>{year} · <b>{days} дн.</b></span>)}
+        {profile.vacationDaysRemaining != null && <>Остаток по кадровым данным {profile.vacationDaysRemaining} дн.</>}</p>
       {vacations.map(row => {
         const days = vacationDays(row, profile.workingHours);
         return <button key={row.id} type="button" className="block text-left text-[14px] text-sea" onClick={() => setV(row)}>
           {ddmmyyyy(row.from)} — {ddmmyyyy(row.to)} · дней {days.calendar} · {row.status === 'approved' ? 'утверждён' : row.status === 'taken' ? 'отгулян' : 'запланирован'}
           {row.allowance && ' · три оклада'}
+          <span className="block text-[12.5px] text-muted">
+            {row.payDate && <>Дата выплаты {ddmmyyyy(row.payDate)} · </>}
+            {vacationGross(row, profile) != null && <><Money value={vacationGross(row, profile)!} approx={row.status === 'planned'} /> до НДФЛ</>}
+          </span>
         </button>;
       })}
       <SecondaryButton className="w-full" onClick={() => setV({ id: uid(), from: now, to: now, status: 'planned' })}>Добавить период</SecondaryButton>
@@ -211,7 +287,7 @@ function Vacations({ profile }: { profile: PayrollProfile }) {
         <label className="flex gap-2 text-[14px]"><input type="checkbox" checked={!!v.allowance} onChange={e => update({ allowance: e.target.checked })} /> Единовременная выплата трёх окладов</label>
         <Field label="Дата выплаты по документу"><input className="field" type="date" value={v.payDate ?? ''} onChange={e => update({ payDate: e.target.value || undefined })} /></Field>
         <Field label="Дневное содержание до налога" hint="Возьмите из расчёта работодателя. Без основания сумма считается предварительной.">
-          <input className="field" inputMode="decimal" value={v.dailyGross ?? ''} onChange={e => update({ dailyGross: parseAmount(e.target.value) ?? undefined })} />
+          <input className="field" inputMode="decimal" value={v.dailyGross ?? ''} onChange={e => update({ dailyGross: parseAmount(e.target.value) ?? undefined, gross: undefined, estimateUnit: undefined })} />
         </Field>
         <Field label="Основание дневного расчёта"><input className="field" value={v.basis ?? ''} onChange={e => update({ basis: e.target.value || undefined })} /></Field>
         <details className="text-[13px]">

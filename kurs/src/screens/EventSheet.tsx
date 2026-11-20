@@ -4,8 +4,8 @@ import { CalendarDays, Undo2 } from 'lucide-react';
 import { useState } from 'react';
 import { AmountInput, Money, PrimaryButton, Row, SecondaryButton, Sheet } from '../components/ui';
 import { GROUP_LABEL, whenText } from '../components/rows';
-import { eventGroup } from '../domain/calendar';
-import { addDays, dayMonth, relDays, weekdayFull } from '../domain/dates';
+import { actionableEvent, cashIncomeEvent, eventGroup } from '../domain/calendar';
+import { addDays, dayMonth, ddmmyyyy, relDays, weekdayFull } from '../domain/dates';
 import { heldKeys, ledger } from '../domain/ledger';
 import { parseAmount, rub } from '../domain/money';
 import type { CalEvent } from '../domain/types';
@@ -13,7 +13,7 @@ import { useStore } from '../store/store';
 import { toast, useToday, useUi } from '../store/ui';
 
 const BONUS_KINDS = ['bonusQuarter', 'bonusYear', 'vacation', 'thirteenth'];
-export const isBonus = (e: CalEvent) => e.kind === 'income' && !!e.incomeKind && BONUS_KINDS.includes(e.incomeKind);
+export const isBonus = (e: CalEvent) => cashIncomeEvent(e) && !!e.incomeKind && BONUS_KINDS.includes(e.incomeKind);
 
 export function EventSheet() {
   const e = useUi(s => s.event);
@@ -33,6 +33,10 @@ function Body({ e }: { e: CalEvent }) {
   const { markEvent, setOverride, clearOverride, updateDebt } = useStore.getState();
   const set = useUi(s => s.set);
   const group = eventGroup(e);
+  const pay = e.payroll;
+  const locked = e.economicType === 'loan_disbursement' || pay?.documented ||
+    e.projection === 'conditional' || e.projection === 'internal_transfer';
+
   // пополнение по воскресеньям: до лимита следующей недели минус остаток уходящей
   const monday = e.kind === 'weekly' ? addDays(e.date, -6) : '';
   const [amount, setAmount] = useState(() => {
@@ -85,14 +89,31 @@ function Body({ e }: { e: CalEvent }) {
           className={`figure block text-[40px] leading-none ${e.kind === 'income' ? 'text-pos' : ''}`} />
         <div className="mt-3 divide-y divide-line">
           <Row label="Когда">{e.dateMode === 'month' ? 'в течение месяца' : `${whenText(e)}, ${weekdayFull(e.date)}`}</Row>
-          {e.dateMode !== 'month' && !mark?.done && <Row label="Осталось">{relDays(now, e.date)}</Row>}
+          {pay && <>
+            <Row label="Расчётный период">{pay.accrualPeriod}</Row>
+            <Row label="Номинальная дата">{ddmmyyyy(pay.nominalDate)}</Row>
+            <Row label="Ожидаемая дата">{pay.documented && !pay.actualPayDate ? 'Дата требует сверки' : ddmmyyyy(pay.expectedPayDate)}</Row>
+            {pay.alternatePayDate && <Row label="Альтернативная дата">{ddmmyyyy(pay.alternatePayDate)} · после подтверждения</Row>}
+            <Row label="Дата поступления">{pay.actualPayDate ? ddmmyyyy(pay.actualPayDate) : 'Не подтверждена'}</Row>
+            <Row label="Начислено">{!pay.documented || pay.actualGrossKnown ? <Money value={pay.gross} /> : 'Нет данных'}</Row>
+            <Row label="НДФЛ">{!pay.documented || pay.actualTaxKnown ? <Money value={pay.tax} /> : 'Нет данных'}</Row>
+            <Row label="Основание">{pay.documentarySource ?? pay.source}</Row>
+          </>}
+          {e.dateMode !== 'month' && !mark?.done && actionableEvent(e) && <Row label="Осталось">{relDays(now, e.date)}</Row>}
           {debt && <Row label="Остаток долга"><button type="button" onClick={() => set({ event: null, debt: debt.id })} className="text-sea"><Money value={debt.balance} /></button></Row>}
           {override && <Row label="Изменено вручную"><button type="button" onClick={() => { clearOverride(e.key); toast('Вернул расчётные сумму и дату'); close(); }} className="text-sea">вернуть расчёт</button></Row>}
         </div>
         {e.note && <p className="mt-3 rounded-xl bg-sea/10 px-3 py-2.5 text-[13px] leading-snug">{e.note}</p>}
       </div>
 
-      {mark?.done ? (
+      {locked ? (
+        <p className="rounded-2xl bg-surface-2 px-4 py-3 text-[14px] text-muted">
+          {e.economicType === 'loan_disbursement' ? 'Подтверждённое заёмное поступление. В доходы не входит.'
+            : pay?.documented ? 'Историческая выплата по документам. Банковское движение не создаётся.'
+            : e.projection === 'internal_transfer' ? 'Пополнение своего счёта. В обязательные расходы не входит.'
+            : 'Условная досрочка. После прихода денег допустимую сумму проверяет осторожный прогноз.'}
+        </p>
+      ) : mark?.done ? (
         <>
           <p className="rounded-2xl bg-pos/10 px-4 py-3 text-[14px] text-pos">
             {e.kind === 'income' ? 'Пришло' : e.kind === 'weekly' ? 'Долито' : 'Оплачено'}: {rub(mark.amount ?? e.amount)}

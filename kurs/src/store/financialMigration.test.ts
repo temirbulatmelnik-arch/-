@@ -93,3 +93,28 @@ describe('обратная совместимость и подтвержден�
     expect(file.status?.coverage).toMatchObject({ scenario: 'base' });
   });
 });
+
+it('classifies historical loans and card fees without moving balances or repeating a marked payment', async () => {
+  const calc = await import('../domain/calendar');
+  const summary = await import('../domain/accounts');
+  const key = 'old-unlabelled';
+  const event = { key, title: 'Перевод', kind: 'income', date, amount: 780, dateMode: 'exact' } as const;
+  const fee = { id: 'fee-1', source: 'credit', category: 'fixed', date, amount: 19, createdAt: at } as const;
+  const store = await reopen(5, { ...old, oneOff: [event], expenses: [fee], accountBook: EMPTY_BOOK,
+    marks: { ...old.marks, [key]: { done: true, paidDate: date, at: date + 'T11:00:00Z', amount: 780 } } });
+  const before = store.getState();
+  const patch = exchange({ accountBook: { historicalLoans: [
+    { eventKey: key, date, amount: 999, debtId: debt.id },
+    { eventKey: key, date, amount: 780, debtId: debt.id },
+  ], creditChargeKinds: { 'fee-1': 'fee' } } });
+  const importBook = () => store.getState().applySync(applyExchange(patch, store.getState(), date, new Set(['accountBook']), () => 'rand'), 'Обмен');
+  importBook();
+  const after = store.getState();
+  expect(calc.eventsBetween(after, date, date).filter(e => e.key === key)).toMatchObject([{ economicType: 'loan_disbursement', amount: 780 }]);
+  expect(summary.monthDebtActivity(after.accountBook, after.expenses, date)).toMatchObject({ loanDisbursements: 780, creditPurchases: 0, fees: 19 });
+  expect(ledger(after)).toEqual(ledger(before));
+  expect(after.marks).toEqual(before.marks);
+  expect(after.expenses).toEqual(before.expenses);
+  expect(after.accountBook.operations).toEqual([]);
+  expect(previewExchange(patch, after, date)).toEqual([]);
+});

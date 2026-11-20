@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Field, Money, PrimaryButton, SecondaryButton, Segmented, Sheet } from '../components/ui';
-import { accountOptions, cashAccount, cents, LIFE_ACCOUNT, RESERVE_ACCOUNT, validDate, type AccountOperation, type CashAccount } from '../domain/accounts';
+import { accountOptions, cashAccount, cents, LIFE_ACCOUNT, monthDebtActivity, RESERVE_ACCOUNT, validDate, type AccountOperation, type CashAccount } from '../domain/accounts';
 import { eventsBetween } from '../domain/calendar';
 import { addDays, ddmmyyyy, monthKey } from '../domain/dates';
 import { parseAmount } from '../domain/money';
@@ -84,6 +84,7 @@ function AccountForm({ account, close }: { account: CashAccount; close: () => vo
 function AccountSelect({ label, value, set }: { label: string; value: string; set: (value: string) => void }) {
   const book = useStore(s => s.accountBook);
   return <Field label={label}><select className="field" value={value} onChange={e => set(e.target.value)}>
+    {!value && <option value="">Выберите счёт по выписке</option>}
     {accountOptions(book).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
   </select></Field>;
 }
@@ -95,6 +96,7 @@ type JournalKind = keyof typeof LABELS;
 function Journal() {
   const now = useToday();
   const { accountBook: book, debts, expenses, oneOff, marks } = useStore();
+  const activity = monthDebtActivity(book, expenses, now);
   const [type, setType] = useState<JournalKind>('transfer');
   const [date, setDate] = useState(now);
   const [time, setTime] = useState('');
@@ -119,6 +121,8 @@ function Journal() {
   const [cashBooked, setCashBooked] = useState(false);
   const [preview, setPreview] = useState<AccountOperation | null>(null);
   const audit = book.loanReviews?.find(r => r.id === auditId);
+  const historical = type === 'loan_disbursement' ? book.historicalLoans?.find(r => r.eventKey === oldKey) : undefined;
+  const checkBalances = !!(audit || historical);
   const auditDone = (id: string) => book.operations.some(e => e.type === 'loan_disbursement' && e.auditId === id && e.status === 'confirmed');
   const eligible = oneOff.filter(e => e.kind === 'income' && marks[e.key]?.done &&
     !book.operations.some(op => op.eventKey === e.key) && (!audit || (
@@ -130,7 +134,7 @@ function Journal() {
 
   const prepare = () => {
     const value = parseAmount(amount);
-    if (audit && (!auditDebt || !auditCash)) { toast('Укажите по выпискам, вошла ли операция в остатки счёта и долга'); return; }
+    if (checkBalances && (!auditDebt || !auditCash || !accountId || !debtId)) { toast('Укажите счёт, долг и включение операции в банковские остатки'); return; }
     if (!value || !validDate(date) || (date > now && !(type === 'transfer' && scheduled))) { toast('Укажите сумму и дату операции'); return; }
     const timestamp = time ? new Date(`${date}T${time}`) : date === now ? new Date() : undefined;
     if (timestamp && Number.isNaN(timestamp.getTime())) { toast('Проверьте время операции'); return; }
@@ -140,8 +144,8 @@ function Journal() {
       externalId: externalId.trim() || undefined };
     if (type === 'transfer') setPreview({ ...base, type, toAccountId: to });
     else if (type === 'loan_disbursement') setPreview({ ...base, type, debtId, splitPlanId: splitPlanId || undefined,
-      eventKey: oldKey || undefined, fundingSource: 'borrowed', debtBooked: audit ? auditDebt === 'yes' : debtBooked,
-      cashBooked: audit ? auditCash === 'yes' : cashBooked, auditId: audit?.id });
+      eventKey: oldKey || undefined, fundingSource: 'borrowed', debtBooked: checkBalances ? auditDebt === 'yes' : debtBooked,
+      cashBooked: checkBalances ? auditCash === 'yes' : cashBooked, auditId: audit?.id });
     else if (type === 'debt_payment') setPreview({ ...base, type, debtId, debtBooked, cashBooked, fundingSource: paymentFunding,
       principal: parseAmount(principal) ?? undefined, interest: parseAmount(interest) ?? undefined, fee: parseAmount(fee) ?? undefined });
     else if (type === 'refund') {
@@ -174,6 +178,23 @@ function Journal() {
   </div>;
 
   return <>
+    <div className="card space-y-1 p-4 text-[13px]">
+      <h3 className="font-medium">Движение по долгам за {monthKey(now)}</h3>
+      <p>Заёмные зачисления <Money value={activity.loanDisbursements} /> · траты по кредиткам <Money value={activity.creditPurchases} /></p>
+      <p>Проценты <Money value={activity.interest} /> · комиссии <Money value={activity.fees} /></p>
+      <p>Погашено тело долга <Money value={activity.principal} /></p>
+      {activity.unknownPrincipal > 0 && <p className="text-muted">Платежи без разбивки <Money value={activity.unknownPrincipal} /></p>}
+      {book.historicalLoans?.some(row => !book.operations.some(op => op.eventKey === row.eventKey)) && <details className="text-muted">
+        <summary className="text-sea">Заёмные поступления из истории календаря</summary>
+        {book.historicalLoans?.filter(row => !book.operations.some(op => op.eventKey === row.eventKey)).map(row =>
+          <button type="button" className="mt-2 block text-left text-sea" key={row.eventKey} onClick={() => {
+            setType('loan_disbursement'); setAuditId(''); setOldKey(row.eventKey); setDate(row.date);
+            setAmount(String(row.amount)); setAccountId(''); setDebtId(row.debtId); setSplitPlanId(''); setTime('');
+            setAuditCash(''); setAuditDebt(''); setExternalId(''); setNote('');
+          }}>{ddmmyyyy(row.date)} · {debts.find(d => d.id === row.debtId)?.short} · <Money value={row.amount} /> · сверить</button>)}
+        <p className="mt-2">Категория исправлена. Привязку к счёту и включение в банковские остатки нужно сверить отдельно.</p>
+      </details>}
+    </div>
     {!!book.loanReviews?.length && <div className="card divide-y divide-line px-4">
       <h3 className="py-3 font-medium">Заёмные поступления к сверке</h3>
       {book.loanReviews.map(r => <button className="flex w-full justify-between gap-2 py-3 text-left text-[13px]" key={r.id} type="button"
@@ -217,7 +238,7 @@ function Journal() {
         <option value="">Выберите покупку</option>
         {expenses.slice(-100).reverse().map(e => <option key={e.id} value={e.id}>{ddmmyyyy(e.date)} · {e.note || e.category} · {e.amount} ₽</option>)}
       </select></Field>}
-      {audit && <>
+      {checkBalances && <>
         <Field label="Уже вошло в остаток долга?"><select className="field" value={auditDebt} onChange={e => setAuditDebt(e.target.value)}>
           <option value="">Уточните по выписке</option><option value="yes">Да, вошло</option><option value="no">Нет, ещё не вошло</option>
         </select></Field>
@@ -230,9 +251,9 @@ function Journal() {
           <option value="unknown">Личные или неизвестно</option><option value="borrowed">Подтверждённый новый заём</option>
         </select>
       </Field>}
-      {!audit && (type === 'loan_disbursement' || type === 'debt_payment') &&
+      {!checkBalances && (type === 'loan_disbursement' || type === 'debt_payment') &&
         <label className="flex gap-2 text-[14px]"><input type="checkbox" checked={debtBooked} onChange={e => setDebtBooked(e.target.checked)} /> Уже включено в сверенный долг</label>}
-      {!audit && type !== 'transfer' && <label className="flex gap-2 text-[14px]"><input type="checkbox" checked={cashBooked} onChange={e => setCashBooked(e.target.checked)} /> Уже включено в сверенный денежный остаток</label>}
+      {!checkBalances && type !== 'transfer' && <label className="flex gap-2 text-[14px]"><input type="checkbox" checked={cashBooked} onChange={e => setCashBooked(e.target.checked)} /> Уже включено в сверенный денежный остаток</label>}
       <Field label="Сумма"><input className="field" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} /></Field>
       {type === 'debt_payment' && <div className="space-y-3">
         {([{ label: 'Тело долга', value: principal, set: setPrincipal }, { label: 'Проценты', value: interest, set: setInterest }, { label: 'Комиссия', value: fee, set: setFee }])

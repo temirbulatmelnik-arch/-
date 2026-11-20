@@ -90,7 +90,9 @@ export interface CalEvent {
   debtId?: string;
   incomeKind?: IncomeKind;
   accountId?: string;
-  economicType?: 'income' | 'loan_disbursement' | 'debt_payment';
+  economicType?: 'income' | 'loan_disbursement' | 'debt_payment' | 'non_income';
+  projection?: 'conditional' | 'internal_transfer' | 'review';
+  payroll?: import('./payroll').WorkPay;
   confidence?: 'confirmed' | 'regular' | 'estimate' | 'tentative';
   accrualPeriod?: string;
   nominalDate?: string;
@@ -101,6 +103,8 @@ export interface CalEvent {
   /** дата по графику, если поступление сдвинулось на рабочий день */
   planned?: string;
 }
+
+export type CalendarOverride = Pick<CalEvent, 'projection'> & { amount?: number; date?: string; economicType?: 'non_income' };
 
 export type IncomeKind = 'salary' | 'bonusMonthly' | 'advance' | 'bonusQuarter' | 'bonusYear' | 'vacation' | 'thirteenth' | 'other';
 

@@ -47,7 +47,7 @@ export function EventRow({ e, mark, now, onClick, onToggle, showDate = true }: {
   const Icon = GROUP_ICON[g];
   const hot = u === 'overdue' || u === 'soon';
   // дата прошла, а отметки нет: в прогнозе оно стоит сегодняшним днём — пометка, чтобы отметить или перенести
-  const missed = u !== 'done' && e.date < now;
+  const missed = u !== 'done' && e.date < now && !e.payroll?.documented;
   return (
     <div className={`flex items-center gap-3 px-4 py-3 ${u === 'done' ? 'opacity-55' : ''}`}>
       <button type="button" onClick={onToggle ?? onClick} aria-label={mark?.done ? 'Снять отметку' : g === 'income' ? 'Отметить: пришло' : g === 'weekly' ? 'Отметить: долито' : 'Отметить: оплачено'}
@@ -62,10 +62,16 @@ export function EventRow({ e, mark, now, onClick, onToggle, showDate = true }: {
           <span className={`block truncate text-[14.5px] font-medium ${u === 'done' ? 'line-through decoration-1' : ''}`}>{e.title}</span>
           <span className={`block text-[12px] ${hot ? 'text-neg' : missed ? 'text-warn' : 'text-muted'}`}>
             {showDate ? `${whenText(e)}, ` : e.dateMode === 'until' ? 'внести до этой даты, ' : ''}
-            {u === 'done' ? (g === 'income' ? 'пришло' : g === 'weekly' ? 'долито' : 'оплачено') : e.dateMode === 'month' ? 'дата не известна' : relDays(now, e.date)}
+            {e.economicType === 'loan_disbursement' ? 'заёмные средства'
+              : e.payroll?.documented ? 'исторический факт по документам'
+              : e.projection === 'conditional' ? 'условная досрочка'
+              : e.projection === 'internal_transfer' ? 'между своими счетами'
+              : e.projection === 'review' ? 'нужна сверка'
+              : u === 'done' ? (g === 'income' ? 'пришло' : g === 'weekly' ? 'долито' : 'оплачено')
+              : e.dateMode === 'month' ? 'дата не известна' : relDays(now, e.date)}
             {missed ? ', не отмечено' : ''}
             {e.moved && u !== 'done' ? ', дата изменена' : ''}
-            {e.planned && u !== 'done' ? `, по графику ${ddmm(e.planned)} — выходной` : ''}
+            {e.planned && u !== 'done' ? `, по графику ${ddmm(e.planned)} по общему графику` : ''}
           </span>
         </span>
         <Money value={mark?.done && mark.amount != null ? mark.amount : e.amount} approx={e.approx && !mark?.done} sign={g === 'income'}

@@ -1,7 +1,7 @@
 // Календарь платежей и поступлений: разовые события из плана + ежемесячный шаблон + воскресные пополнения карты жизни.
 import type { AccountBook } from './accounts';
 import { addDays, dayIn, monthKey, weekStart } from './dates';
-import type { CalEvent, Debt, EventMark, FixedItem, IncomeTemplate, WeeklyOverride } from './types';
+import type { CalEvent, CalendarOverride, Debt, EventMark, FixedItem, IncomeKind, IncomeTemplate, WeeklyOverride } from './types';
 import { bridgeWeek, type Bridge } from './bridge';
 import { weeklyLimit } from './plan';
 import { isRegularWork, workEvents, type PayrollProfile } from './payroll';
@@ -40,7 +40,7 @@ export interface CalendarInput {
   templateFrom: string;
   weeklyOverrides: WeeklyOverride[];
   /** точная сумма и дата платежа со скриншота банка вместо оценки */
-  overrides?: Record<string, { amount?: number; date?: string }>;
+  overrides?: Record<string, CalendarOverride>;
   /** мост на кредитке: в его недели из резерва доливают по плану моста, а не весь лимит */
   bridge?: Bridge | null;
 }
@@ -50,6 +50,16 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
   const from = addDays(rangeFrom, -35), to = addDays(rangeTo, 35);
   const out: CalEvent[] = [];
   const byId = new Map(input.debts.map(d => [d.id, d]));
+  const journalLoans = new Map(input.accountBook?.operations.filter(op => op.type === 'loan_disbursement' && op.status === 'confirmed' && op.eventKey)
+    .map(op => [op.eventKey!, op]));
+  const historicalLoans = new Map(input.accountBook?.historicalLoans?.map(op => [op.eventKey, op]));
+  const ov = input.overrides ?? {};
+  const seen = new Set<string>();
+  const push = (event: CalEvent) => {
+    if (seen.has(event.key)) return;
+    seen.add(event.key);
+    out.push(event);
+  };
   const closedBefore = (debtId: string | undefined, date: string) => {
     const d = debtId ? byId.get(debtId) : undefined;
     return !!d && d.closed && (!d.closedOn || d.closedOn < date);
@@ -58,23 +68,24 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
   for (const e of input.oneOff) {
     if (e.date < from || e.date > to) continue;
     if (e.kind === 'payment' && closedBefore(e.debtId, e.date)) continue;
-    out.push(e);
+    const incomeKind = e.incomeKind ?? (e.kind === 'income' && e.key.startsWith('inc:') ? e.key.split(':')[1] as IncomeKind : undefined);
+    push(incomeKind ? { ...e, incomeKind } : e);
   }
 
   for (let m = monthKey(from); m <= monthKey(to); m = nextMonth(m)) {
-    const push = (e: CalEvent) => { if (e.date >= from && e.date <= to) out.push(e); };
+    const within = (e: CalEvent) => { if (e.date >= from && e.date <= to) push(e); };
 
     // обязательные платежи — у каждого своя дата; работают с собственного месяца, а не с начала шаблона
     for (const f of input.fixed) {
       if (m < (f.from ?? input.templateFrom)) continue;
-      push({ key: `fix:${f.id}:${m}`, date: dayIn(m, f.day), dateMode: 'exact', kind: 'payment', title: f.name, amount: f.amount, note: f.note });
+      within({ key: `fix:${f.id}:${m}`, date: dayIn(m, f.day), dateMode: 'exact', kind: 'payment', title: f.name, amount: f.amount, note: f.note });
     }
 
     if (m < input.templateFrom) continue;
     for (const d of input.debts) {
       if (d.closed || d.balance <= 0.5) continue;
       if (d.rule.type === 'schedule') {
-        d.rule.items.filter(i => monthKey(i.date) === m).forEach((i, n) => push({
+        d.rule.items.filter(i => monthKey(i.date) === m).forEach((i, n) => within({
           key: `pay:${d.id}:${m}${n ? `:${n}` : ''}`, date: i.date, dateMode: 'exact', kind: 'payment', title: d.short, amount: i.amount, debtId: d.id,
         }));
         continue;
@@ -82,14 +93,14 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
       const amount = estimatePayment(d, m);
       if (!amount) continue;
       const card = d.kind === 'card';
-      push({
+      within({
         key: `pay:${d.id}:${m}`, date: dayIn(m, d.dueDay), dateMode: card ? 'until' : 'exact', kind: 'payment',
         title: card ? `${d.short}, минимальный` : d.short, amount, approx: d.rule.type === 'interestPlus', debtId: d.id,
       });
     }
     for (const inc of input.incomes) {
       if (inc.months && !inc.months.includes(Number(m.slice(5, 7)))) continue;
-      push({
+      within({
         key: `inc:${inc.kind}:${m}`, date: dayIn(m, inc.day), dateMode: 'approx', kind: 'income',
         title: inc.name, amount: inc.amount, approx: true, incomeKind: inc.kind,
       });
@@ -100,7 +111,7 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
   // В календаре — полный лимит как оценка; сколько долито на самом деле, записывает закрытие недели.
   for (let sun = addDays(weekStart(from), 6); sun <= to; sun = addDays(sun, 7)) {
     const mon = addDays(sun, 1);
-    out.push({
+    push({
       key: `wk:${mon}`, date: sun, dateMode: 'exact', kind: 'weekly', title: 'Долить карту жизни до лимита',
       amount: bridgeWeek(input.bridge, mon)?.fromReserve ?? weeklyLimit(input.debts, mon, input.weeklyOverrides),
     });
@@ -108,38 +119,53 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
 
   for (const plan of input.accountBook?.splitPlans ?? []) {
     if (closedBefore(plan.debtId, from)) continue;
-    plan.schedule.forEach((payment, index) => out.push({
+    plan.schedule.forEach((payment, index) => push({
       key: `split-plan:${plan.id}:${payment.date}:${index}`, date: payment.date, dateMode: 'exact', kind: 'payment',
       title: plan.name, amount: payment.amount, debtId: plan.debtId,
     }));
   }
   if (input.work) {
     const sourceMarks = input.marks ?? {};
-    const work = input.work;
+    const work = { ...input.work, payDates: { ...input.work.payDates } };
+    const canonicalMarks = { ...sourceMarks };
+    for (const [key, alias] of Object.entries(work.aliases ?? {})) {
+      if (sourceMarks[alias]?.done) canonicalMarks[key] = sourceMarks[alias];
+    }
+    for (const [key, custom] of Object.entries(ov)) {
+      if (custom.date && !canonicalMarks[key]?.done && !work.payDates[key]) work.payDates[key] = custom.date;
+    }
     // Сначала выбираем однозначные прежние события, затем используем их отметки при расчёте НДФЛ.
-    const candidates = workEvents(work, from, to, sourceMarks);
+    const candidates = workEvents(work, from, to, canonicalMarks);
     const aliases = new Map<string, CalEvent>();
     const used = new Set<string>();
     for (const e of candidates) {
-      const found = out.filter(old => old.economicType !== 'loan_disbursement' && old.kind === 'income' && !used.has(old.key) && old.incomeKind === e.incomeKind &&
+      const found = out.filter(old => !journalLoans.has(old.key) && !historicalLoans.has(old.key) && ov[old.key]?.economicType !== 'non_income' &&
+        old.economicType !== 'loan_disbursement' && old.kind === 'income' && !used.has(old.key) && old.incomeKind === e.incomeKind &&
         (old.key === e.key || (isRegularWork(e.incomeKind) && (old.date === e.nominalDate || old.date === e.expectedPayDate))));
-      const old = found.find(old => old.key === e.key) ?? (found.length === 1 ? found[0] : undefined);
+      const explicit = work.aliases?.[e.key];
+      const old = (explicit ? out.find(o => o.key === explicit && !journalLoans.has(o.key) && !historicalLoans.has(o.key)) : undefined) ??
+        found.find(old => old.key === e.key) ?? (found.length === 1 ? found[0] : undefined);
       if (old) { aliases.set(e.key, old); used.add(old.key); }
     }
-    const canonicalMarks = { ...sourceMarks };
-    for (const [key, old] of aliases) if (sourceMarks[old.key]?.done) canonicalMarks[key] = sourceMarks[old.key];
+    for (const [key, old] of aliases) {
+      const mark = sourceMarks[old.key];
+      if (mark?.done) canonicalMarks[key] = { ...mark, paidDate: mark.paidDate ?? paidOn(old, mark) };
+      const customDate = ov[old.key]?.date;
+      if (customDate && !mark?.done) work.payDates[key] = customDate;
+    }
     const modelled = workEvents(work, from, to, canonicalMarks);
     const recognised = new Set(modelled.map(e => e.key));
-    const remaining = out.filter(e => !used.has(e.key) && !(recognised.has(e.key) && e.kind === 'income'));
+    const vacationMonths = new Set(modelled.filter(e => e.key.startsWith('work:vacation:') || e.key.startsWith('work:allowance:')).map(e => monthKey(e.date)));
+    const remaining = out.filter(e => !used.has(e.key) && !recognised.has(e.key) &&
+      !(e.key.startsWith('inc:vacation:') && !sourceMarks[e.key]?.done && vacationMonths.has(monthKey(e.date))));
     out.length = 0;
     out.push(...remaining, ...modelled.map(e => {
       const old = aliases.get(e.key);
-      if (!old) return e;
+      if (!old) return work.aliases?.[e.key] && canonicalMarks[e.key]?.done ? { ...e, key: work.aliases[e.key] } : e;
       const mark = sourceMarks[old.key];
       return { ...e, key: old.key,
-        date: mark?.done ? mark.paidDate ?? e.date : old.dateMode === 'exact' && !old.approx ? old.date : e.date,
-        amount: old.dateMode === 'exact' && !old.approx ? old.amount : e.amount,
-        ...(old.dateMode === 'exact' && !old.approx ? { approx: false } : {}),
+        date: mark?.done ? mark.paidDate ?? e.date : e.date,
+        note: old.note ?? e.note,
       };
     }));
   }
@@ -152,29 +178,47 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
     key: `split-debit:${debit.id}`, date: debit.date, dateMode: 'exact', kind: 'payment',
     title: 'Сплит · общее автосписание', amount: debit.amount, accountId: debit.accountId, economicType: 'debt_payment', confidence: 'confirmed',
   });
-  const loans = new Map(input.accountBook?.operations.filter(op => op.type === 'loan_disbursement' && op.status === 'confirmed' && op.eventKey)
-    .map(op => [op.eventKey!, op]));
   const accounts = input.accountBook?.paymentAccounts;
   const rank = { payment: 0, weekly: 1, income: 2 } as const;
-  const ov = input.overrides ?? {};
   return out
     .filter(e => !replaced.has(e.key))
     .map(e => {
-      const loan = loans.get(e.key);
+      const loan = journalLoans.get(e.key);
+      const historical = historicalLoans.get(e.key);
       if (loan && e.kind === 'income') return { ...e, date: loan.date, amount: loan.amount, accountId: loan.accountId,
         dateMode: 'exact' as const, economicType: 'loan_disbursement' as const, confidence: 'confirmed' as const };
-      return e.kind === 'payment' ? { ...e, accountId: accounts?.[e.key] ?? (e.debtId ? accounts?.[e.debtId] : undefined) ?? e.accountId } : e;
+      if (historical && e.kind === 'income') return { ...e, date: historical.date, amount: historical.amount,
+        dateMode: 'exact' as const, economicType: 'loan_disbursement' as const, confidence: 'confirmed' as const };
+      const fixedKey = e.key.startsWith('fix:') && !input.marks?.[e.key]?.done ? e.key.slice(0, e.key.lastIndexOf(':')) : undefined;
+      return e.kind === 'payment' ? { ...e,
+        accountId: accounts?.[e.key] ?? (e.debtId ? accounts?.[e.debtId] : undefined) ?? (fixedKey ? accounts?.[fixedKey] : undefined) ?? e.accountId } : e;
     })
     // деньги приходят только в рабочий день: выходной или праздник — значит, накануне
     .map(e => {
       if (e.kind !== 'income' || e.economicType === 'loan_disbursement' || e.nominalDate || e.dateMode === 'month' || ov[e.key]?.date) return e;
+      const mark = input.marks?.[e.key];
+      if (mark?.done) return { ...e, date: paidOn(e, mark) };
       const date = workdayOnOrBefore(e.date);
       return date === e.date ? e : { ...e, date, planned: e.date };
     })
-    .map(e => (ov[e.key] ? { ...e, amount: ov[e.key].amount ?? e.amount, date: (e.nominalDate && input.marks?.[e.key]?.done ? undefined : ov[e.key].date) ?? e.date, approx: ov[e.key].amount != null ? false : e.approx, moved: ov[e.key].date != null && ov[e.key].date !== e.date } : e))
+    .map(e => {
+      const custom = ov[e.key];
+      if (!custom || e.economicType === 'loan_disbursement') return e;
+      const fact = e.kind === 'income' && (input.marks?.[e.key]?.done || e.payroll?.documented);
+      return { ...e, amount: fact ? e.amount : custom.amount ?? e.amount, date: fact ? e.date : custom.date ?? e.date,
+        economicType: custom.economicType ?? e.economicType, projection: custom.projection ?? e.projection,
+        approx: !fact && custom.amount != null ? false : e.approx, moved: !fact && custom.date != null && custom.date !== e.date };
+    })
     .filter(e => e.date >= rangeFrom && e.date <= rangeTo)
     .sort((a, b) => a.date.localeCompare(b.date) || rank[a.kind] - rank[b.kind] || a.title.localeCompare(b.title));
 }
+
+export const cashIncomeEvent = (event: CalEvent) =>
+  event.kind === 'income' && event.economicType !== 'loan_disbursement' && event.economicType !== 'non_income';
+
+export const actionableEvent = (event: CalEvent) =>
+  !event.payroll?.documented && event.economicType !== 'loan_disbursement' &&
+  event.projection !== 'conditional' && event.projection !== 'internal_transfer' && event.projection !== 'review';
 
 const nextMonth = (m: string) => {
   const [y, mm] = m.split('-').map(Number);

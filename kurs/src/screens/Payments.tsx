@@ -17,7 +17,7 @@ import { runQuick } from '../components/TabBar';
 import { Bar, Empty, IconButton, Money, Sheet } from '../components/ui';
 import { weekMoney, type WeekMoney } from '../domain/bridge';
 import { monthDays, NARROW, reserveByDay } from '../domain/coverage';
-import { eventGroup, eventsBetween, type EventGroup } from '../domain/calendar';
+import { actionableEvent, cashIncomeEvent, eventGroup, eventsBetween, type EventGroup } from '../domain/calendar';
 import { addDays, addMonths, dayMonth, ddmm, lastDay, monthKey, monthName, plural, weekday, weekdayFull, weekStart } from '../domain/dates';
 import type { CalEvent, EventMark } from '../domain/types';
 import { useStore } from '../store/store';
@@ -69,8 +69,8 @@ export function Payments() {
   const selected = monthKey(picked) === month ? picked : month === monthKey(now) ? now : events.find(e => e.kind !== 'weekly')?.date ?? `${month}-01`;
 
   const amount = (e: CalEvent) => (marks[e.key]?.done && marks[e.key].amount != null ? marks[e.key].amount! : e.amount);
-  const total = events.filter(e => e.kind === 'payment').reduce((s, e) => s + amount(e), 0);
-  const incomes = events.filter(e => e.kind === 'income').reduce((s, e) => s + amount(e), 0);
+  const total = events.filter(e => e.kind === 'payment' && (actionableEvent(e) || marks[e.key]?.done)).reduce((s, e) => s + amount(e), 0);
+  const incomes = events.filter(cashIncomeEvent).reduce((s, e) => s + amount(e), 0);
 
   const said = verdict(days);
   // смена месяца — переход (startTransition): соседний месяц уже на экране, а сборка нового дальнего соседа, линии и
@@ -121,6 +121,7 @@ function useToggle() {
 function SwipeEvent({ e, mark, now, showDate = false }: { e: CalEvent; mark?: EventMark; now: string; showDate?: boolean }) {
   const set = useUi(s => s.set);
   const toggle = useToggle();
+  if (!actionableEvent(e)) return <EventRow e={e} mark={mark} now={now} showDate={showDate} onClick={() => set({ event: e })} />;
   const done = !!mark?.done;
   const g = eventGroup(e);
   const label = done ? 'Снять отметку' : g === 'income' ? 'Пришло' : g === 'weekly' ? 'Долил' : 'Оплачено';

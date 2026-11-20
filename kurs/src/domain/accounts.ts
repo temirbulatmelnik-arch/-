@@ -67,6 +67,14 @@ export interface LoanReview {
   label: string;
 }
 
+/** A categorization of an existing, already marked receipt. It never posts money or changes debt. */
+export interface HistoricalLoan {
+  eventKey: string;
+  debtId: string;
+  date: string;
+  amount: number;
+}
+
 export interface AccountBook {
   accounts: CashAccount[];
   operations: AccountOperation[];
@@ -74,6 +82,8 @@ export interface AccountBook {
   splitPlans: SplitPlan[];
   splitDebits: SplitDebit[];
   loanReviews?: LoanReview[];
+  historicalLoans?: HistoricalLoan[];
+  creditChargeKinds?: Record<string, 'interest' | 'fee'>;
   stress?: { date: string; amount: number; accountId: string };
 }
 
@@ -217,19 +227,36 @@ export function debtProjection(debt: Debt, expenses: Expense[], book: AccountBoo
 }
 
 export function debtActivity(book: AccountBook, expenses: Expense[], from: string, to: string) {
-  const totals = { borrowed: 0, principal: 0, interestAndFees: 0, unknownPrincipal: 0 };
+  const totals = { borrowed: 0, loanDisbursements: 0, creditPurchases: 0, principal: 0, interest: 0, fees: 0, interestAndFees: 0, unknownPrincipal: 0 };
+  const linked = new Set(book.operations.filter(op => op.type === 'loan_disbursement' && op.status === 'confirmed').map(op => op.eventKey));
   for (const op of book.operations) {
     if (op.status !== 'confirmed' || op.date < from || op.date > to) continue;
-    if (op.type === 'loan_disbursement') totals.borrowed += cents(op.amount);
+    if (op.type === 'loan_disbursement') {
+      totals.loanDisbursements += cents(op.amount);
+    }
     if (op.type === 'debt_payment') {
       totals.principal += cents(op.principal ?? 0);
-      totals.interestAndFees += cents(op.interest ?? 0) + cents(op.fee ?? 0);
+      totals.interest += cents(op.interest ?? 0);
+      totals.fees += cents(op.fee ?? 0);
       if (op.principal == null) totals.unknownPrincipal += cents(op.amount);
     }
-    if ((op.type === 'interest' || op.type === 'fee') && op.debtId) totals.interestAndFees += cents(op.amount);
+    if (op.type === 'interest' && op.debtId) totals.interest += cents(op.amount);
+    if (op.type === 'fee' && op.debtId) totals.fees += cents(op.amount);
   }
-  for (const e of expenses) if (e.source === 'credit' && e.date >= from && e.date <= to) totals.borrowed += cents(e.amount);
-  return { borrowed: rubles(totals.borrowed), principal: rubles(totals.principal),
+  for (const loan of book.historicalLoans ?? []) {
+    if (!linked.has(loan.eventKey) && loan.date >= from && loan.date <= to) totals.loanDisbursements += cents(loan.amount);
+  }
+  for (const e of expenses) {
+    if (e.source !== 'credit' || e.date < from || e.date > to) continue;
+    const kind = book.creditChargeKinds?.[e.id];
+    if (kind === 'interest') totals.interest += cents(e.amount);
+    else if (kind === 'fee') totals.fees += cents(e.amount);
+    else totals.creditPurchases += cents(e.amount);
+  }
+  totals.borrowed = totals.loanDisbursements + totals.creditPurchases;
+  totals.interestAndFees = totals.interest + totals.fees;
+  return { borrowed: rubles(totals.borrowed), loanDisbursements: rubles(totals.loanDisbursements), creditPurchases: rubles(totals.creditPurchases),
+    principal: rubles(totals.principal), interest: rubles(totals.interest), fees: rubles(totals.fees),
     interestAndFees: rubles(totals.interestAndFees), unknownPrincipal: rubles(totals.unknownPrincipal) };
 }
 
@@ -243,6 +270,10 @@ export function bookOperationAllowed(op: AccountOperation, book: AccountBook, de
   if (op.type === 'transfer' && !accounts.some(a => a.id === op.toAccountId)) return false;
   if ('debtId' in op && op.debtId && !debts.some(d => d.id === op.debtId)) return false;
   if (op.type === 'loan_disbursement' && op.splitPlanId && !book.splitPlans.some(p => p.id === op.splitPlanId && p.debtId === op.debtId)) return false;
+  if (op.type === 'loan_disbursement' && op.eventKey) {
+    const historical = book.historicalLoans?.find(loan => loan.eventKey === op.eventKey);
+    if (historical && (historical.debtId !== op.debtId || historical.date !== op.date || cents(historical.amount) !== cents(op.amount))) return false;
+  }
   if (op.type === 'loan_disbursement' && op.auditId) {
     const review = book.loanReviews?.find(r => r.id === op.auditId);
     if (!review || op.date < review.from || op.date > review.to || cents(op.amount) !== cents(review.amount)) return false;
