@@ -273,14 +273,14 @@ export function Week() {
     const st = useStore.getState();
     const source = suggestSource(st, now);
     const effect = spendEffect(st, { amount: q.amount, source, date: now, now, reserve: led.reserve });
-    withUndo(`${q.note ?? CATEGORY[q.category].short}, ${rub(q.amount)}. ${effect.text}`, () => st.addExpenses([{ date: now, amount: q.amount, category: q.category, note: q.note, source, origin: 'manual' }]));
+    withUndo(`${q.note ?? CATEGORY[q.category].short}, ${rub(q.amount)}. ${effect.text}`, () => st.addExpenses([{ date: now, amount: q.amount, category: q.category, note: q.note, source, origin: 'manual', creditCard: source === 'credit' ? bridge?.card : undefined }]));
     haptic('success');
     flyCoin(el, CAT_COLOR[q.category]);
   };
   const repeatYesterday = (el: Element) => {
     const st = useStore.getState();
     withUndo(`Как вчера: ${ySet.length} ${plural(ySet.length, 'трата', 'траты', 'трат')} на ${rub(ySet.reduce((t, e) => t + e.amount, 0))}`,
-      () => st.addExpenses(ySet.map(e => ({ date: now, amount: e.amount, category: e.category, note: e.note, source: e.source, origin: 'manual' as const, ...(e.creditCard ? { creditCard: e.creditCard } : {}) }))));
+      () => st.addExpenses(ySet.map(e => ({ date: now, amount: e.amount, category: e.category, note: e.note, source: e.source, origin: 'manual' as const, creditCard: e.creditCard, accountId: e.accountId }))));
     haptic('success');
     flyCoin(el);
   };

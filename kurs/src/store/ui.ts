@@ -90,7 +90,7 @@ export const toast = (text: string, undo?: () => void) => useUi.getState().set({
 /** Сделать действие с данными и показать сообщение с «Отменить»: траты, отметки, долги и резерв вернутся как были */
 export function withUndo(text: string | (() => string), action: () => void) {
   const s = useStore.getState();
-  const before = { expenses: s.expenses, marks: s.marks, debts: s.debts, reserve: s.reserve, reserveLog: s.reserveLog };
+  const before = { expenses: s.expenses, marks: s.marks, debts: s.debts, reserve: s.reserve, reserveLog: s.reserveLog, accountBook: s.accountBook };
   action();
   toast(typeof text === 'function' ? text() : text, () => { useStore.setState(before); toast('Отменено'); });
 }
@@ -108,6 +108,6 @@ export function useToday(): string {
 }
 
 export function useCal(): CalendarInput {
-  const [debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge] = useStore(useShallow(s => [s.debts, s.incomes, s.fixed, s.oneOff, s.templateFrom, s.weeklyOverrides, s.overrides, s.bridge] as const));
-  return useMemo(() => ({ debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge }), [debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge]);
+  const [debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge, accountBook] = useStore(useShallow(s => [s.debts, s.incomes, s.fixed, s.oneOff, s.templateFrom, s.weeklyOverrides, s.overrides, s.bridge, s.accountBook] as const));
+  return useMemo(() => ({ debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge, accountBook }), [debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge, accountBook]);
 }

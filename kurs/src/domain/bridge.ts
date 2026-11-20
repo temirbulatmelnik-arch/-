@@ -30,7 +30,7 @@ export const activeBridge = (b: Bridge | null | undefined): Bridge | null => (b 
 export const bridgeWeek = (b: Bridge | null | undefined, monday: string) => activeBridge(b)?.weeks.find(w => w.monday === monday) ?? null;
 
 /** Трата моста: с кредитки моста (без указанной карты — тоже она) */
-export const onBridgeCard = (e: Expense, b: Bridge) => e.source === 'credit' && (e.creditCard ?? b.card) === b.card;
+export const onBridgeCard = (e: Expense, b: Bridge) => e.source === 'credit' && e.creditCard === b.card;
 
 export interface WeekMoney {
   monday: string;

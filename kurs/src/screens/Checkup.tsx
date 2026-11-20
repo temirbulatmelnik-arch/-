@@ -20,10 +20,10 @@ import { toast, useUi } from '../store/ui';
 
 /** учёт по счетам: что должно быть в банке сейчас */
 export function useLedger(): Ledger {
-  const [checkups, cardBalance, reserve, reserveLog, marks, expenses, oneOff, debts, bridge] = useStore(useShallow(s =>
-    [s.checkups, s.cardBalance, s.reserve, s.reserveLog, s.marks, s.expenses, s.oneOff, s.debts, s.bridge] as const));
-  return useMemo(() => ledger({ checkups, cardBalance, reserve, reserveLog, marks, expenses, oneOff, debts, bridge }),
-    [checkups, cardBalance, reserve, reserveLog, marks, expenses, oneOff, debts, bridge]);
+  const [checkups, cardBalance, reserve, reserveLog, marks, expenses, oneOff, debts, bridge, accountBook] = useStore(useShallow(s =>
+    [s.checkups, s.cardBalance, s.reserve, s.reserveLog, s.marks, s.expenses, s.oneOff, s.debts, s.bridge, s.accountBook] as const));
+  return useMemo(() => ledger({ checkups, cardBalance, reserve, reserveLog, marks, expenses, oneOff, debts, bridge, accountBook }),
+    [checkups, cardBalance, reserve, reserveLog, marks, expenses, oneOff, debts, bridge, accountBook]);
 }
 
 let snoozed = 0;

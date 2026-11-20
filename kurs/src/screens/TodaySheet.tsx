@@ -76,7 +76,7 @@ export function TodayDetails({ summary }: { summary?: boolean }) {
                 <motion.div key={e.id} layout layoutDependency={i} initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, height: 0 }} transition={spring}>
                   <Hold preview={<div className="pointer-events-none"><ExpenseRow e={e} /></div>} actions={[
                     { label: 'Изменить', icon: <Pencil size={17} />, onSelect: () => edit(e) },
-                    { label: 'Повторить ещё раз', icon: <Copy size={17} />, onSelect: () => { useStore.getState().addExpenses([{ date: e.date, amount: e.amount, category: e.category, note: e.note, source: e.source, origin: 'manual' }]); toast('Записано ещё раз'); } },
+                    { label: 'Повторить ещё раз', icon: <Copy size={17} />, onSelect: () => { useStore.getState().addExpenses([{ date: e.date, amount: e.amount, category: e.category, note: e.note, source: e.source, origin: 'manual', creditCard: e.creditCard, accountId: e.accountId }]); toast('Записано ещё раз'); } },
                     { label: 'Удалить', icon: <Trash2 size={17} />, danger: true, onSelect: () => { useStore.getState().removeExpense(e.id); toast(`Удалено: ${e.note || CATEGORY[e.category].short}`); } },
                   ]}>
                     <SwipeRow rowClass="bg-bg" right={[

@@ -1,4 +1,5 @@
 // Календарь платежей и поступлений: разовые события из плана + ежемесячный шаблон + воскресные пополнения карты жизни.
+import type { AccountBook } from './accounts';
 import { addDays, dayIn, monthKey, weekStart } from './dates';
 import type { CalEvent, Debt, EventMark, FixedItem, IncomeTemplate, WeeklyOverride } from './types';
 import { bridgeWeek, type Bridge } from './bridge';
@@ -29,6 +30,7 @@ export function annuity(balance: number, rate: number, months: number): number {
 
 export interface CalendarInput {
   debts: Debt[];
+  accountBook?: AccountBook;
   incomes: IncomeTemplate[];
   fixed: FixedItem[];
   oneOff: CalEvent[];
@@ -101,12 +103,35 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
     });
   }
 
+  for (const plan of input.accountBook?.splitPlans ?? []) {
+    if (closedBefore(plan.debtId, from)) continue;
+    plan.schedule.forEach((payment, index) => out.push({
+      key: `split-plan:${plan.id}:${payment.date}:${index}`, date: payment.date, dateMode: 'exact', kind: 'payment',
+      title: plan.name, amount: payment.amount, debtId: plan.debtId,
+    }));
+  }
+  const splitDebits = input.accountBook?.splitDebits ?? [];
+  const replaced = new Set(splitDebits.flatMap(d => d.replacesKeys));
+  for (const debit of splitDebits) out.push({
+    key: `split-debit:${debit.id}`, date: debit.date, dateMode: 'exact', kind: 'payment',
+    title: 'Сплит · общее автосписание', amount: debit.amount, accountId: debit.accountId, economicType: 'debt_payment', confidence: 'confirmed',
+  });
+  const loans = new Map(input.accountBook?.operations.filter(op => op.type === 'loan_disbursement' && op.status === 'confirmed' && op.eventKey)
+    .map(op => [op.eventKey!, op]));
+  const accounts = input.accountBook?.paymentAccounts;
   const rank = { payment: 0, weekly: 1, income: 2 } as const;
   const ov = input.overrides ?? {};
   return out
+    .filter(e => !replaced.has(e.key))
+    .map(e => {
+      const loan = loans.get(e.key);
+      if (loan && e.kind === 'income') return { ...e, date: loan.date, amount: loan.amount, accountId: loan.accountId,
+        dateMode: 'exact' as const, economicType: 'loan_disbursement' as const, confidence: 'confirmed' as const };
+      return e.kind === 'payment' ? { ...e, accountId: accounts?.[e.key] ?? (e.debtId ? accounts?.[e.debtId] : undefined) ?? e.accountId } : e;
+    })
     // деньги приходят только в рабочий день: выходной или праздник — значит, накануне
     .map(e => {
-      if (e.kind !== 'income' || e.dateMode === 'month' || ov[e.key]?.date) return e;
+      if (e.kind !== 'income' || e.economicType === 'loan_disbursement' || e.dateMode === 'month' || ov[e.key]?.date) return e;
       const date = workdayOnOrBefore(e.date);
       return date === e.date ? e : { ...e, date, planned: e.date };
     })

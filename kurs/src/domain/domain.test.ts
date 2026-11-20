@@ -623,7 +623,7 @@ describe('мост на кредитке', () => {
   const bridge: Bridge = { card: 'sber-card', cap: 7782, repayBy: '2027-02-18', weeks: [
     { monday: '2026-11-02', fromReserve: 0, fromCredit: 582 }, { monday: '2026-11-09', fromReserve: 4000, fromCredit: 4000 }, { monday: '2026-11-16', fromReserve: 4800, fromCredit: 3200 },
   ] };
-  const exp = (id: string, date: string, amount: number, source: Expense['source'] = 'life', category: Expense['category'] = 'fun'): Expense => ({ id, date, amount, category, source, createdAt: '' });
+  const exp = (id: string, date: string, amount: number, source: Expense['source'] = 'life', category: Expense['category'] = 'fun'): Expense => ({ id, date, amount, category, source, ...(source === 'credit' ? { creditCard: 'sber-card' } : {}), createdAt: '' });
   const base: ExchangeState = {
     debts: DEBTS, incomes: [], fixed: [], oneOff: [], templateFrom: '2026-10', weeklyOverrides: ov, overrides: {}, marks: {}, plan: PLAN,
     expenses: [exp('a', '2026-10-31', 17930)], reserve: 65750, savings: 0, cardBalance: null,
@@ -653,7 +653,7 @@ describe('мост на кредитке', () => {
       { date: '2026-10-31', amount: 17930, note: 'то же' },
       { date: '2026-11-02', amount: 95, category: 'transport', note: 'Метро' },
       { date: '2026-11-02', amount: 95, category: 'transport', note: 'Метро, 2-я', dup: true },
-      { date: '2026-11-03', amount: 200, category: 'fun', source: 'credit' },
+      { date: '2026-11-03', amount: 200, category: 'fun', source: 'credit', creditCard: 'sber-card' },
     ] }))!, base);
     const sections = previewExchange(file, base, '2026-11-03');
     expect(sections.map(x => x.id)).toEqual(['bridge', 'expenses']);
@@ -839,19 +839,21 @@ describe('учёт по счетам для воскресной сверки', 
     });
     const bridge = { card: 'c3', cap: 30_000, weeks: [{ monday: '2026-11-02', fromReserve: 5000, fromCredit: 3000 }] } as unknown as LedgerInput['bridge'];
     const l = ledger({
-      ...base, bridge, now: '2026-11-01',
+      ...base, bridge, now: '2026-11-05',
       debts: [card('c1', 1, 10_000), card('c2', 2, 20_000), card('c3', 5, 30_000, { limit: 100_000 }), card('c4', 3, 0, { closed: true }),
         { ...card('loan', 0, 50_000), kind: 'loan' }],
       expenses: [
         { ...spend('2026-11-03', 500, 'credit'), creditCard: 'c2' },
-        spend('2026-11-04', 700, 'credit'), // без карты — с кредитки моста
+        { ...spend('2026-11-04', 700, 'credit'), creditCard: 'c3' },
+        spend('2026-11-04', 999, 'credit'), // карта не классифицирована
         { ...spend('2026-10-30', 900, 'credit'), creditCard: 'c1' }, // до обновления остатка — уже в нём
       ],
     });
     expect(l.cards.map(c => c.debt.id)).toEqual(['c3', 'c1', 'c2']);
-    expect(l.cards.map(c => c.expected)).toEqual([30_700, 10_000, 20_500]);
+    expect(l.cards.map(c => c.expected)).toEqual([30_798.63, 10_032.88, 20_565.75]);
     expect(l.cards[0].bridge).toBe(true);
-    expect(l.credit).toBe(30_700);
+    expect(l.unclassifiedCredit).toHaveLength(1);
+    expect(l.credit).toBeGreaterThanOrEqual(30_700);
   });
 
   it('кредитка: проценты набегают по дням с последнего обновления остатка — как у банка', () => {

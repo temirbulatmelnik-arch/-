@@ -1,6 +1,7 @@
 // Учёт по счетам банка: сколько должно быть на карте жизни (мастер-счёт), в резерве (накопительный) и долга на
 // кредитке моста — от последней сверки. В воскресенье вечером человек вводит, что видит в банке, приложение сравнивает
 // и считает, сколько перевести между картой и резервом.
+import { accountMovement, accountProjection, cashAccount, debtProjection, EMPTY_BOOK, LIFE_ACCOUNT, recordedAfter, RESERVE_ACCOUNT, rubles, type AccountBook, type BankBalance } from './accounts';
 import { activeBridge, bridgeWeek, weekMoney, type Bridge } from './bridge';
 import { addDays, daysBetween, today } from './dates';
 import { weeklyLimit } from './plan';
@@ -28,6 +29,7 @@ export interface Checkup {
   toReserve: number;
   /** остатки после перевода — точка отсчёта следующей сверки */
   after: { card: number; reserve: number };
+  operationIds?: string[];
   creditCard?: string;
   /** остальные кредитки, кроме кредитки моста: долг по учёту и в банке; после сверки остаток долга берётся из банка */
   cards?: { id: string; expected: number | null; actual: number }[];
@@ -35,6 +37,7 @@ export interface Checkup {
 
 export interface LedgerInput {
   checkups: Checkup[];
+  accountBook?: AccountBook;
   cardBalance: CardBalance | null;
   reserve: number;
   reserveLog: ReserveMove[];
@@ -82,6 +85,10 @@ export interface Ledger {
   /** из долга на кредитке моста — проценты по дням с последнего обновления остатка (сверки): банк начисляет их каждый
    *  день, поэтому credit больше, чем «сверка + траты с кредитки» */
   creditInterest: number;
+  cashAccounts: ReturnType<typeof accountProjection>;
+  reserveVerified: boolean;
+  debtBalances: Record<string, ReturnType<typeof debtProjection>>;
+  unclassifiedCredit: Expense[];
 }
 
 const endOfDay = (date: string) => `${date}T23:59:59.999`;
@@ -89,10 +96,10 @@ const endOfDay = (date: string) => `${date}T23:59:59.999`;
 /** трата после точки: позже дня отсчёта; в сам день — только внесённая руками после сверки */
 const after = (e: Expense, at: string, date: string) => e.date > date || (e.date === date && e.origin === 'manual' && e.createdAt > at);
 
-type CardRef = { at: string; date: string; amount: number; dateOnly?: boolean; includedExpenseIds?: string[] };
+type CardRef = { at: string; date: string; amount: number; dateOnly?: boolean; includedExpenseIds?: string[]; operationIds?: string[] };
 
 const fromBalance = (b: CardBalance): CardRef => ({ ...b, at: b.at ?? endOfDay(b.date), dateOnly: !b.at });
-const fromCheckup = (c: Checkup): CardRef => ({ at: c.at, date: c.date, amount: c.after.card });
+const fromCheckup = (c: Checkup): CardRef => ({ at: c.at, date: c.date, amount: c.after.card, operationIds: c.operationIds });
 const time = (at: string) => Date.parse(at);
 
 function afterCard(e: Expense, ref: CardRef, included: Set<string>): boolean {
@@ -107,8 +114,8 @@ function afterCard(e: Expense, ref: CardRef, included: Set<string>): boolean {
 export const isAbsolute = (m: ReserveMove) => m.abs ?? /^Сверка/.test(m.note);
 
 /** последний момент, когда резерв пришёл из банка целиком */
-export function reserveAnchor(log: ReserveMove[]): { at: string; date: string } | null {
-  for (let i = log.length - 1; i >= 0; i--) if (isAbsolute(log[i])) return { at: log[i].at ?? endOfDay(log[i].date), date: log[i].date };
+export function reserveAnchor(log: ReserveMove[]): { at: string; date: string; operationIds?: string[] } | null {
+  for (let i = log.length - 1; i >= 0; i--) if (isAbsolute(log[i])) return { at: log[i].at ?? endOfDay(log[i].date), date: log[i].date, operationIds: log[i].operationIds };
   return null;
 }
 
@@ -168,6 +175,10 @@ export function transferPlan(o: { events: CalEvent[]; marks: Record<string, Even
 }
 
 export function ledger(s: LedgerInput): Ledger {
+  const now = s.now ?? today();
+  const book = s.accountBook ?? EMPTY_BOOK;
+  const operations = book.operations.filter(op => op.status === 'confirmed' && op.date <= now);
+  const linked = new Set(operations.flatMap(op => op.eventKey ? [op.eventKey] : []));
   const last = s.checkups.at(-1);
   // точка отсчёта карты: последняя сверка или остаток карты из выписки/вручную — что позже
   const cb = s.cardBalance ? fromBalance(s.cardBalance) : null;
@@ -183,7 +194,7 @@ export function ledger(s: LedgerInput): Ledger {
   if (ref) {
     card = ref.amount;
     for (const [key, m] of Object.entries(s.marks)) {
-      if (!m.done || !(time(m.at) > time(ref.at))) continue;
+      if (!m.done || linked.has(key) || !(time(m.at) > time(ref.at))) continue;
       const amount = m.amount ?? 0;
       const kind = kindOf(key, s.oneOff);
       if (kind === 'weekly') card += amount;
@@ -191,7 +202,9 @@ export function ledger(s: LedgerInput): Ledger {
       else if (kind === 'income') { card += amount; pool += amount; }
     }
     const included = new Set(ref.includedExpenseIds);
-    for (const e of s.expenses) if (e.source === 'life' && afterCard(e, ref, included)) card -= e.amount;
+    for (const e of s.expenses) if (cashAccount(e) === LIFE_ACCOUNT && afterCard(e, ref, included)) card -= e.amount;
+    const bankRef: BankBalance = { amount: ref.amount, date: ref.date, at: ref.dateOnly ? undefined : ref.at, includedIds: ref.operationIds };
+    for (const op of operations) if (recordedAfter(op, bankRef)) card += rubles(accountMovement(op, LIFE_ACCOUNT));
     for (const r of s.reserveLog) if (r.card && r.at && time(r.at) > time(ref.at)) { card += r.card; if (r.card < 0 || r.forKeys) pool += r.card; }
   }
   let held = 0;
@@ -205,26 +218,25 @@ export function ledger(s: LedgerInput): Ledger {
   held = Math.min(Math.round(held * 100) / 100, pool);
 
   // резерв: отметки «оплачено из резерва» и траты из резерва после последнего остатка из банка
-  const anchor = [reserveAnchor(s.reserveLog), last ? { at: last.at, date: last.date } : null].filter(Boolean).sort((a, b) => b!.at.localeCompare(a!.at))[0] ?? null;
+  const anchor = [reserveAnchor(s.reserveLog), last ? { at: last.at, date: last.date, operationIds: last.operationIds } : null].filter(Boolean).sort((a, b) => b!.at.localeCompare(a!.at))[0] ?? null;
   let reserve = s.reserve;
   if (anchor) {
     for (const [key, m] of Object.entries(s.marks)) {
-      if (m.done && m.at > anchor.at && kindOf(key, s.oneOff) === 'payment' && (m.paidFrom ?? 'reserve') === 'reserve') reserve -= m.amount ?? 0;
+      if (m.done && !linked.has(key) && m.at > anchor.at && kindOf(key, s.oneOff) === 'payment' && (m.paidFrom ?? 'reserve') === 'reserve') reserve -= m.amount ?? 0;
     }
-    for (const e of s.expenses) if (e.source === 'reserve' && after(e, anchor.at, anchor.date)) reserve -= e.amount;
+    for (const e of s.expenses) if (cashAccount(e) === RESERVE_ACCOUNT && after(e, anchor.at, anchor.date)) reserve -= e.amount;
   }
 
-  // кредитки: остаток долга плюс покупки с карты после его последнего обновления
-  // (трата с кредитки без указанной карты — с кредитки моста)
+  for (const op of operations) {
+    if (!anchor || recordedAfter(op, { ...anchor, amount: s.reserve, includedIds: anchor.operationIds })) {
+      reserve += rubles(accountMovement(op, RESERVE_ACCOUNT));
+    }
+  }
+
+  // Кредитки: прогноз долга от банковской точки отсчёта и классифицированных операций.
   const b = s.bridge && s.bridge.weeks.length ? s.bridge : null;
-  const now = s.now ?? today();
-  const owed = (d: Debt) => {
-    const at = d.updatedAt ?? '';
-    const date = at.slice(0, 10);
-    let x = d.balance + accruedOnCard(d, now);
-    if (at) for (const e of s.expenses) if (e.source === 'credit' && (e.creditCard ?? b?.card) === d.id && (e.date > date || (e.date === date && e.createdAt > at))) x += e.amount;
-    return Math.round(x * 100) / 100;
-  };
+  const debtBalances = Object.fromEntries(s.debts.map(d => [d.id, debtProjection(d, s.expenses, book, now, accruedOnCard(d, now))]));
+  const owed = (d: Debt) => debtBalances[d.id].estimated;
   const creditCard = b ? s.debts.find(d => d.id === b.card) ?? null : null;
   const credit = creditCard ? owed(creditCard) : null;
   const cards = s.debts
@@ -233,6 +245,8 @@ export function ledger(s: LedgerInput): Ledger {
     .map(d => ({ debt: d, expected: owed(d), accrued: accruedOnCard(d, now), bridge: d.id === creditCard?.id }));
 
   return {
+    cashAccounts: accountProjection(book, s.expenses, now), reserveVerified: !!anchor, debtBalances,
+    unclassifiedCredit: s.expenses.filter(e => e.source === 'credit' && !s.debts.some(d => d.kind === 'card' && d.id === e.creditCard)),
     card, cardFrom: ref ? { at: ref.at, date: ref.date } : null, reserve, credit, creditCard, cards,
     incomeOnCard: Math.round((pool - held) * 100) / 100, heldOnCard: held, creditInterest: creditCard ? accruedOnCard(creditCard, now) : 0,
   };
@@ -266,13 +280,19 @@ export function cardOn(s: LedgerInput, date: string): number | null {
     return fwd ? at > time(ref.at) && late <= end : late > end && at <= time(ref.at);
   };
   let delta = 0;
-  for (const [key, m] of Object.entries(s.marks)) if (m.done && inRange(m.at, key)) delta += markMove(key, m);
+  const ops = (s.accountBook ?? EMPTY_BOOK).operations.filter(op => op.status === 'confirmed');
+  const linked = new Set(ops.flatMap(op => op.eventKey ? [op.eventKey] : []));
+  for (const [key, m] of Object.entries(s.marks)) if (m.done && !linked.has(key) && inRange(m.at, key)) delta += markMove(key, m);
   for (const r of s.reserveLog) if (r.card && r.at && inRange(r.at)) delta += r.card;
   const included = new Set(ref.includedExpenseIds);
   for (const e of s.expenses) {
-    if (e.source !== 'life') continue;
+    if (cashAccount(e) !== LIFE_ACCOUNT) continue;
     const afterRef = afterCard(e, ref, included);
     if (fwd ? afterRef && e.date <= date : !afterRef && e.date > date) delta -= e.amount;
+  }
+  for (const op of ops) {
+    const afterRef = recordedAfter(op, { amount: ref.amount, date: ref.date, at: ref.dateOnly ? undefined : ref.at, includedIds: ref.operationIds });
+    if (fwd ? afterRef && op.date <= date : !afterRef && op.date > date) delta += rubles(accountMovement(op, LIFE_ACCOUNT));
   }
   return Math.round((fwd ? ref.amount + delta : ref.amount - delta) * 100) / 100;
 }

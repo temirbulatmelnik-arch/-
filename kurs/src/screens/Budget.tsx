@@ -69,7 +69,7 @@ export function Budget() {
   const remove = (e: Expense) => { useStore.getState().removeExpense(e.id); toast(`Удалено: ${e.note || CATEGORY[e.category].short}`); };
   // та же покупка ещё раз (кофе, проезд) — одним движением
   const repeat = (e: Expense) => {
-    useStore.getState().addExpenses([{ date: now, amount: e.amount, category: e.category, note: e.note, source: e.source, origin: 'manual', ...(e.creditCard ? { creditCard: e.creditCard } : {}) }]);
+    useStore.getState().addExpenses([{ date: now, amount: e.amount, category: e.category, note: e.note, source: e.source, origin: 'manual', creditCard: e.creditCard, accountId: e.accountId }]);
     toast(`Записано ещё раз: ${e.note || CATEGORY[e.category].short}`);
   };
 

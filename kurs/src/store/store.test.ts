@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { CalEvent } from '../domain/types';
 import { useStore } from './store';
+import { debtProjection, EMPTY_BOOK } from '../domain/accounts';
 import { today } from '../domain/dates';
 
 const sunday: CalEvent = { key: 'wk:2026-11-02', date: '2026-11-01', dateMode: 'exact', kind: 'weekly', title: 'Долить карту жизни до лимита', amount: 8000 };
@@ -32,7 +33,7 @@ describe('пополнение карты из резерва', () => {
 });
 
 describe('воскресная сверка с банком', () => {
-  beforeEach(() => useStore.setState({ reserve: 50_000, reserveLog: [], marks: {}, closures: {}, checkups: [], cardBalance: null, expenses: [], debts: [], bridge: null, oneOff: [] }));
+  beforeEach(() => useStore.setState({ reserve: 50_000, reserveLog: [], marks: {}, closures: {}, checkups: [], cardBalance: null, expenses: [], debts: [], bridge: null, oneOff: [], accountBook: EMPTY_BOOK }));
 
   it('«Перевёл»: резерв и карта — из банка с переводом, пополнение отмечено один раз, повтор не списывает', () => {
     s().checkup({ monday: '2026-10-26', expected: { card: null, reserve: 50_000, credit: null }, actual: { card: 2000, reserve: 49_000, credit: null }, topUp: 6000, toReserve: 0 },
@@ -65,14 +66,14 @@ describe('воскресная сверка с банком', () => {
     expect(s().marks['fix:x:2026-12']).toMatchObject({ done: true, paidDate: today() });
   });
 
-  it('платёж по кредитке: проценты — по дням с последнего обновления остатка, а не за целый месяц', () => {
+  it('погашение кредитки: только подтверждённое тело, банковский остаток сохраняется', () => {
     const card = { id: 'k', name: 'К', short: 'К', kind: 'card' as const, balance: 100_000, startBalance: 100_000, rate: 0.365, dueDay: 11,
       rule: { type: 'interestPlus', plus: 1000 } as never, frozen: true, order: 1, closed: false, updatedAt: '2025-10-01T09:00:00.000Z' };
     useStore.setState({ debts: [card] });
     const pay: CalEvent = { key: 'pay:k:2025-10', date: '2025-10-11', dateMode: 'exact', kind: 'payment', title: 'К', amount: 5000, debtId: 'k' };
-    s().markEvent(pay, true, 5000);
-    // 10 дней по 36,5% годовых со 100 000 — 1000 ₽ процентов
-    expect(s().debts[0].balance).toBe(96_000);
+    s().markEvent(pay, true, 5000, 'reserve', { principal: 4000, interest: 1000 });
+    expect(s().debts[0].balance).toBe(100_000);
+    expect(debtProjection(s().debts[0], [], s().accountBook, today()).estimated).toBe(96_000);
     s().markEvent(pay, false);
     expect(s().debts[0].balance).toBe(100_000);
   });
