@@ -203,6 +203,9 @@ export const useStore = create<State>()(
       updateFromSeed: (seed, code) => set(s => ({ ...mergeSeed(s, seed), planRev: seed.rev ?? s.planRev, planCode: code })),
       applySync: (patch, summary) => set(s => {
         const next: Partial<Data> = { ...patch };
+        if (patch.cardBalance && !patch.cardBalance.at && patch.cardBalance.date === today()) {
+          next.cardBalance = { ...patch.cardBalance, at: nowIso() };
+        }
         if (summary != null) {
           const { imports, settings, planCode, ready, ...snapshot } = pickData(s);
           void settings; void planCode; void ready;
