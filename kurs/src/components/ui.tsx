@@ -8,12 +8,13 @@ import { usePan } from './motion';
 /* ---------- Деньги ---------- */
 
 /** Сумма: тонкие цифры и маленький знак рубля. sign — плюс у поступлений. */
-export function Money({ value, className = '', approx, sign, rubClass = '' }: { value: number; className?: string; approx?: boolean; sign?: boolean; rubClass?: string }) {
-  const v = Math.round(value);
+const moneyWithKopecks = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2, minimumFractionDigits: 2 });
+export function Money({ value, className = '', approx, sign, rubClass = '', kopecks }: { value: number; className?: string; approx?: boolean; sign?: boolean; rubClass?: string; kopecks?: boolean }) {
+  const v = kopecks ? value : Math.round(value);
   return (
     <span className={`whitespace-nowrap ${className}`}>
       {approx && <span className="opacity-60">≈&#8239;</span>}
-      {sign && v > 0 ? '+' : ''}{num(v)}
+      {sign && v > 0 ? '+' : ''}{kopecks && !Number.isInteger(v) ? moneyWithKopecks.format(v).replace('-', '−') : num(v)}
       <span className={`ml-[0.12em] text-[0.62em] font-normal opacity-55 ${rubClass}`}>₽</span>
     </span>
   );

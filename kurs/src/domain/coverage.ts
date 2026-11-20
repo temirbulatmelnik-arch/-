@@ -3,7 +3,7 @@
 // Регулировать можно только недельные деньги на жизнь: пополнение карты и мост на кредитке.
 import { accountMovement, cents, LIFE_ACCOUNT, RESERVE_ACCOUNT, rubles } from './accounts';
 import { activeBridge, bridgeState, type Bridge } from './bridge';
-import { cashIncomeEvent, eventsBetween, type CalendarInput } from './calendar';
+import { cashIncomeEvent, eventsBetween, incomeStatus, type CalendarInput, type IncomeStatus } from './calendar';
 import { addDays, daysBetween, ddmm, lastDay, monthKey } from './dates';
 import { RESERVE_BUFFER, weeklyLimit } from './plan';
 import { UNIT_2027, with2027Unit } from './payroll';
@@ -27,6 +27,7 @@ export interface CoverageStep {
   key?: string;
   accountId?: string;
   confidence?: CalEvent['confidence'];
+  incomeStatus?: IncomeStatus;
 }
 
 export interface CoverageMonth {
@@ -55,6 +56,8 @@ export interface Coverage {
   /** первая нехватка: день и сколько не хватает в самой глубокой точке после него */
   accountRisk?: AccountRisk | null;
   accountByDay?: Record<string, Record<string, number | null>>;
+  paymentFunding?: PaymentFunding[];
+  transferFunding?: TransferFunding[];
   bufferRisk?: { date: string; amount: number } | null;
   shortage: { date: string; title: string; amount: number } | null;
 }
@@ -127,6 +130,7 @@ function run(input: CoverageInput, from: string, to: string, shift?: { key: stri
   const { extra, minUp } = bridgeEvents(input, from, to);
   const step = (e: CalEvent, date: string): CoverageStep => ({
     date: shift && e.key === shift.key ? shift.date : date, title: e.title, kind: e.kind, approx: e.approx, key: e.key, balance: 0,
+    incomeStatus: incomeStatus(e),
     delta: e.kind === 'income' ? e.amount : -(e.amount + (minUp[e.key] ?? 0)),
   });
   const list: CoverageStep[] = [...due.map(e => step(e, from)), ...ahead.map(e => step(e, e.date)), ...extra]
@@ -147,14 +151,33 @@ export interface AccountRisk {
   reason: 'unassigned' | 'unverified' | 'insufficient';
 }
 
+export interface PaymentFunding {
+  key: string;
+  date: string;
+  title: string;
+  accountId?: string;
+  amount: number;
+  available: number | null;
+  shortfall: number | null;
+  prepareBy: string;
+}
+
+export interface TransferFunding {
+  id: string;
+  date: string;
+  fromAccountId: string;
+  toAccountId: string;
+  amount: number;
+  available: number | null;
+  status: 'projected' | 'insufficient' | 'unverified';
+}
+
 const REGULAR = new Set(['salary', 'advance', 'bonusMonthly']);
-const OPTIONAL_BONUS = new Set(['bonusQuarter', 'bonusYear', 'vacation', 'thirteenth']);
 function includeIncome(e: CalEvent, scenario: Scenario): boolean {
   if (!cashIncomeEvent(e) || e.payroll?.documented) return false;
   if (e.payroll?.vacationId) return true;
-  if (e.projection === 'review') return scenario === 'base';
+  if (incomeStatus(e) === 'conditional') return scenario === 'base';
   if (e.confidence === 'confirmed' || e.confidence === 'regular' || (e.incomeKind && REGULAR.has(e.incomeKind))) return true;
-  if (e.incomeKind && OPTIONAL_BONUS.has(e.incomeKind)) return scenario === 'base';
   if (e.confidence === 'estimate') return scenario === 'base';
   return scenario === 'base' && !e.approx && e.dateMode === 'exact' && e.confidence !== 'tentative';
 }
@@ -181,6 +204,8 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
   const start = rubles(total);
   const daily: NonNullable<Coverage['accountByDay']> = {};
   const steps: CoverageStep[] = [];
+  const paymentFunding: PaymentFunding[] = [];
+  const transferFunding: TransferFunding[] = [];
   const byDay: Record<string, number> = {};
   let accountRisk: AccountRisk | null = null;
   let bufferRisk: Coverage['bufferRisk'] = null;
@@ -194,6 +219,7 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
       accountRisk = { accountId: id, date, title, amount: available == null ? null : rubles(amount - available),
         reason: !id ? 'unassigned' : available == null ? 'unverified' : 'insufficient' };
     }
+    return available;
   };
   const push = (step: Omit<CoverageStep, 'balance' | 'delta'>, delta: number) => {
     total += delta;
@@ -248,37 +274,43 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
       }
       const amount = cents(e.amount + (minUp[e.key] ?? 0));
       if (amount <= 0) continue;
-      requireMoney(e.accountId, amount, date, e.title);
+      const available = requireMoney(e.accountId, amount, date, e.title);
+      paymentFunding.push({ key: e.key, date, title: e.title, accountId: e.accountId, amount: rubles(amount),
+        available: available == null ? null : rubles(available),
+        shortfall: available == null ? null : rubles(Math.max(0, amount - available)), prepareBy: addDays(date, -1) });
       move(e.accountId, -amount);
       push({ date, title: e.title, kind: e.kind, key: e.key, accountId: e.accountId, approx: e.approx, confidence: e.confidence }, -amount);
     }
     for (const op of transfers.filter(op => op.date === date)) {
       if (op.type !== 'transfer') continue;
-      requireMoney(op.accountId, cents(op.amount), date, 'Перевод между счетами');
+      const available = requireMoney(op.accountId, cents(op.amount), date, 'Перевод между счетами');
+      const status = available == null ? 'unverified' : available < cents(op.amount) ? 'insufficient' : 'projected';
+      transferFunding.push({ id: op.id, date, fromAccountId: op.accountId, toAccountId: op.toAccountId, amount: op.amount,
+        available: available == null ? null : rubles(available), status });
+      if (status !== 'projected') continue;
       move(op.accountId, accountMovement(op, op.accountId));
       move(op.toAccountId, accountMovement(op, op.toAccountId));
     }
     for (const e of day.filter(x => x.kind === 'income')) {
       const accountId = e.accountId ?? LIFE_ACCOUNT;
       move(accountId, cents(e.amount));
-      push({ date, title: e.title, kind: 'income', key: e.key, accountId, approx: e.approx, confidence: e.confidence }, cents(e.amount));
+      push({ date, title: e.title, kind: 'income', key: e.key, accountId, approx: e.approx, confidence: e.confidence,
+        incomeStatus: incomeStatus(e) }, cents(e.amount));
     }
     byDay[date] = rubles(total);
     daily[date] = Object.fromEntries([...balances].map(([id, value]) => [id, value === null ? null : rubles(value)]));
   }
   const min = steps.reduce<CoverageStep | null>((m, s) => (!m || s.balance < m.balance ? s : m), null);
-  return { start, from, to, steps, byDay, accountByDay: daily, accountRisk, bufferRisk, min };
+  return { start, from, to, steps, byDay, accountByDay: daily, accountRisk, paymentFunding, transferFunding, bufferRisk, min };
 }
 
 /** Сравнение двух расчётных единиц с одинаковыми остатками, счетами и обязательствами. */
 export function compare2027Coverage(input: CoverageInput, from: string, scenario: Scenario = 'cautious') {
   const work = input.cal.work;
   if (!work || from > '2027-12-31') return [];
-  const horizon = addDays(from, HORIZON_DAYS);
-  const end = horizon < '2027-12-31' ? '2027-12-31' : horizon;
   return UNIT_2027.map(unit => {
     const model = { ...input, cal: { ...input.cal, work: { ...with2027Unit(work, unit.unit), cautiousUnit2027: undefined } } };
-    const result = coverage(model, from, scenario, end);
+    const result = coverage(model, from, scenario, '2027-12-31');
     return { ...unit, ...result };
   });
 }
@@ -309,13 +341,14 @@ export function safePrepayment(input: CoverageInput, from: string, accountId: st
 /** Прогноз резерва от сегодня: не меньше 150 дней и до первой крупной премии после самого тонкого места */
 export function coverage(input: CoverageInput, from: string, scenario: Scenario = 'base', until?: string): Coverage {
   const model = scenarioInput(input, scenario);
-  let to = addDays(from, HORIZON_DAYS);
-  if (until && until > to) to = until;
+  let to = until && until >= from ? until : addDays(from, HORIZON_DAYS);
   const runModel = (end: string) => model.cash ? runAccounts(model, from, end, scenario) : run(model, from, end, undefined, scenario);
   let base = runModel(to);
-  const big = eventsBetween(model.cal, base.min?.date ?? from, addDays(from, 400))
-    .find(e => e.kind === 'income' && e.amount >= 100_000 && !model.marks[e.key]?.done && projectedEvent(e, scenario));
-  if (big && big.date > to) { to = big.date; base = runModel(to); }
+  if (!until) {
+    const big = eventsBetween(model.cal, base.min?.date ?? from, addDays(from, 400))
+      .find(e => e.kind === 'income' && e.amount >= 100_000 && !model.marks[e.key]?.done && projectedEvent(e, scenario));
+    if (big && big.date > to) { to = big.date; base = runModel(to); }
+  }
   const { steps, min } = base;
 
   // узкие места: по дню — последний платёж, после которого остаток ниже запаса
@@ -338,6 +371,28 @@ export function coverage(input: CoverageInput, from: string, scenario: Scenario 
   const firstNeg = base.start < 0 ? { balance: base.start, date: from, title: 'Остатки на начало прогноза' } : steps.find(s => s.balance < 0);
   const shortage = firstNeg ? { date: firstNeg.date, title: firstNeg.title, amount: -Math.min(firstNeg.balance, ...steps.filter(s => s.date >= firstNeg.date).map(s => s.balance)) } : null;
   return { ...base, narrow, months: [...months.values()], shortage, to, min };
+}
+
+export const COVERAGE_SCENARIOS = ['base', 'cautious', 'stress'] as const;
+
+export function compareCoverage(input: CoverageInput, from: string, to: string) {
+  if (to < from) return [];
+  const scenarios = COVERAGE_SCENARIOS.map(scenario => ({ scenario, cov: coverage(input, from, scenario, to) }));
+  const cautious = scenarios[1].cov;
+  const comparisonDate = cautious.min && cautious.min.balance < cautious.start ? cautious.min.date : from;
+  return scenarios.map(({ scenario, cov }) => {
+    const min = Math.min(cov.start, cov.min?.balance ?? cov.start);
+    const flows = { forecastIncome: 0, conditionalIncome: 0, expenses: 0 };
+    for (const step of cov.steps) {
+      if (step.date > comparisonDate) break;
+      const group = step.kind !== 'income' ? 'expenses' : step.incomeStatus === 'conditional' ? 'conditionalIncome' : 'forecastIncome';
+      flows[group] += cents(step.delta);
+    }
+    return { scenario, from, to, min, minDate: cov.min && cov.min.balance < cov.start ? cov.min.date : from,
+      firstShortage: cov.shortage, accountRisk: cov.accountRisk, bufferRisk: cov.bufferRisk,
+      comparisonDate, closingOnComparisonDate: rubles(cents(cov.start) + flows.forecastIncome + flows.conditionalIncome + flows.expenses),
+      flowsOnComparisonDate: { forecastIncome: rubles(flows.forecastIncome), conditionalIncome: rubles(flows.conditionalIncome), expenses: rubles(-flows.expenses) } };
+  });
 }
 
 export interface CoverageHint {

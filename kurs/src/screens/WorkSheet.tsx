@@ -4,7 +4,7 @@ import { compare2027Coverage } from '../domain/coverage';
 import { useMemo, useState } from 'react';
 import { Field, Money, PrimaryButton, SecondaryButton, Segmented, Sheet } from '../components/ui';
 import { accountOptions, LIFE_ACCOUNT, validDate } from '../domain/accounts';
-import { cashIncomeEvent, eventsBetween } from '../domain/calendar';
+import { cashIncomeEvent, eventsBetween, incomeStatus, INCOME_STATUS_LABEL } from '../domain/calendar';
 import { ddmmyyyy } from '../domain/dates';
 import { parseAmount } from '../domain/money';
 import { payComponents, payRateOn, progressiveTax, UNIT_2027, UNIT_REFERENCE, vacationDays, vacationGross, with2027Unit, type PayrollProfile, type PayRate, type Vacation } from '../domain/payroll';
@@ -72,6 +72,7 @@ function Income({ profile, now, calendar }: { profile: PayrollProfile; now: stri
         <div className="grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 text-[13px]">
           <span>Фактически зачислено</span><b className="text-right">{amount(result.actual)}</b>
           <span>Ожидается до конца года</span><b className="text-right">{amount(result.expected || null)}</b>
+          {result.conditional > 0 && <><span>Из прогноза на условиях</span><b className="text-right">{amount(result.conditional)}</b></>}
           <span>{year === '2026' ? 'Известные суммы и остаток года' : 'Основной прогноз за год'}</span><b className="text-right">{amount(result.total)}</b>
           {year === '2027' && <><span>Осторожный прогноз за год</span><b className="text-right">{amount(cautious.total)}</b></>}
         </div>
@@ -85,7 +86,8 @@ function Income({ profile, now, calendar }: { profile: PayrollProfile; now: stri
           <div className="mt-2 divide-y divide-line">
             {result.breakdown.filter(row => row.total != null).map(row => <div className="py-2" key={row.group}>
               <p>{INCOME_GROUPS[row.group]}</p>
-              <p className="text-muted">Факт {amount(row.actual)} · ожидается {amount(row.expected || null)}</p>
+              <p className="text-muted">Факт {amount(row.actual)} · ожидается {amount(row.expected || null)}
+                {row.conditional > 0 && <> · условно {amount(row.conditional)}</>}</p>
             </div>)}
           </div>
         </details>
@@ -115,12 +117,13 @@ function Income({ profile, now, calendar }: { profile: PayrollProfile; now: stri
         const pay = e.payroll;
         const mark = cal.marks?.[e.key];
         const actual = mark?.done ? mark.amount ?? e.amount : pay?.actualNet;
+        const status = incomeStatus(e, mark);
         return <button type="button" key={e.key} className="block w-full px-4 py-3 text-left" onClick={() => set({ workSheet: false, event: e })}>
           <div className="flex justify-between gap-2"><span className="font-medium">{e.title}</span><Money value={actual ?? e.amount} approx={actual == null} /></div>
           <div className="mt-1 text-[13px] text-muted">
             {e.dateMode === 'month' ? fmtMonth(e.date.slice(0, 7)) : ddmmyyyy(e.date)}
             {e.accrualPeriod && <> · расчётный период {e.accrualPeriod}</>}
-            {' · '}{mark?.done ? 'поступление отмечено' : pay?.documented ? 'по документу' : 'прогноз'}
+            {status && <> · {INCOME_STATUS_LABEL[status]}</>}
           </div>
           {pay && <p className="mt-1 text-[12px] text-muted">
             {(!pay.documented || pay.actualGrossKnown) && <>Начислено <Money value={pay.gross} /> · </>}

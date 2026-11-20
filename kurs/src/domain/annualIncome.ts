@@ -1,5 +1,5 @@
 import { cents, rubles } from './accounts';
-import { cashIncomeEvent, eventsBetween, paidOn, type CalendarInput } from './calendar';
+import { cashIncomeEvent, eventsBetween, incomeStatus, paidOn, type CalendarInput } from './calendar';
 import { projectedEvent, type Scenario } from './coverage';
 import type { CalEvent, IncomeKind } from './types';
 
@@ -17,9 +17,9 @@ export function annualIncome(input: CalendarInput, year: number, now: string, sc
   const byKey = new Map(all.map(event => [event.key, event]));
   const journal = input.accountBook?.operations ?? [];
   const paidByKey = new Map(journal.filter(op => op.status === 'confirmed' && op.eventKey).map(op => [op.eventKey!, op]));
-  const entries: { date: string; amount: number; actual: boolean; group: IncomeGroup }[] = [];
-  const record = (date: string, amount: number, actual: boolean, kind?: IncomeKind) => {
-    if (date >= from && date <= to && (actual ? date <= now : date >= now)) entries.push({ date, amount: cents(amount), actual, group: groupOf(kind) });
+  const entries: { date: string; amount: number; actual: boolean; conditional: boolean; group: IncomeGroup }[] = [];
+  const record = (date: string, amount: number, actual: boolean, kind?: IncomeKind, conditional = false) => {
+    if (date >= from && date <= to && (actual ? date <= now : date >= now)) entries.push({ date, amount: cents(amount), actual, conditional, group: groupOf(kind) });
   };
   const next: CalEvent[] = [];
   let missingEstimate = 0;
@@ -36,7 +36,7 @@ export function annualIncome(input: CalendarInput, year: number, now: string, sc
       }
       const plan = projectedEvent(event, scenario);
       if (plan && event.date >= now && plan.date <= to) {
-        record(plan.date, plan.amount, false, plan.incomeKind);
+        record(plan.date, plan.amount, false, plan.incomeKind, incomeStatus(plan) === 'conditional');
         next.push(plan);
       }
     }
@@ -51,7 +51,8 @@ export function annualIncome(input: CalendarInput, year: number, now: string, sc
     const planned = rows.filter(row => !row.actual);
     const actualTotal = rubles(actual.reduce((total, row) => total + row.amount, 0));
     const expected = rubles(planned.reduce((total, row) => total + row.amount, 0));
-    return { actual: actual.length ? actualTotal : null, expected, total: actual.length || planned.length ? rubles(cents(actualTotal) + cents(expected)) : null };
+    const conditional = rubles(planned.reduce((total, row) => total + (row.conditional ? row.amount : 0), 0));
+    return { actual: actual.length ? actualTotal : null, expected, conditional, total: actual.length || planned.length ? rubles(cents(actualTotal) + cents(expected)) : null };
   };
   const months = Array.from({ length: 12 }, (_, index) => {
     const month = `${year}-${String(index + 1).padStart(2, '0')}`;

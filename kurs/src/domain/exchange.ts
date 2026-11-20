@@ -1,14 +1,15 @@
 import { accountOptions, appendOperations, bookOperationAllowed, budgetExpenses, cents, EMPTY_BOOK, LIFE_ACCOUNT, monthDebtActivity, RESERVE_ACCOUNT, validAmount, validBankBalance, validDate, validLoanReview, validSplitDebit, validSplitPlan, type AccountBook, type CashAccount } from './accounts';
-import { validPayroll, type PayrollProfile } from './payroll';
+import { validPayroll, with2027Unit, type PayrollProfile } from './payroll';
+import { annualIncome } from './annualIncome';
 // Файл обмена с чатом «Финансы»: один формат в обе стороны.
 // Приложение выгружает всё, что знает (status — сводка только для чтения); чат возвращает тот же формат,
 // но только с изменениями. Списки с id/key — «добавить или изменить», удаление — только явное "delete": true.
 // Перед применением приложение показывает разницу по разделам; присланное без изменений ничего не трогает.
 import { bridgeState, weekMoney, type Bridge } from './bridge';
 import { cardOn, ledger, type Checkup, type LedgerInput } from './ledger';
-import { compare2027Coverage, coverage, coverageInput, safePrepayment } from './coverage';
+import { compare2027Coverage, compareCoverage, coverage, coverageInput, HORIZON_DAYS, safePrepayment } from './coverage';
 import { PROTOCOL_VERSION } from './sync';
-import { eventsBetween, paidOn, type CalendarInput } from './calendar';
+import { eventsBetween, incomeStatus, paidOn, type CalendarInput, type IncomeStatus } from './calendar';
 import { categorize } from './categorize';
 import { addDays, daysBetween, ddmm, plural } from './dates';
 import { rub } from './money';
@@ -50,6 +51,7 @@ export interface ExchangeFile {
   protocolVersion?: string;
   short?: boolean;
   from?: 'app' | 'chat';
+  appVersion?: string;
   date?: string;
   /** одной фразой: что меняется */
   summary?: string;
@@ -75,7 +77,7 @@ export interface ExchangeFile {
   incomes?: IncomeTemplate[];
   /** события календаря по key: amount и date — плановые, paid — фактически оплачено или пришло */
   /** событие ищется по key, а без него — по названию, дате (±7 дней) и сумме */
-  calendar?: { key?: string; date?: string; title?: string; kind?: string; amount?: number; done?: boolean; paid?: number; paidFrom?: string; paidDate?: string; reset?: boolean; resetAmount?: boolean; approx?: boolean; exact?: boolean; planned?: string; dateMode?: string; accountId?: string; economicType?: CalEvent['economicType']; projection?: CalEvent['projection']; accrualPeriod?: string; nominalDate?: string; expectedPayDate?: string; actualPayDate?: string; confidence?: CalEvent['confidence'] }[];
+  calendar?: { key?: string; date?: string; title?: string; kind?: string; amount?: number; done?: boolean; paid?: number; paidFrom?: string; paidDate?: string; reset?: boolean; resetAmount?: boolean; approx?: boolean; exact?: boolean; planned?: string; dateMode?: string; accountId?: string; economicType?: CalEvent['economicType']; projection?: CalEvent['projection']; accrualPeriod?: string; nominalDate?: string; expectedPayDate?: string; actualPayDate?: string; confidence?: CalEvent['confidence']; incomeStatus?: IncomeStatus; manuallyAdjusted?: boolean }[];
   /** разовые платежи и поступления */
   events?: ({ key?: string; date?: string; title?: string; amount?: number; kind?: 'payment' | 'income'; dateMode?: CalEvent['dateMode']; note?: string; debtId?: string } & Del)[];
   expensesFrom?: string;
@@ -91,6 +93,7 @@ export interface ExchangeFile {
   weeks?: unknown;
   checklist?: (Partial<ChecklistItem> & { id: string } & Del)[];
   strategy?: StrategySection[];
+  strategyEdits?: { title: string; find: string; replace: string }[];
   rules?: string[];
 }
 
@@ -149,12 +152,28 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
   };
   // окно −45…+75 дней и, дальше него, всё, что поправлено в приложении вручную: точные суммы и даты будущих платежей;
   // воскресные пополнения карты — только прошедшие и ближайшее, чтобы сверить их с переводами из резерва
-  const calendar = short
+  const recent = short
     ? eventsBetween(s, addDays(now, -14), addDays(now, 45))
     : eventsBetween(s, addDays(now, -45), addDays(now, 400))
       .filter(e => (e.kind === 'weekly' ? e.date <= addDays(now, 7) : e.date <= addDays(now, 75) || s.overrides[e.key] || s.marks[e.key]));
+  const year = Number(now.slice(0, 4));
+  const lastYear = year + (s.work?.from.startsWith(String(year - 1)) ? 0 : 1);
+  const firstYear = Math.max(year - 1, Number(s.work?.from.slice(0, 4) ?? year));
+  const throughYear = `${lastYear}-12-31`;
+  const calendar = !short && s.work
+    ? [...new Map([...recent, ...eventsBetween(s, `${firstYear}-01-01`, throughYear).filter(e => e.kind === 'income')]
+      .map(e => [e.key, e])).values()].sort((a, b) => a.date.localeCompare(b.date))
+    : recent;
+  const incomeReport = (reportYear: number, scenario: 'base' | 'cautious') => {
+    const work = s.work;
+    const model = scenario === 'cautious' && work?.cautiousUnit2027 ? { ...s, work: with2027Unit(work, work.cautiousUnit2027) } : s;
+    const { next, ...report } = annualIncome(model, reportYear, now, scenario);
+    void next;
+    return { year: reportYear, scenario, ...report };
+  };
   return {
-    app: EXCHANGE_APP, version: 2, protocolVersion: PROTOCOL_VERSION, from: 'app', date: now, ...(short ? { short: true } : {}),
+    app: EXCHANGE_APP, version: 2, protocolVersion: PROTOCOL_VERSION, from: 'app', date: now,
+    ...(typeof __APP_VERSION__ === 'string' ? { appVersion: __APP_VERSION__ } : {}), ...(short ? { short: true } : {}),
     about: 'Файл обмена приложения «Курс». status — сводка только для чтения. Остальные разделы можно менять: в ответ присылай этот же формат только с изменениями.',
     status: {
       totalDebt: r0(Object.values(led.debtBalances).reduce((sum, d) => sum + d.estimated, 0)),
@@ -167,9 +186,9 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
       },
       reserveNeed: { amount: r0(need.need), untilBonus: need.next },
       coverage: {
-        to: cov.to, ...(cov.min ? { min: r0(cov.min.balance), minDate: cov.min.date, minTitle: cov.min.title } : {}),
+        to: cov.to, ...(cov.min ? { min: cov.min.balance, minDate: cov.min.date, minTitle: cov.min.title } : {}),
         ...(s.accountBook ? { scenario: 'base', accountRisk: cov.accountRisk, bufferRisk: cov.bufferRisk } : {}),
-        ...(cov.shortage ? { shortage: { date: cov.shortage.date, amount: r0(cov.shortage.amount), title: cov.shortage.title } } : {}),
+        ...(cov.shortage ? { shortage: cov.shortage } : {}),
         narrow: cov.narrow.map(n => ({ date: n.date, title: n.title, left: r0(n.balance) })),
       },
       ...(s.accountBook ? {
@@ -179,6 +198,13 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
         debtActivity: monthDebtActivity(s.accountBook, s.expenses, now),
         accountRisk: cov.accountRisk,
         coverageScenarios: { cautious: byScenario('cautious'), ...(short ? {} : { stress: byScenario('stress') }) },
+        ...(!short ? {
+          coverageComparison: { common: compareCoverage(input, now, addDays(now, HORIZON_DAYS)), yearEnd: compareCoverage(input, now, throughYear) },
+          paymentFunding: cov.paymentFunding?.filter(p => p.date <= addDays(now, 45)),
+          transferFunding: cov.transferFunding?.filter(p => p.date <= addDays(now, 45)),
+        } : {}),
+        ...(!short && s.work ? { yearIncome: Array.from({ length: Math.max(0, lastYear - firstYear + 1) }, (_, index) => firstYear + index)
+          .flatMap(reportYear => [incomeReport(reportYear, 'base'), incomeReport(reportYear, 'cautious')]) } : {}),
         ...(!short && s.work ? { payUnitScenarios: compare2027Coverage(input, now).map(scenario => ({
           id: scenario.id, unit: scenario.unit, to: scenario.to, min: Math.min(scenario.start, scenario.min?.balance ?? scenario.start),
           shortage: scenario.shortage, accountRisk: scenario.accountRisk,
@@ -206,14 +232,19 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
     ...(short ? {} : { incomes: s.incomes }),
     calendar: calendar.map(e => {
       const m = s.marks[e.key];
+      const status = incomeStatus(e, m);
+      const override = s.overrides[e.key];
+      const manuallyAdjusted = override?.amount != null || override?.date != null;
+      const exact = status ? status === 'recorded' || (status === 'documented' && !!e.payroll?.actualPayDate)
+        : manuallyAdjusted && !e.approx;
       return {
         key: e.key, date: e.date, title: e.title, kind: e.kind, amount: e.amount,
         ...(e.approx ? { approx: true } : {}), ...(e.dateMode !== 'exact' ? { dateMode: e.dateMode } : {}),
-        // сумма или дата внесены в приложении вручную — это не оценка
-        ...(s.overrides[e.key] ? { exact: true } : {}), ...(e.planned ? { planned: e.planned } : {}),
+        ...(exact ? { exact: true } : {}), ...(manuallyAdjusted ? { manuallyAdjusted: true } : {}),
+        ...(status ? { incomeStatus: status } : {}), ...(e.planned ? { planned: e.planned } : {}),
         ...(e.accountId ? { accountId: e.accountId } : {}), ...(e.economicType ? { economicType: e.economicType } : {}),
         ...(e.projection ? { projection: e.projection } : {}),
-        ...(e.confidence ? { confidence: e.confidence } : {}),
+        ...(status === 'conditional' ? { confidence: 'estimate' as const } : e.confidence ? { confidence: e.confidence } : {}),
         ...(e.accrualPeriod ? { accrualPeriod: e.accrualPeriod, nominalDate: e.nominalDate, expectedPayDate: e.expectedPayDate,
           actualPayDate: m?.done ? paidOn(e, m) : e.payroll?.actualPayDate } : {}),
         done: !!m?.done, ...(m?.done && m.amount != null ? { paid: m.amount } : {}), ...(m?.paidFrom ? { paidFrom: m.paidFrom } : {}),
@@ -880,6 +911,7 @@ const stepWork: Step = (f, s) => {
   const actual = { ...base?.actual };
   for (const [key, record] of Object.entries(incoming.actual ?? {})) {
     const former = actual[key];
+    if (!record || (former?.net != null && record.net != null && cents(former.net) !== cents(record.net))) continue;
     actual[key] = { ...record, ...Object.fromEntries(Object.entries(former ?? {}).filter(([, value]) => value != null)) };
   }
   const next: PayrollProfile = {
@@ -959,6 +991,21 @@ const stepStrategy: Step = (f, s) => {
   if (Array.isArray(f.strategy) && !same(f.strategy, s.strategy)) {
     patch.strategy = f.strategy.filter(x => x.title && typeof x.text === 'string');
     lines.push(`Стратегия: ${patch.strategy.length} ${plural(patch.strategy.length, 'раздел', 'раздела', 'разделов')}`);
+  }
+  if (Array.isArray(f.strategyEdits)) {
+    const original = patch.strategy ?? s.strategy;
+    const strategy = original.map(section => {
+      let text = section.text;
+      for (const edit of f.strategyEdits ?? []) {
+        if (edit?.title !== section.title || typeof edit.find !== 'string' || !edit.find || typeof edit.replace !== 'string') continue;
+        const first = text.indexOf(edit.find);
+        if (first >= 0 && first === text.lastIndexOf(edit.find)) text = text.replace(edit.find, () => edit.replace);
+      }
+      if (section.text === text) return section;
+      lines.push(`Стратегия · ${section.title}`);
+      return { ...section, text };
+    });
+    if (!same(strategy, original)) patch.strategy = strategy;
   }
   if (Array.isArray(f.rules) && !same(f.rules, s.rules)) {
     patch.rules = f.rules.filter(r => typeof r === 'string' && r.trim());

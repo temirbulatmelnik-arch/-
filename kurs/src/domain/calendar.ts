@@ -197,17 +197,24 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
     .map(e => {
       if (e.kind !== 'income' || e.economicType === 'loan_disbursement' || e.nominalDate || e.dateMode === 'month' || ov[e.key]?.date) return e;
       const mark = input.marks?.[e.key];
-      if (mark?.done) return { ...e, date: paidOn(e, mark) };
+      if (mark?.done) return { ...e, date: paidOn(e, mark), dateMode: 'exact' as const, approx: false };
       const date = workdayOnOrBefore(e.date);
       return date === e.date ? e : { ...e, date, planned: e.date };
     })
     .map(e => {
       const custom = ov[e.key];
-      if (!custom || e.economicType === 'loan_disbursement') return e;
-      const fact = e.kind === 'income' && (input.marks?.[e.key]?.done || e.payroll?.documented);
-      return { ...e, amount: fact ? e.amount : custom.amount ?? e.amount, date: fact ? e.date : custom.date ?? e.date,
-        economicType: custom.economicType ?? e.economicType, projection: custom.projection ?? e.projection,
-        approx: !fact && custom.amount != null ? false : e.approx, moved: !fact && custom.date != null && custom.date !== e.date };
+      if (e.economicType === 'loan_disbursement') return e;
+      const mark = input.marks?.[e.key];
+      const fact = e.kind === 'income' && (mark?.done || e.payroll?.documented);
+      const status = incomeStatus({ ...e, projection: custom?.projection ?? e.projection }, mark);
+      const scenario = status === 'conditional';
+      return { ...e,
+        amount: fact ? mark?.amount ?? e.amount : custom?.amount ?? e.amount,
+        date: fact ? mark?.paidDate ?? e.date : custom?.date ?? e.date,
+        dateMode: scenario && e.dateMode !== 'month' ? 'approx' as const : e.dateMode,
+        economicType: custom?.economicType ?? e.economicType, projection: custom?.projection ?? e.projection,
+        approx: scenario || (!fact && custom?.amount == null && e.approx),
+        moved: !fact && custom?.date != null && custom.date !== e.date };
     })
     .filter(e => e.date >= rangeFrom && e.date <= rangeTo)
     .sort((a, b) => a.date.localeCompare(b.date) || rank[a.kind] - rank[b.kind] || a.title.localeCompare(b.title));
@@ -215,6 +222,24 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
 
 export const cashIncomeEvent = (event: CalEvent) =>
   event.kind === 'income' && event.economicType !== 'loan_disbursement' && event.economicType !== 'non_income';
+
+export type IncomeStatus = 'recorded' | 'documented' | 'forecast' | 'conditional';
+const optionalPay = new Set<IncomeKind>(['bonusQuarter', 'bonusYear', 'thirteenth']);
+
+export function incomeStatus(event: CalEvent, mark?: EventMark): IncomeStatus | undefined {
+  if (event.kind !== 'income') return undefined;
+  if (mark?.done) return 'recorded';
+  if (event.payroll?.documented) return 'documented';
+  if (event.projection === 'review' || event.projection === 'conditional' ||
+      (event.incomeKind && optionalPay.has(event.incomeKind)) ||
+      (event.incomeKind === 'other' && event.confidence === 'estimate') ||
+      (event.incomeKind === 'vacation' && !event.payroll)) return 'conditional';
+  return 'forecast';
+}
+
+export const INCOME_STATUS_LABEL: Record<IncomeStatus, string> = {
+  recorded: 'Подтверждено в приложении', documented: 'Факт по документам', forecast: 'Прогноз', conditional: 'Условный сценарий',
+};
 
 export const actionableEvent = (event: CalEvent) =>
   !event.payroll?.documented && event.economicType !== 'loan_disbursement' &&

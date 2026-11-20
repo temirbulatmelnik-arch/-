@@ -118,3 +118,41 @@ it('classifies historical loans and card fees without moving balances or repeati
   expect(after.accountBook.operations).toEqual([]);
   expect(previewExchange(patch, after, date)).toEqual([]);
 });
+
+it('refines the date of a documented bonus on one key without marking any cash movement', async () => {
+  const key = 'inc:bonusQuarter:2026-10';
+  const pay = { kind: 'bonusQuarter', title: 'Премия', net: 17440, gross: 20045, asOf: date, payMonth: '2026-10' } as const;
+  const store = await reopen(5, { ...old, work: { from: '2026-01-01', rates: [{
+    from: '2026-01-01', unit: 2000, positionUnits: 15, rankUnits: 5,
+    seniority: 0.1, conditions: 0.2, monthlyBonus: 0.3, confidence: 'estimate',
+  }], actual: { [key]: pay } },
+    incomes: [{ kind: 'bonusQuarter', name: 'Премия', day: 29, amount: 17440, months: [10, 12] }],
+    overrides: { 'inc:bonusQuarter:2026-12': { amount: 18888, date: '2026-12-24' } },
+    templateFrom: '2026-01' });
+  const before = store.getState();
+  const file = exchange({ work: { actual: { [key]: { ...pay, payDate: '2026-10-23' } } } });
+  store.getState().applySync(applyExchange(file, before, date, new Set(['work']), () => 'synthetic'));
+  const after = store.getState();
+  const out = buildExchange(after, date, { short: false });
+  expect(out.calendar?.filter(row => row.key === key)).toMatchObject([{
+    date: '2026-10-23', actualPayDate: '2026-10-23', incomeStatus: 'documented', exact: true, done: false, amount: 17440,
+  }]);
+  const future = out.calendar?.find(row => row.key === 'inc:bonusQuarter:2026-12');
+  expect(future).toMatchObject({ manuallyAdjusted: true, incomeStatus: 'conditional', approx: true, done: false });
+  expect(future).not.toHaveProperty('exact');
+  expect(ledger(after)).toEqual(ledger(before));
+  expect(after.marks).toEqual(before.marks);
+  expect(previewExchange(file, after, date)).toEqual([]);
+});
+
+it('updates only matching strategy text and preserves all payment and checklist marks', async () => {
+  const strategy = [{ title: 'План', text: 'Строка А\nСтарый текст\nСтрока Б' }, { title: 'История', text: 'Старый текст' }];
+  const store = await reopen(5, { ...old, strategy });
+  const file = exchange({ strategyEdits: [{ title: 'План', find: 'Старый текст', replace: 'Новый текст' }] });
+  const before = store.getState();
+  store.getState().applySync(applyExchange(file, before, date, new Set(['strategy']), () => 'synthetic'));
+  expect(store.getState().strategy).toEqual([{ ...strategy[0], text: 'Строка А\nНовый текст\nСтрока Б' }, strategy[1]]);
+  expect(store.getState().marks).toEqual(before.marks);
+  expect(store.getState().checks).toEqual(before.checks);
+  expect(previewExchange(file, store.getState(), date)).toEqual([]);
+});

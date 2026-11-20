@@ -4,7 +4,7 @@ import { CalendarDays, Undo2 } from 'lucide-react';
 import { useState } from 'react';
 import { AmountInput, Money, PrimaryButton, Row, SecondaryButton, Sheet } from '../components/ui';
 import { GROUP_LABEL, whenText } from '../components/rows';
-import { actionableEvent, cashIncomeEvent, eventGroup } from '../domain/calendar';
+import { actionableEvent, cashIncomeEvent, eventGroup, incomeStatus, INCOME_STATUS_LABEL } from '../domain/calendar';
 import { addDays, dayMonth, ddmmyyyy, relDays, weekdayFull } from '../domain/dates';
 import { heldKeys, ledger } from '../domain/ledger';
 import { parseAmount, rub } from '../domain/money';
@@ -34,6 +34,7 @@ function Body({ e }: { e: CalEvent }) {
   const set = useUi(s => s.set);
   const group = eventGroup(e);
   const pay = e.payroll;
+  const status = incomeStatus(e, mark);
   const locked = e.economicType === 'loan_disbursement' || pay?.documented ||
     e.projection === 'conditional' || e.projection === 'internal_transfer';
 
@@ -85,10 +86,14 @@ function Body({ e }: { e: CalEvent }) {
   return (
     <div className="space-y-4 pt-1">
       <div className="card px-5 py-4">
-        <Money value={mark?.done && mark.amount != null ? mark.amount : e.amount} approx={e.approx && !mark?.done} sign={e.kind === 'income'}
+        <Money value={mark?.done && mark.amount != null ? mark.amount : e.amount} approx={e.approx && !mark?.done} sign={e.kind === 'income'} kopecks={!e.approx}
           className={`figure block text-[40px] leading-none ${e.kind === 'income' ? 'text-pos' : ''}`} />
         <div className="mt-3 divide-y divide-line">
           <Row label="Когда">{e.dateMode === 'month' ? 'в течение месяца' : `${whenText(e)}, ${weekdayFull(e.date)}`}</Row>
+          {status && e.economicType !== 'loan_disbursement' && <Row label="Статус">{INCOME_STATUS_LABEL[status]}</Row>}
+          {e.kind === 'payment' && !mark?.done && <Row label="Счёт списания">
+            {accountOptions(book).find(option => option.id === e.accountId)?.name ?? 'Требует уточнения'}
+          </Row>}
           {pay && <>
             <Row label="Расчётный период">{pay.accrualPeriod}</Row>
             <Row label="Номинальная дата">{ddmmyyyy(pay.nominalDate)}</Row>

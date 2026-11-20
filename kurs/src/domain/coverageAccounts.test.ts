@@ -54,3 +54,38 @@ it('строит два независимых кассовых прогноза
   expect(ranges[1].steps.find(e => e.key === advance2027)!.delta).toBeGreaterThan(ranges[0].steps.find(e => e.key === advance2027)!.delta);
   expect(s.cal.work.rates).toMatchObject([{ from: '2026-10-01', unit: 2071 }]);
 });
+
+it('checks each obligation and funds the following morning only from a feasible planned transfer', () => {
+  const state = input([payment, { ...payment, key: 'unassigned', accountId: undefined }], { debit: 2500, reserve: 100000, life: 5000 });
+  state.cal.accountBook = { ...EMPTY_BOOK, operations: [{
+    id: 'move-for-bill', date, type: 'transfer', accountId: 'reserve', toAccountId: 'debit',
+    amount: 5500, origin: 'manual', status: 'planned', fundingSource: 'own',
+  }] };
+  const actual = coverage(state, date);
+  expect(actual.paymentFunding?.find(row => row.key === 'bill')).toMatchObject({
+    available: 8000, shortfall: 0, prepareBy: date,
+  });
+  expect(actual.paymentFunding?.find(row => row.key === 'unassigned')).toMatchObject({ available: null, shortfall: null });
+  expect(actual.transferFunding).toMatchObject([{ status: 'projected' }]);
+  state.cash!.reserve = 5400;
+  const rejected = coverage(state, date);
+  expect(rejected.transferFunding).toMatchObject([{ status: 'insufficient' }]);
+  expect(rejected.paymentFunding?.find(row => row.key === 'bill')).toMatchObject({ available: 2500, shortfall: 5500 });
+  state.cash!.reserve = 100000;
+  state.cal.accountBook.operations[0].date = payment.date;
+  expect(coverage(state, date).paymentFunding?.find(row => row.key === 'bill')?.shortfall).toBe(5500);
+});
+
+it('compares scenarios on identical exact dates, separating conditional receipts from ordinary estimates', async () => {
+  const { compareCoverage } = await import('./coverage');
+  const until = '2026-12-02';
+  const seasonal = { ...bonus, date: '2026-11-30', key: 'conditional', amount: 1800 };
+  const later = { ...bonus, date: '2026-12-23', key: 'outside' };
+  const state = input([payment, salary, seasonal, later], { debit: 5000, reserve: 8000, life: 5000 });
+  const rows = compareCoverage(state, date, until);
+  expect(rows).toHaveLength(3);
+  expect(rows.every(row => row.to === until && row.comparisonDate === rows[0].comparisonDate)).toBe(true);
+  expect(coverage(state, date, 'base', until).steps.some(step => step.key === 'outside')).toBe(false);
+  expect(rows[1].flowsOnComparisonDate.conditionalIncome).toBe(0);
+  expect(rows[0].closingOnComparisonDate).toBeGreaterThanOrEqual(rows[1].closingOnComparisonDate);
+});

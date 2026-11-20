@@ -4,9 +4,9 @@ import { AnimatePresence, motion } from 'motion/react';
 import { CheckCircle2, ChevronDown, TriangleAlert } from 'lucide-react';
 import { useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { coverage, coverageHints, coverageInput, NARROW, type Coverage, type CoverageInput, type CoverageStep, type Scenario } from '../domain/coverage';
+import { compareCoverage, coverage, coverageHints, coverageInput, HORIZON_DAYS, NARROW, type Coverage, type CoverageInput, type CoverageStep, type Scenario } from '../domain/coverage';
 import { accountOptions, EMPTY_BOOK } from '../domain/accounts';
-import { dayMonth, ddmm, monthName } from '../domain/dates';
+import { addDays, dayMonth, ddmm, ddmmyyyy, monthName } from '../domain/dates';
 import { num } from '../domain/money';
 import { useLedger } from '../screens/Checkup';
 import { useStore } from '../store/store';
@@ -110,6 +110,10 @@ export function CoverageCard() {
   const risk = cov.accountRisk;
   const riskName = accountOptions(input.cal.accountBook ?? EMPTY_BOOK).find(a => a.id === risk?.accountId)?.name;
   const [open, setOpen] = useState(false);
+  const [compare, setCompare] = useState(false);
+  const comparisons = useMemo(() => compare ? compareCoverage(input, now, addDays(now, HORIZON_DAYS)) : [], [compare, input, now]);
+  const funding = cov.paymentFunding?.filter(p => p.date <= addDays(now, 45)) ?? [];
+  const accountName = (id?: string) => accountOptions(input.cal.accountBook ?? EMPTY_BOOK).find(a => a.id === id)?.name;
   const hints = useMemo(() => coverageHints(input, now, cov), [input, now, cov]);
   const s = cov.shortage, m = cov.min;
   const focus = Math.max(0, (s ? cov.steps.findIndex(x => x.balance < 0) : m ? cov.steps.indexOf(m) : -1) + 1);
@@ -127,10 +131,10 @@ export function CoverageCard() {
           {s || risk ? <TriangleAlert size={22} strokeWidth={1.8} className="mt-0.5 shrink-0 text-[#ff9a70]" /> : <CheckCircle2 size={22} strokeWidth={1.8} className="mt-0.5 shrink-0 text-[#9ff0d4]" />}
           <div className="min-w-0">
             <h2 className="font-display text-[21px] leading-tight font-medium">
-              {s ? <>{dayMonth(s.date)} не хватит {num(s.amount)} ₽</> : risk ? <>Счёт требует проверки</> : <>Хватает по прогнозу до {dayMonth(cov.to)}</>}
+              {s ? <>Максимальная нехватка <Money value={s.amount} kopecks /></> : risk ? <>Счёт требует проверки</> : <>Хватает по прогнозу до {dayMonth(cov.to)}</>}
             </h2>
             <p className="mt-1 text-[13.5px] leading-snug text-card-muted">
-              {s ? <>Первый дефицит после «{s.title}». Показана максимальная нехватка.</>
+              {s ? <>Первый дефицит {dayMonth(s.date)} после «{s.title}». Минимум {ddmm(m?.date ?? now)}, расчёт до {ddmmyyyy(cov.to)}.</>
                 : m ? <>Минимум {dayMonth(m.date)} · <Money value={m.balance} className="text-card" /></> : null}
             </p>
           </div>
@@ -144,6 +148,26 @@ export function CoverageCard() {
         {hints[0] && <p className="mt-1 text-muted">{hints[0].text}</p>}
       </div>}
       {cov.bufferRisk && <p className="mt-3 px-1 text-[13px] text-muted">С {dayMonth(cov.bufferRisk.date)} запас ниже цели на <Money value={cov.bufferRisk.amount} />.</p>}
+      {funding.length > 0 && <details className="card mt-3 p-4 text-[13px]">
+        <summary className="font-medium text-sea">Счета и подготовка ближайших платежей</summary>
+        <div className="mt-2 divide-y divide-line">
+          {funding.map(p => <div className="py-2" key={p.key}>
+            <p>{ddmm(p.date)} · {p.title} · <Money value={p.amount} kopecks /></p>
+            <p className="text-muted">{accountName(p.accountId) ?? 'Счёт списания нужно указать'}
+              {p.shortfall == null ? (p.accountId ? ' · остаток нужно сверить' : '')
+                : p.shortfall > 0 ? <> · подготовить к {ddmm(p.prepareBy)} ещё <Money value={p.shortfall} kopecks /></>
+                  : ' · хватает по прогнозу'}</p>
+          </div>)}
+        </div>
+        <p className="mt-2 text-muted">Суммы учитывают предыдущие обязательства. Остаток на карте и срок зачисления проверьте в банке.</p>
+      </details>}
+      <details className="card mt-3 p-4 text-[13px]" onToggle={event => setCompare(event.currentTarget.open)}>
+        <summary className="font-medium text-sea">Сравнить сценарии на одинаковом горизонте</summary>
+        {comparisons.map(row => <p className="mt-2" key={row.scenario}>
+          {{ base: 'Базовый', cautious: 'Осторожный', stress: 'Стрессовый' }[row.scenario]} · минимум <Money value={row.min} kopecks /> {ddmm(row.minDate)}
+        </p>)}
+        {comparisons[0] && <p className="mt-2 text-muted">До {ddmmyyyy(comparisons[0].to)}. Базовый включает условные доходы. Осторожный исключает их и снижает оценку отпускных. Стрессовый дополнительно сдвигает отпускные и учитывает заданный внеплановый расход.</p>}
+      </details>
       {scenario === 'stress' && !input.cal.accountBook?.stress && <p className="mt-2 px-1 text-[13px] text-muted">Добавьте непредвиденный расход в настройках счетов для стресс-сценария.</p>}
       {s && (
         <div className="mt-3 space-y-2">

@@ -2,7 +2,7 @@
 import { AlertTriangle, ArrowDownLeft, Check, ChevronRight, CreditCard, Info, PiggyBank, Receipt, Repeat, Sparkles, Wallet } from 'lucide-react';
 import { motion } from 'motion/react';
 import type { CSSProperties, ReactNode } from 'react';
-import { eventGroup, urgency, type EventGroup } from '../domain/calendar';
+import { eventGroup, incomeStatus, INCOME_STATUS_LABEL, urgency, type EventGroup } from '../domain/calendar';
 import { ddmm, relDays, weekday } from '../domain/dates';
 import { CATEGORY } from '../domain/plan';
 import type { Alert } from '../domain/summary';
@@ -46,6 +46,7 @@ export function EventRow({ e, mark, now, onClick, onToggle, showDate = true }: {
   const g = eventGroup(e);
   const Icon = GROUP_ICON[g];
   const hot = u === 'overdue' || u === 'soon';
+  const status = incomeStatus(e, mark);
   // дата прошла, а отметки нет: в прогнозе оно стоит сегодняшним днём — пометка, чтобы отметить или перенести
   const missed = u !== 'done' && e.date < now && !e.payroll?.documented;
   return (
@@ -63,7 +64,7 @@ export function EventRow({ e, mark, now, onClick, onToggle, showDate = true }: {
           <span className={`block text-[12px] ${hot ? 'text-neg' : missed ? 'text-warn' : 'text-muted'}`}>
             {showDate ? `${whenText(e)}, ` : e.dateMode === 'until' ? 'внести до этой даты, ' : ''}
             {e.economicType === 'loan_disbursement' ? 'заёмные средства'
-              : e.payroll?.documented ? 'исторический факт по документам'
+              : status ? INCOME_STATUS_LABEL[status]
               : e.projection === 'conditional' ? 'условная досрочка'
               : e.projection === 'internal_transfer' ? 'между своими счетами'
               : e.projection === 'review' ? 'нужна сверка'
@@ -74,7 +75,7 @@ export function EventRow({ e, mark, now, onClick, onToggle, showDate = true }: {
             {e.planned && u !== 'done' ? `, по графику ${ddmm(e.planned)} по общему графику` : ''}
           </span>
         </span>
-        <Money value={mark?.done && mark.amount != null ? mark.amount : e.amount} approx={e.approx && !mark?.done} sign={g === 'income'}
+        <Money value={mark?.done && mark.amount != null ? mark.amount : e.amount} approx={e.approx && !mark?.done} sign={g === 'income'} kopecks={!e.approx}
           className={`shrink-0 text-[15px] ${g === 'income' ? 'text-pos' : ''}`} />
       </button>
     </div>
