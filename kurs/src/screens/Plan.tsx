@@ -290,7 +290,8 @@ function ChecklistView() {
   const now = useToday();
   const [checklist, checks, toggleCheck] = useStore(useShallow(s => [s.checklist, s.checks, s.toggleCheck] as const));
   const set = useUi(s => s.set);
-  const isDone = (c: ChecklistItem) => checks[c.id]?.done ?? !!c.done;
+  const marks = useStore(s => s.marks);
+  const isDone = (c: ChecklistItem) => checks[c.id]?.done ?? !!(c.done || (c.eventKey && marks[c.eventKey]?.done));
   const sorted = [...checklist].sort((a, b) => Number(isDone(a)) - Number(isDone(b)) || (a.due ?? '9999').localeCompare(b.due ?? '9999'));
   // пришли из «Внимания» — прокрутить к пункту и подсветить его
   const focus = useUi(s => s.focus);
@@ -315,6 +316,8 @@ function ChecklistView() {
                 <motion.span animate={{ scale: done ? [1, 1.3, 1] : 1 }} transition={{ duration: 0.35 }} className={`mt-0.5 grid size-6 shrink-0 place-items-center rounded-full border ${done ? 'border-transparent bg-pos text-white' : due === 'overdue' ? 'border-warn' : 'border-line'}`}>{done && <Check size={13} strokeWidth={2.5} />}</motion.span>
                 <span className="min-w-0 flex-1">
                   <span className={`block text-[14.5px] leading-snug ${done ? 'line-through decoration-1' : ''}`}>{c.title}</span>
+                  <span className="mt-0.5 block text-[12.5px] text-muted">{done ? 'Выполнено' : due === 'overdue' ? 'Просрочено'
+                    : c.status === 'clarify' ? 'Нужно уточнение' : c.status === 'payment' ? 'Ожидает оплаты' : 'Ожидает проверки'}</span>
                   {c.note && !done && <span className="mt-0.5 block text-[12.5px] leading-snug text-muted">{c.note}</span>}
                 </span>
                 {c.due && !done && <Chip tone={due === 'overdue' ? 'warn' : due === 'soon' ? 'sea' : 'neutral'} className="mt-0.5">{c.due.length === 7 ? monthName(c.due).split(' ')[0] : ddmm(c.due)}</Chip>}

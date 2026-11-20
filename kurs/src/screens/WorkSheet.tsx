@@ -53,7 +53,7 @@ function Income({ profile, now, calendar }: { profile: PayrollProfile; now: stri
           </div>
           {pay && <p className="mt-1 text-[12px] text-muted">Начислено <Money value={pay.gross} /> · НДФЛ <Money value={pay.tax} />
             {actual != null && <> · отклонение <Money value={actual - expected} sign /></>}
-            {pay.netRange && <> · налоговая база требует сверки</>}
+            {pay.netRange && <> · без сверки базы ориентир на руки <Money value={pay.netRange[0]} />–<Money value={pay.netRange[1]} /></>}
           </p>}
         </button>;
       })}
@@ -89,6 +89,7 @@ function WorkSettings() {
   const [taxBase, setTaxBase] = useState('');
   const [source, setSource] = useState(latest?.source ?? '');
   const [editRateDate, setEditRateDate] = useState(latest?.from);
+  const compareRate = work?.rates.find(r => r.from.startsWith('2027-'));
   const save = () => {
     const unit = parseAmount(values.unit), positionUnits = parseAmount(values.positionUnits), rankUnits = parseAmount(values.rankUnits);
     const seniority = parseAmount(values.seniority), conditions = parseAmount(values.conditions), monthlyBonus = parseAmount(values.monthlyBonus);
@@ -119,6 +120,11 @@ function WorkSettings() {
             setEditRateDate(r.from); setFrom(r.from); setValues(asTexts(r)); setSource(r.source ?? ''); setConfirmed(r.confidence === 'confirmed');
           }}>{ddmmyyyy(r.from)} · <Money value={r.unit} /> за единицу · <Money value={payComponents(r).total} /> до НДФЛ</button>)}
         <SecondaryButton className="w-full" onClick={() => { setEditRateDate(undefined); setFrom(now); setConfirmed(false); }}>Добавить ставку с новой даты</SecondaryButton>
+      </div>}
+      {compareRate && <div className="rounded-xl bg-surface-2 p-3 text-[13px]">
+        <p className="font-medium">Сценарии 2027 · полный месяц до НДФЛ</p>
+        <p>Закон № 659-124 · <Money value={payComponents({ ...compareRate, unit: 2157 }).total} /></p>
+        <p>Проект бюджета · <Money value={payComponents({ ...compareRate, unit: 2167 }).total} /></p>
       </div>}
       <Field label="Включить модель с даты"><input className="field" type="date" value={start} onChange={e => setStart(e.target.value)} /></Field>
       <Field label={editRateDate ? 'Дата действия ставки' : 'Новая ставка с даты'}><input className="field" type="date" value={from} onChange={e => setFrom(e.target.value)} /></Field>

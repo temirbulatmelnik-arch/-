@@ -345,7 +345,7 @@ const stepLimits: Step = (f, s) => {
   let plan: PlanConfig = base;
   const touch = (p: Partial<PlanConfig>) => { plan = { ...plan, ...p }; };
   if (L.defaultWeekly && validDate(L.defaultWeekly.from) && validAmount(L.defaultWeekly.amount) && L.defaultWeekly.amount > 0
-      && !same(plan.defaultWeekly, L.defaultWeekly)) {
+      && (!plan.defaultWeekly || plan.defaultWeekly.from <= L.defaultWeekly.from) && !same(plan.defaultWeekly, L.defaultWeekly)) {
     touch({ defaultWeekly: L.defaultWeekly });
     lines.push(`Базовый недельный лимит с ${L.defaultWeekly.from} · ${money(L.defaultWeekly.amount)}. Особые недельные лимиты сохраняются.`);
   }
@@ -846,9 +846,11 @@ const stepChecklist: Step = (f, s, ctx) => {
       if (i >= 0) { lines.push(`Убрать: ${list[i].title}`); list = list.filter((_, k) => k !== i); lc = true; }
       continue;
     }
+    const status = p.status && ['review', 'payment', 'clarify'].includes(p.status) ? p.status : undefined;
+    const eventKey = typeof p.eventKey === 'string' && p.eventKey ? p.eventKey : undefined;
     if (i < 0) {
       if (!p.title) continue;
-      list.push({ id: p.id, title: p.title, ...(p.note ? { note: p.note } : {}), ...(p.due ? { due: p.due } : {}) });
+      list.push({ id: p.id, title: p.title, ...(status ? { status } : {}), ...(eventKey ? { eventKey } : {}), ...(p.note ? { note: p.note } : {}), ...(p.due ? { due: p.due } : {}) });
       lc = true;
       lines.push(`Новый пункт: ${p.title}${p.due ? `, срок ${p.due}` : ''}`);
     } else {
@@ -857,8 +859,10 @@ const stepChecklist: Step = (f, s, ctx) => {
       if (p.title && p.title !== cur.title) changes.push(`«${p.title}»`);
       if (p.due !== undefined && p.due !== cur.due) changes.push(`срок ${p.due || 'без срока'}`);
       if (p.note !== undefined && p.note !== cur.note) changes.push('пояснение');
+      if (status && status !== cur.status) changes.push('статус');
+      if (eventKey && eventKey !== cur.eventKey) changes.push('связанный платёж');
       if (changes.length) {
-        list[i] = { ...cur, ...(p.title ? { title: p.title } : {}), ...(p.due !== undefined ? { due: p.due || undefined } : {}), ...(p.note !== undefined ? { note: p.note || undefined } : {}) };
+        list[i] = { ...cur, ...(status ? { status } : {}), ...(eventKey ? { eventKey } : {}), ...(p.title ? { title: p.title } : {}), ...(p.due !== undefined ? { due: p.due || undefined } : {}), ...(p.note !== undefined ? { note: p.note || undefined } : {}) };
         lc = true;
         lines.push(`${cur.title}: ${changes.join(', ')}`);
       }

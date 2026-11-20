@@ -15,7 +15,7 @@ import { parseAmount, rub } from '../domain/money';
 import { BIG_PURCHASE, CATEGORIES, CATEGORY } from '../domain/plan';
 import { SOURCE_LABEL, SOURCES, spendEffect, suggestSource, type SpendEffect } from '../domain/sources';
 import { guessCategory, parseSpoken } from '../domain/spoken';
-import type { CategoryId, Source } from '../domain/types';
+import type { CategoryId, Expense, Source } from '../domain/types';
 import { useStore } from '../store/store';
 import { toast, useUi, type AddPrefill } from '../store/ui';
 import { useLedger } from './Checkup';
@@ -58,6 +58,7 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   const [picked, setPicked] = useState(!!(edit || p.source));
   const [card, setCard] = useState(edit?.creditCard ?? p.creditCard ?? '');
   const [account, setAccount] = useState(edit?.accountId ?? LIFE_ACCOUNT);
+  const [funding, setFunding] = useState<NonNullable<Expense['fundingSource']>>(edit?.fundingSource ?? 'unknown');
   const cashAccounts = useStore(s => s.accountBook.accounts);
   const [expenses, debts, weeklyOverrides, bridge] = useStore(useShallow(s => [s.expenses, s.debts, s.weeklyOverrides, s.bridge] as const));
   const led = useLedger();
@@ -118,7 +119,8 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
     if (!valid) return;
     if (src === 'credit' && !card) { setSource(src); toast('Выберите кредитную карту'); return; }
     if (!edit && !p.wishId && value > BIG_PURCHASE && src === 'life' && !askPause) { setAskPause(true); return; }
-    const item = { date, amount: value, category: category!, note: noteText() || undefined, source: src, origin: 'manual' as const, creditCard: src === 'credit' ? card : undefined, accountId: src === 'life' && account !== LIFE_ACCOUNT ? account : undefined };
+    const item = { date, amount: value, category: category!, note: noteText() || undefined, source: src, origin: 'manual' as const, creditCard: src === 'credit' ? card : undefined, accountId: src === 'life' && account !== LIFE_ACCOUNT ? account : undefined,
+      fundingSource: src === 'credit' ? 'borrowed' as const : funding };
     const done = src === source ? effect : spendEffect({ expenses, debts, weeklyOverrides, bridge }, { amount: value, source: src, date, now: today(), reserve: led.reserve, skipId: edit?.id, creditCard: card });
     if (edit) store.updateExpense(edit.id, item);
     else store.addExpenses([item]);
@@ -230,6 +232,12 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
         <select className="field mt-1" value={account} onChange={e => setAccount(e.target.value)}>
           <option value={LIFE_ACCOUNT}>Карта жизни</option>
           {cashAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+      </label>}
+      {source !== 'credit' && (cashAccounts.length > 0 || funding !== 'unknown') && <label className="block text-[13px]">Происхождение денег
+        <select className="field mt-1" value={funding} onChange={e => setFunding(e.target.value as NonNullable<Expense['fundingSource']>)}>
+          <option value="unknown">Неизвестно или смешано</option><option value="own">Подтверждено: собственные</option>
+          <option value="borrowed">Подтверждено: ранее полученный заём</option>
         </select>
       </label>}
       {/* подсказка не исчезает во время жеста: иначе сосуды съезжали бы из-под пальца */}

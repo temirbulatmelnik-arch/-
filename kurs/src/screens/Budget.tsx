@@ -1,3 +1,4 @@
+import { debtActivity } from '../domain/accounts';
 // «Траты» — куда ушли деньги. Месяц против лимитов этапа: «прилив» из цветов категорий, категории с полосами,
 // недели месяца, поиск и фильтры, все траты по дням. Нажатие на категорию — фильтр; свайп влево — изменить, удалить.
 import { AnimatePresence, motion } from 'motion/react';
@@ -28,6 +29,13 @@ export function Budget() {
   const enter = useEnter();
   const expenses = useBudgetExpenses();
   const [debts, wishes, overrides] = useStore(useShallow(s => [s.debts, s.wishes, s.weeklyOverrides] as const));
+  const book = useStore(s => s.accountBook);
+  const recent = useMemo(() => Array.from({ length: 4 }, (_, index) => {
+    const monday = addDays(weekStart(now), -(index + 1) * 7);
+    const sunday = addDays(monday, 6);
+    return { monday, sunday, spent: expenses.filter(e => e.date >= monday && e.date <= sunday).reduce((sum, e) => sum + e.amount, 0),
+      borrowed: debtActivity(book, expenses, monday, sunday).borrowed };
+  }), [book, expenses, now]);
   const set = useUi(s => s.set);
   const [month, setMonth] = useState(monthKey(now));
   const [cat, setCat] = useState<CategoryId | null>(null);
@@ -114,7 +122,7 @@ export function Budget() {
               <span className="h-full bg-[#aab8f0]" style={{ width: `${(src.reserve / srcAll) * 100}%` }} />
             </div>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-card-muted">
-              <span><span className="mr-1.5 inline-block size-2 rounded-[3px] bg-white/85 align-[0px]" />свои <Money value={src.life} className="text-card" /></span>
+              <span><span className="mr-1.5 inline-block size-2 rounded-[3px] bg-white/85 align-[0px]" />дебет <Money value={src.life} className="text-card" /></span>
               {src.credit > 0 && <span><span className="mr-1.5 inline-block size-2 rounded-[3px] align-[0px]" style={{ background: 'var(--loan-hatch)' }} />в долг <Money value={src.credit} className="text-card" /></span>}
               {src.reserve > 0 && <span><span className="mr-1.5 inline-block size-2 rounded-[3px] bg-[#aab8f0] align-[0px]" />из резерва <Money value={src.reserve} className="text-card" /></span>}
             </div>
@@ -122,6 +130,17 @@ export function Budget() {
         )}
       </section>
 
+      <section className="card mx-4 mt-5 overflow-hidden text-[13px]">
+        <h3 className="px-4 pt-3 font-medium">Последние четыре полные недели</h3>
+        <table className="w-full text-right">
+          <thead className="text-muted"><tr><th className="px-4 py-2 text-left font-normal">Неделя</th>
+            <th className="py-2 font-normal">Покупки</th><th className="px-4 py-2 font-normal">Новые займы</th></tr></thead>
+          <tbody className="divide-y divide-line">{recent.map(w => <tr key={w.monday}>
+            <th className="px-4 py-2 text-left font-normal">{ddmm(w.monday)}–{ddmm(w.sunday)}</th>
+            <td><Money value={w.spent} /></td><td className="px-4"><Money value={w.borrowed} /></td>
+          </tr>)}</tbody>
+        </table>
+      </section>
       {weeks.length > 0 && (
         <section className="mt-5">
           <div className="mb-2 px-5 text-[14px] font-medium">Недели</div>

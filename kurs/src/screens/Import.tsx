@@ -272,10 +272,10 @@ function ReviewList({ review, onBack }: { review: Review; onBack: () => void }) 
         store.updateDebt(i.debt.id, { balance: i.balance });
         if (i.event && i.minPayment > 0) store.setOverride(i.event.key, { amount: i.minPayment, ...(i.dueDate ? { date: i.dueDate } : {}) });
       }
-      if (i.type === 'mark') store.markEvent(i.event, true, i.amount);
+      if (i.type === 'mark') store.markEvent(i.event, true, i.amount, undefined, { paidDate: i.date, accountId: i.event.accountId });
       if (i.type === 'income' && i.event) {
         if (i.bonus && !bonus) bonus = i;
-        else if (!i.bonus) store.markEvent(i.event, true, i.amount);
+        else if (!i.bonus) store.markEvent(i.event, true, i.amount, undefined, { paidDate: i.date });
       }
       if (i.type === 'reserve') store.setReserve(i.balance, 'Сверка по выписке');
       if (i.type === 'card') store.setCardBalance({ amount: i.balance, date: i.date, source: 'statement' });

@@ -219,6 +219,8 @@ export interface ChecklistItem {
   note?: string;
   /** YYYY-MM-DD или YYYY-MM */
   due?: string;
+  eventKey?: string;
+  status?: 'review' | 'payment' | 'clarify';
   /** выполнено на момент составления плана */
   done?: boolean;
 }
