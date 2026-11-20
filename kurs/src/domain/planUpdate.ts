@@ -35,6 +35,11 @@ export function mergeSeed(s: PlanState, seed: PlanSeed): Partial<PlanState> {
       ...(l.limit != null ? { limit: l.limit } : {}) };
   });
   for (const l of s.debts) if (!seed.debts.some(d => d.id === l.id)) debts.push(l);
+  const checklist = new Map((seed.checklist ?? []).map(item => [item.id, item]));
+  for (const item of s.checklist) {
+    const next = checklist.get(item.id);
+    checklist.set(item.id, next ? { ...item, ...next, note: item.note ?? next.note, done: item.done ?? next.done } : item);
+  }
   return {
     debts,
     incomes: seed.incomes,
@@ -47,7 +52,7 @@ export function mergeSeed(s: PlanState, seed: PlanSeed): Partial<PlanState> {
     plan: seed.plan ?? s.plan,
     // отметки из плана добавляются, но не перетирают сделанные на телефоне
     marks: { ...(seed.marks ?? {}), ...s.marks },
-    checklist: seed.checklist ?? s.checklist,
+    checklist: [...checklist.values()],
     strategy: seed.strategy ?? s.strategy,
     rules: seed.rules ?? s.rules,
   };

@@ -205,7 +205,13 @@ export function ledger(s: LedgerInput): Ledger {
     const included = new Set(ref.includedExpenseIds);
     for (const e of s.expenses) if (cashAccount(e) === LIFE_ACCOUNT && afterCard(e, ref, included)) card -= e.amount;
     const bankRef: BankBalance = { amount: ref.amount, date: ref.date, at: ref.dateOnly ? undefined : ref.at, includedIds: ref.operationIds };
-    for (const op of operations) if (recordedAfter(op, bankRef)) card += rubles(accountMovement(op, LIFE_ACCOUNT));
+    for (const op of operations) {
+      if (!recordedAfter(op, bankRef)) continue;
+      const amount = rubles(accountMovement(op, LIFE_ACCOUNT));
+      card += amount;
+      if (op.fundingSource !== 'borrowed' && (op.type === 'income' || (op.type === 'transfer' && op.toAccountId === RESERVE_ACCOUNT))) pool += amount;
+      if (op.eventKey && earmarked.has(op.eventKey) && (op.type === 'debt_payment' || op.type === 'expense')) pool += amount;
+    }
     for (const r of s.reserveLog) if (r.card && r.at && time(r.at) > time(ref.at)) { card += r.card; if (r.card < 0 || r.forKeys) pool += r.card; }
   }
   let held = 0;

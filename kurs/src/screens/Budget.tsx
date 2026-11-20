@@ -12,10 +12,10 @@ import { CAT_COLOR, CatIcon, Empty, Money } from '../components/ui';
 import { addDays, addMonths, ddmm, monthKey, monthName, weekday, weekStart } from '../domain/dates';
 import { CATEGORY, currentPhase, weeklyLimit } from '../domain/plan';
 import { bySource } from '../domain/sources';
-import { countsWeekly, monthByCategory } from '../domain/summary';
+import { monthByCategory } from '../domain/summary';
 import type { CategoryId, Expense, Source } from '../domain/types';
 import { useStore } from '../store/store';
-import { toast, useToday, useUi } from '../store/ui';
+import { toast, useBudgetExpenses, useToday, useUi } from '../store/ui';
 
 
 type SourceFilter = 'all' | Source;
@@ -26,7 +26,8 @@ const SOURCES: { id: SourceFilter; label: string; dot?: string }[] = [
 export function Budget() {
   const now = useToday();
   const enter = useEnter();
-  const [expenses, debts, wishes, overrides] = useStore(useShallow(s => [s.expenses, s.debts, s.wishes, s.weeklyOverrides] as const));
+  const expenses = useBudgetExpenses();
+  const [debts, wishes, overrides] = useStore(useShallow(s => [s.debts, s.wishes, s.weeklyOverrides] as const));
   const set = useUi(s => s.set);
   const [month, setMonth] = useState(monthKey(now));
   const [cat, setCat] = useState<CategoryId | null>(null);
@@ -49,7 +50,7 @@ export function Budget() {
     const out: { monday: string; spent: number; limit: number }[] = [];
     for (let m = weekStart(`${month}-01`); monthKey(m) <= month && m <= now; m = addDays(m, 7)) {
       if (monthKey(addDays(m, 6)) < month) continue;
-      const list = expenses.filter(e => e.date >= m && e.date <= addDays(m, 6) && countsWeekly(e));
+      const list = expenses.filter(e => e.date >= m && e.date <= addDays(m, 6));
       out.push({ monday: m, spent: list.reduce((s, e) => s + e.amount, 0), limit: weeklyLimit(debts, m, overrides) });
     }
     return out.reverse();

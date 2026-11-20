@@ -82,7 +82,9 @@ function Body({ monday }: { monday: string }) {
   const bridgeCard = led.cards.find(c => c.bridge);
   const otherCards = led.cards.filter(c => !c.bridge);
 
-  const leftover = useMemo(() => weekLeftover(expenses, debts, overrides, bridge, monday), [expenses, debts, overrides, bridge, monday]);
+  const balance = cardV ?? led.card;
+  const leftover = balance == null ? weekLeftover(expenses, debts, overrides, bridge, monday) :
+    Math.max(0, balance - led.incomeOnCard - led.heldOnCard);
   const plan = useMemo(() => checkupPlan({ expenses, debts, overrides, bridge, marks, monday, leftover, incomeOnCard: led.incomeOnCard }),
     [expenses, debts, overrides, bridge, marks, monday, leftover, led.incomeOnCard]);
   const [sent, setSent] = useState('');

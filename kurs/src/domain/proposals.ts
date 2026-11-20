@@ -207,7 +207,7 @@ function dedupe(txs: DraftTx[], expenses: Expense[]): DraftTx[] {
   for (const t of out) if (take(`${t.date}|${Math.round(t.amount * 100)}`, e => e.fingerprint === t.fingerprint)) t.duplicate = true;
   for (const t of out) {
     if (t.duplicate) continue;
-    const e = take(`${t.date}|${Math.round(t.amount * 100)}`, x => !x.fingerprint?.includes('#')) ?? null;
+    const e = take(`${t.date}|${Math.round(t.amount * 100)}`, x => !x.fingerprint?.includes('#') && x.source === t.source && (!t.creditCard || x.creditCard === t.creditCard)) ?? null;
     if (e) { t.duplicate = true; if (!e.fingerprint?.includes('#')) t.linkId = e.id; }
   }
   return out;
@@ -219,7 +219,7 @@ export function fromBank(p: BankParse, ctx: BankCtx): { summary: string; warning
   const debts = ctx.cal.debts;
   const bankWord = p.bank === 'tbank' ? 'Т-БАНК' : p.bank === 'sber' ? 'СБЕР' : p.bank === 'vtb' ? 'ВТБ' : '';
   const creditId = p.credit && bankWord ? guessDebt(`${bankWord} КРЕДИТНАЯ КАРТА`, debts.filter(d => d.kind === 'card')) : '';
-  const source: Source = creditId ? 'credit' : 'life';
+  const source: Source = p.credit ? 'credit' : 'life';
   const info = (text: string, o: BankOp) => items.push({ id: pid(), type: 'info', on: false, text, amount: o.amount, date: o.date });
   const spends: DraftTx[] = [];
 

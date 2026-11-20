@@ -1,10 +1,10 @@
 // Итог недели: сколько потрачено из лимита, по категориям, и сколько долить на карту жизни из резерва в воскресенье.
 // Остаток недели остаётся на карте и уменьшает пополнение: долить = лимит следующей недели − остаток.
 // В недели моста на кредитке из резерва доливают по плану моста, а остаток уменьшает траты с кредитки.
+import { cashAccount, LIFE_ACCOUNT } from './accounts';
 import { bridgeWeek, weekMoney, type Bridge } from './bridge';
 import { addDays, fromKey, weekStart } from './dates';
 import { CATEGORIES, weeklyLimit } from './plan';
-import { countsWeekly } from './summary';
 import type { CategoryId, Debt, Expense, WeekClosure, WeeklyOverride } from './types';
 
 /** Какую неделю закрывать: в выходные — текущую, в пн–вт — прошлую (если ещё не закрыта), иначе текущую */
@@ -37,12 +37,12 @@ export interface WeekReport {
 export function weekReport(expenses: Expense[], debts: Debt[], overrides: WeeklyOverride[], monday: string, bridge?: Bridge | null): WeekReport {
   const sunday = addDays(monday, 6);
   const list = expenses.filter(e => e.date >= monday && e.date <= sunday);
-  const counted = list.filter(countsWeekly);
+  const counted = list;
   const spent = counted.reduce((s, e) => s + e.amount, 0);
   const limit = weeklyLimit(debts, monday, overrides);
   const nextLimit = weeklyLimit(debts, addDays(monday, 7), overrides);
   // на карте осталось по учёту: в неделю моста — карта отдельно от кредитки
-  const leftover = Math.max(0, bridgeWeek(bridge, monday) ? weekMoney(expenses, debts, overrides, bridge, monday).cardLeft : limit - spent);
+  const leftover = Math.max(0, bridgeWeek(bridge, monday) ? weekMoney(expenses, debts, overrides, bridge, monday).cardLeft : limit - list.filter(e => cashAccount(e) === LIFE_ACCOUNT).reduce((sum, e) => sum + e.amount, 0));
   const next = bridgeWeek(bridge, addDays(monday, 7));
   return {
     monday, sunday, limit, spent, left: limit - spent, count: list.length, nextLimit, leftover,

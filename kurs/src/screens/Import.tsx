@@ -1,3 +1,4 @@
+import { cashAccount } from '../domain/accounts';
 // Выписка и скриншоты из банка → что на них → что обновить: траты по категориям, оплаченные платежи,
 // поступления (премия сразу открывает распределение), остаток на карте. После — итог недели.
 import { AlertTriangle, Camera, Check, ClipboardPaste, FileSpreadsheet, FileText, KeyRound, Loader2 } from 'lucide-react';
@@ -10,7 +11,7 @@ import { parseBankText } from '../domain/bankText';
 import { draft, parseCsv, parseText } from '../domain/statements';
 import type { CategoryId, Source } from '../domain/types';
 import { weekToClose } from '../domain/weekly';
-import { useStore } from '../store/store';
+import { uid, useStore } from '../store/store';
 import { toast, useUi } from '../store/ui';
 
 export function ImportSheet() {
@@ -257,7 +258,14 @@ function ReviewList({ review, onBack }: { review: Review; onBack: () => void }) 
         if (i.dir === 'toCard') { if (i.event) store.markEvent(i.event, true, i.amount); else store.moveReserve(-i.amount, 'Перевод из резерва на карту', i.amount); }
         else store.moveReserve(i.amount, 'Перевод с карты в резерв', -i.amount);
       }
-      if (i.type === 'refund') { if (i.amount >= i.expense.amount - 0.5) store.removeExpense(i.expense.id); else store.updateExpense(i.expense.id, { amount: Math.round((i.expense.amount - i.amount) * 100) / 100 }); }
+      if (i.type === 'refund') {
+        const accountId = cashAccount(i.expense) ?? i.expense.creditCard;
+        if (accountId) {
+          store.saveOperation({ id: uid(), externalId: JSON.stringify(['refund', i.expense.id, i.date, i.amount, i.name]),
+            type: 'refund', expenseId: i.expense.id, accountId, debtId: i.expense.source === 'credit' ? i.expense.creditCard : undefined,
+            amount: Math.min(i.expense.amount, i.amount), date: i.date, at: i.date === today() ? new Date().toISOString() : undefined, status: 'confirmed', origin: 'bank', fundingSource: 'unknown' });
+        }
+      }
       if (i.type === 'interest') store.moveReserve(i.amount, 'Проценты на накопительный');
       if (i.type === 'due') store.setOverride(i.event.key, { amount: i.amount, date: i.date });
       if (i.type === 'debt') {

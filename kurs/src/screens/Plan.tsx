@@ -1,3 +1,5 @@
+import { monthDebtActivity } from '../domain/accounts';
+import { useLedger } from './Checkup';
 // «Долги» — тает ли долг. Общий долг досчитывает вниз от начального, фарватер: долги буями по порядку закрытия,
 // судно — у текущей цели, впереди гавань «Свобода». Ниже — «Долги / План / Чек-лист», листаются пальцем.
 import { Anchor, Check, Gift, Lock, Plus, Ship, Target } from 'lucide-react';
@@ -73,7 +75,8 @@ function useDebtForecast(): Forecast {
 function DebtHero() {
   const [debts, plan] = useStore(useShallow(s => [s.debts, s.planTrajectory] as const));
   const set = useUi(s => s.set);
-  const total = totalDebt(debts);
+  const led = useLedger();
+  const total = Object.values(led.debtBalances).reduce((sum, d) => sum + d.estimated, 0);
   const start = plan[0]?.[1] ?? debts.reduce((s, d) => s + d.startBalance, 0);
   const fc = useDebtForecast();
   const planEnd = plan.at(-1)?.[0];
@@ -96,7 +99,7 @@ function DebtHero() {
           </div>
         )}
         <div className="mt-3 grid grid-cols-2 gap-3 text-[12px] text-card-muted">
-          <div>Погашено с начала<Money value={Math.max(0, start - total)} className="mt-0.5 block text-[15px] text-card" /></div>
+          <div>Изменение долга с начала<Money value={total - start} sign className="mt-0.5 block text-[15px] text-card" /></div>
           <div>Проценты в месяц<Money value={monthlyInterest(debts)} approx className="mt-0.5 block text-[15px] text-card" /></div>
         </div>
       </div>
@@ -324,6 +327,36 @@ function ChecklistView() {
   );
 }
 
+const LIQUIDITY_RULES = [
+  'Сначала минимальные платежи и необходимые расходы. Деньги под автосписание готовятся заранее на нужном счёте.',
+  'Получение займа увеличивает деньги и обязательства. Подменять им регулярный доход нельзя.',
+  'После обязательных платежей проверьте осторожный прогноз и целевой защитный запас.',
+  'Учитывайте подтверждённый факт зачисления отдельно от расчёта выплаты и реально выполненного погашения.',
+  'Квартальные и годовые премии сверяйте по факту. Ежемесячная премия входит в регулярный расчёт.',
+  'Сравнивайте расходы на обслуживание и документированную экономию. Досрочно направляйте только безопасную сумму.',
+];
+
+function DebtActivityPanel() {
+  const now = useToday();
+  const [book, expenses, snapshots, debts] = useStore(useShallow(s => [s.accountBook, s.expenses, s.snapshots, s.debts] as const));
+  const month = monthKey(now);
+  const activity = monthDebtActivity(book, expenses, now);
+  const led = useLedger();
+  const start = snapshots.filter(s => s.month < month).at(-1);
+  const end = Object.values(led.debtBalances).reduce((sum, info) => sum + info.estimated, 0);
+  const confirmed = debts.every(d => d.closed || (d.bankBalance?.date === now && Math.abs(led.debtBalances[d.id]?.delta ?? 0) < 0.01));
+  return <div className="card mx-4 space-y-2 p-4 text-[13px]">
+    <h3 className="font-medium">Чистое изменение долга за месяц</h3>
+    {start && <div className="flex justify-between"><span>Предыдущий снимок</span><Money value={start.total} /></div>}
+    <div className="flex justify-between"><span>Новые заимствования</span><Money value={activity.borrowed} sign /></div>
+    <div className="flex justify-between"><span>Подтверждённые проценты и комиссии</span><Money value={activity.interestAndFees} sign /></div>
+    <div className="flex justify-between"><span>Подтверждённое тело платежей</span><Money value={-activity.principal} sign /></div>
+    <div className="flex justify-between"><span>Долг {confirmed ? 'по банку' : 'по учёту'}</span><Money value={end} approx={!confirmed} /></div>
+    {start && <div className="flex justify-between"><span>Изменение относительно снимка</span><Money value={end - start.total} sign approx={!confirmed} /></div>}
+    {activity.unknownPrincipal > 0 && <p className="text-muted">Для платежей на <Money value={activity.unknownPrincipal} /> пока нет разбивки.</p>}
+  </div>;
+}
+
 function StrategyView() {
   const now = useToday();
   const [debts, strategy, rules] = useStore(useShallow(s => [s.debts, s.strategy, s.rules] as const));
@@ -332,6 +365,11 @@ function StrategyView() {
   const closedNames = (p: number) => debts.filter(d => d.phase === p).every(d => d.closed);
   return (
     <>
+      <SectionTitle>Ликвидность</SectionTitle>
+      <DebtActivityPanel />
+      <ul className="card mx-4 mt-3 list-disc space-y-2 py-4 pl-8 pr-4 text-[13px]">
+        {LIQUIDITY_RULES.map(rule => <li key={rule}>{rule}</li>)}
+      </ul>
       <SectionTitle>Этапы</SectionTitle>
       <div className="card mx-4 px-4 py-2">
         {phases.map((p, i) => {

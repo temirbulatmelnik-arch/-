@@ -6,6 +6,7 @@ import type { CategoryId, Debt, Phase, WeeklyOverride } from './types';
 // (PlanSeed.plan). В открытом коде — только нейтральные значения для старта с нуля.
 export interface PlanConfig {
   phases: Phase[];
+  defaultWeekly?: { from: string; amount: number };
   /** лимит категории в месяц на первом этапе и как было до плана */
   categories: Record<CategoryId, { limit: number; baseline: number }>;
   /** особая нехватка зарплаты по месяцам YYYY-MM */
@@ -101,6 +102,8 @@ export function weeklyLimit(debts: Debt[], date: string, overrides: WeeklyOverri
   const monday = weekStart(date);
   const o = overrides.find(x => monday >= x.from && monday <= x.to);
   if (o) return o.amount;
+  const defaultWeekly = planConfig().defaultWeekly;
+  if (defaultWeekly && monday >= defaultWeekly.from) return defaultWeekly.amount;
   return currentPhase(debts, date).weekly;
 }
 

@@ -25,6 +25,7 @@ export interface Vacation {
   /** Основание расчёта по кадровому документу, уже приведённое к дневной сумме. */
   dailyGross?: number;
   basis?: string;
+  formula?: { divisor: number; additions: { amount: number; index?: number }[] };
 }
 
 export interface PayrollProfile {
@@ -90,6 +91,15 @@ export function vacationDays(v: Pick<Vacation, 'from' | 'to'>, hours?: Record<st
     work: days.filter(date => workHours(date, hours) > 0).length };
 }
 
+export function vacationGross(v: Vacation, profile: PayrollProfile): number | null {
+  const days = vacationDays(v, profile.workingHours).calendar;
+  if (v.dailyGross != null) return kopecks(v.dailyGross * days);
+  const rate = effectiveRate(profile.rates, v.from);
+  if (!rate || !v.formula) return null;
+  const additions = v.formula.additions.reduce((total, entry) => total + cents(entry.amount * (entry.index ?? 1)), 0);
+  return rubles(Math.round((cents(rate.unit * (rate.positionUnits + rate.rankUnits)) + additions / 12) * days / v.formula.divisor));
+}
+
 export function validPayroll(profile: PayrollProfile): boolean {
   if (!profile || !validDate(profile.from) || !Array.isArray(profile.rates) || !profile.rates.length) return false;
   if (!profile.rates.every(r => r && validDate(r.from) && validAmount(r.unit) && r.unit > 0 &&
@@ -106,10 +116,15 @@ export function validPayroll(profile: PayrollProfile): boolean {
   if (!sorted.every((v, i) => v && typeof v.id === 'string' && !!v.id && validDate(v.from) && validDate(v.to) &&
       v.from <= v.to && v.to <= addMonths(v.from.slice(0, 7), 3) + '-01' && ['planned', 'approved', 'taken'].includes(v.status)
       && (v.payDate == null || validDate(v.payDate)) && (v.dailyGross == null || (validAmount(v.dailyGross) && v.dailyGross >= 0))
+      && (v.formula == null || (validAmount(v.formula.divisor) && v.formula.divisor > 0
+        && Array.isArray(v.formula.additions) && v.formula.additions.every(a => a && validAmount(a.amount) && a.amount >= 0
+          && (a.index == null || (validAmount(a.index) && a.index > 0)))))
       && (!i || sorted[i - 1].to < v.from))) return false;
   const taxBases = profile.taxBase ?? {};
   if (!Object.entries(taxBases).every(([y, t]) => t && validDate(t.asOf) && t.asOf.startsWith(y + '-') && validAmount(t.base) && t.base >= 0)) return false;
-  return Object.values(profile.deductions ?? {}).every(d => validAmount(d) && d >= 0);
+  return Object.values(profile.deductions ?? {}).every(d => validAmount(d) && d >= 0)
+    && Object.values(profile.actual ?? {}).every(a => a && validDate(a.asOf)
+      && [a.gross, a.tax, a.otherWithheld].every(x => x == null || (validAmount(x) && x >= 0)));
 }
 
 const effectiveRate = (rates: PayRate[], date: string) => rates.filter(r => r.from <= date).reduce<PayRate | undefined>(
@@ -189,11 +204,12 @@ export function workPayments(profile: PayrollProfile, from: string, to: string, 
       kind: 'vacation' as const, accrualPeriod: monthKey(v.from), nominalDate, expectedPayDate: payDate, vacationId: v.id,
       confidence: 'tentative' as const, provisionalCalendar: !calendarApproved(Number(year)),
     };
-    if (v.dailyGross != null || marks[`work:vacation:${v.id}`]?.done) lines.push({
+    const vacationEstimatedGross = vacationGross(v, profile);
+    if (vacationEstimatedGross != null || marks[`work:vacation:${v.id}`]?.done) lines.push({
       ...common, key: `work:vacation:${v.id}`, title: 'Денежное содержание на отпуск',
-      gross: kopecks((v.dailyGross ?? 0) * vacationDays(v, off).calendar),
+      gross: vacationEstimatedGross ?? 0,
       source: v.basis ?? 'Расчётная дневная сумма',
-      confidence: v.status !== 'planned' && v.dailyGross != null && v.basis && v.payDate ? 'confirmed' : 'tentative',
+      confidence: v.status !== 'planned' && vacationEstimatedGross != null && v.basis && v.payDate ? 'confirmed' : 'tentative',
     });
     if (v.allowance && !allowanceYears.has(year)) {
       allowanceYears.add(year);

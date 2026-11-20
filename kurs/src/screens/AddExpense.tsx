@@ -45,8 +45,8 @@ export function AddExpenseSheet() {
 
 // prefill приходит пропсом: во время анимации закрытия в состоянии уже null
 function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
-  const edit = p.edit;
   const store = useStore.getState();
+  const edit = p.edit ? store.expenses.find(e => e.id === p.edit!.id) ?? p.edit : undefined;
   const [amount, setAmount] = useState(edit ? String(edit.amount) : p.amount ? String(p.amount) : '');
   const [category, setCategory] = useState<CategoryId | null>(edit?.category ?? p.category ?? null);
   const [note, setNote] = useState(edit?.note ?? p.note ?? '');

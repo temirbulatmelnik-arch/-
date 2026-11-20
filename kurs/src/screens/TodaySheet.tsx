@@ -1,6 +1,5 @@
 // Траты за сегодня: окно по нажатию на кольцо дня и тело карточки «Сегодня» на «Неделе».
-// Сверху — сколько потрачено из лимита дня и что это значит, ниже — траты дня; оплаченное из резерва в лимит не входит —
-// оно отдельно.
+// Сверху — сколько потрачено из лимита, ниже — покупки дня по всем источникам.
 import { Copy, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Hold } from '../components/Hold';
 import { AnimatePresence, motion } from 'motion/react';
@@ -10,18 +9,19 @@ import { useShallow } from 'zustand/react/shallow';
 import { ExpenseRow } from '../components/rows';
 import { Money, PrimaryButton, Sheet } from '../components/ui';
 import { dayMonth, plural, weekdayFull } from '../domain/dates';
-import { countsWeekly, dayBudget, type DayBudget } from '../domain/summary';
+import { dayBudget, type DayBudget } from '../domain/summary';
 import type { Expense } from '../domain/types';
 import { useStore } from '../store/store';
-import { toast, useToday, useUi } from '../store/ui';
+import { toast, useBudgetExpenses, useToday, useUi } from '../store/ui';
 import { CATEGORY } from '../domain/plan';
 
 export function useTodaySpends() {
   const now = useToday();
-  const [expenses, debts, overrides] = useStore(useShallow(s => [s.expenses, s.debts, s.weeklyOverrides] as const));
+  const expenses = useBudgetExpenses();
+  const [debts, overrides] = useStore(useShallow(s => [s.debts, s.weeklyOverrides] as const));
   return useMemo(() => {
     const list = expenses.filter(e => e.date === now).reverse();
-    return { now, budget: dayBudget(expenses, debts, overrides, now), counted: list.filter(countsWeekly), outside: list.filter(e => !countsWeekly(e)) };
+    return { now, budget: dayBudget(expenses, debts, overrides, now), counted: list };
   }, [expenses, debts, overrides, now]);
 }
 
@@ -46,7 +46,7 @@ export function dayNote(b: DayBudget): { text: string; over: boolean } {
 
 export function TodayDetails({ summary }: { summary?: boolean }) {
   // в листе строки свайпаются (фон листа под ними сплошной), в карточке стопки — просто нажимаются
-  const { budget: b, counted, outside } = useTodaySpends();
+  const { budget: b, counted } = useTodaySpends();
   const set = useUi(s => s.set);
   const note = dayNote(b);
   const edit = (e: Expense) => set({ today: false, add: { edit: e } });
@@ -92,12 +92,7 @@ export function TodayDetails({ summary }: { summary?: boolean }) {
           </div>
         )
         : counted.length === 0 && <p className="px-4 pt-3 text-[14px] text-muted">Сегодня трат пока нет. Нажмите «+» внизу.</p>}
-      {outside.length > 0 && (
-        <>
-          <div className="px-4 pt-4 text-[13px] text-muted">Не входит в лимит дня</div>
-          <div className="divide-hair opacity-80">{outside.map(e => <ExpenseRow key={e.id} e={e} onClick={() => edit(e)} />)}</div>
-        </>
-      )}
+
     </div>
   );
 }

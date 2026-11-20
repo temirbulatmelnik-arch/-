@@ -349,19 +349,19 @@ describe('неделя', () => {
     expect(dayBudget([exp('2026-11-09', 760)], DEBTS, ov, '2026-11-09')).toMatchObject({ day: 1140, spentToday: 760, left: 380, nextWeek: false });
     // перерасход 220 → с завтра (8 000 − 1 360) / 6 = 1 100
     expect(dayBudget([exp('2026-11-09', 1360)], DEBTS, ov, '2026-11-09')).toMatchObject({ left: -220, tomorrow: 1100 });
-    // вторник: вчерашние траты уменьшают утренний остаток, траты из резерва не считаются
-    expect(dayBudget([exp('2026-11-09', 1360), exp('2026-11-10', 500, 'reserve')], DEBTS, ov, '2026-11-10')).toMatchObject({ day: 1100, spentToday: 0, left: 1100 });
+    // вторник: вчерашние траты уменьшают утренний остаток, покупки из резерва входят в бюджет
+    expect(dayBudget([exp('2026-11-09', 1360), exp('2026-11-10', 500, 'reserve')], DEBTS, ov, '2026-11-10')).toMatchObject({ day: 1100, spentToday: 500, left: 600 });
     // воскресенье: завтра — новая неделя со своим лимитом
     expect(dayBudget([exp('2026-11-15', 300)], DEBTS, ov, '2026-11-15')).toMatchObject({ nextWeek: true, tomorrow: 1280 });
     // неделя кончилась раньше — на сегодня ноль
     expect(dayBudget([exp('2026-11-10', 8200), exp('2026-11-12', 100)], DEBTS, ov, '2026-11-12')).toMatchObject({ day: 0, left: -100, exhausted: true, tomorrow: 0 });
   });
-  it('остаток недели совпадает с картой жизни: связь с карты тоже в лимите, анализы из резерва — нет', () => {
+  it('недельный бюджет учитывает связь с карты и покупку из резерва', () => {
     const exp = (date: string, amount: number, category: Expense['category'], source: Expense['source'] = 'life'): Expense => ({ id: date + amount + category, date, amount, category, source, createdAt: '' });
     const ov = [{ from: '2026-11-09', to: '2026-11-15', amount: 8000 }];
     const list = [exp('2026-11-09', 1382.96, 'groceries'), exp('2026-11-10', 893, 'transport'), exp('2026-11-10', 50, 'fixed'), exp('2026-11-10', 8737, 'health', 'reserve')];
-    expect(weekSummary(list, DEBTS, ov, '2026-11-10').left).toBeCloseTo(5674.04, 2);
-    expect(dayBudget(list, DEBTS, ov, '2026-11-10').spentToday).toBe(943);
+    expect(weekSummary(list, DEBTS, ov, '2026-11-10').left).toBeCloseTo(-3062.96, 2);
+    expect(dayBudget(list, DEBTS, ov, '2026-11-10').spentToday).toBe(9680);
   });
   it('подписи банка: «Транспорт», «Супермаркеты»; разовая правка категорий из выписок', () => {
     expect(categorize('Транспорт · Транспорт')).toBe('transport');
@@ -377,13 +377,13 @@ describe('неделя', () => {
     expect(weekToClose('2026-10-26', { '2026-10-19': { monday: '2026-10-19', limit: 0, spent: 0, left: 0, transferred: 0, at: '' } })).toBe('2026-10-26');
     expect(weekToClose('2026-10-22', {})).toBe('2026-10-19');
   });
-  it('итог: всё с карты жизни в лимите, даже обязательные; из резерва — нет', () => {
+  it('итог: все покупки недели учитываются независимо от источника', () => {
     const e = (amount: number, category: Expense['category'], source: Expense['source'] = 'life') => ({ id: String(amount), date: '2026-11-03', amount, category, source, createdAt: '' });
     const r = weekReport([e(1000, 'groceries'), e(500, 'taxi'), e(2400, 'fixed'), e(3000, 'health', 'reserve')], DEBTS, [], '2026-11-02');
     expect(r.limit).toBe(10_000);
-    expect(r.spent).toBe(3900);
-    expect(r.left).toBe(6100);
-    expect(r.byCategory.map(c => c.id)).toEqual(['fixed', 'groceries', 'taxi']);
+    expect(r.spent).toBe(6900);
+    expect(r.left).toBe(3100);
+    expect(r.byCategory.map(c => c.id)).toEqual(['health', 'fixed', 'groceries', 'taxi']);
   });
 });
 
@@ -690,7 +690,7 @@ describe('мост на кредитке', () => {
     expect(eff(st(), { ...at, amount: 8500, source: 'credit' })).toEqual({ tone: 'neg', text: 'Сверх лимита недели на 500 ₽ — это уже новый долг' });
     expect(eff({ ...st(), bridge: null }, { ...at, amount: 100, source: 'credit' }).tone).toBe('neg');
     // резерв: остаток резерва, в лимит не входит; правка траты не считает её прежнюю сумму
-    expect(eff(st(), { ...at, amount: 1000, source: 'reserve' })).toEqual({ tone: 'rsv', text: 'Из резерва: останется 49 000 ₽. В лимит недели не входит' });
+    expect(eff(st(), { ...at, amount: 1000, source: 'reserve' })).toEqual({ tone: 'rsv', text: 'Из резерва: останется 49 000 ₽. Трата входит в недельный бюджет' });
     expect(spendEffect(st([exp('e', '2026-11-11', 700)]), { ...at, amount: 700, source: 'life', skipId: 'e' })).toEqual(spendEffect(st(), { ...at, amount: 700, source: 'life' }));
     expect(bySource([exp('a', '2026-11-10', 100), exp('b', '2026-11-10', 40, 'credit'), exp('c', '2026-11-10', 7, 'reserve')])).toEqual({ life: 100, credit: 40, reserve: 7 });
   });

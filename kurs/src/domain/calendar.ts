@@ -121,7 +121,7 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
     const aliases = new Map<string, CalEvent>();
     const used = new Set<string>();
     for (const e of candidates) {
-      const found = out.filter(old => old.kind === 'income' && !used.has(old.key) && old.incomeKind === e.incomeKind &&
+      const found = out.filter(old => old.economicType !== 'loan_disbursement' && old.kind === 'income' && !used.has(old.key) && old.incomeKind === e.incomeKind &&
         (old.key === e.key || (isRegularWork(e.incomeKind) && (old.date === e.nominalDate || old.date === e.expectedPayDate))));
       const old = found.find(old => old.key === e.key) ?? (found.length === 1 ? found[0] : undefined);
       if (old) { aliases.set(e.key, old); used.add(old.key); }
@@ -144,7 +144,10 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
     }));
   }
   const splitDebits = input.accountBook?.splitDebits ?? [];
-  const replaced = new Set(splitDebits.flatMap(d => d.replacesKeys));
+  const replaced = new Set([
+    ...splitDebits.flatMap(d => d.replacesKeys),
+    ...(input.accountBook?.splitPlans ?? []).flatMap(plan => plan.replacesKeys ?? []).filter(key => !input.marks?.[key]?.done),
+  ]);
   for (const debit of splitDebits) out.push({
     key: `split-debit:${debit.id}`, date: debit.date, dateMode: 'exact', kind: 'payment',
     title: 'Сплит · общее автосписание', amount: debit.amount, accountId: debit.accountId, economicType: 'debt_payment', confidence: 'confirmed',

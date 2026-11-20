@@ -2,7 +2,7 @@
 // Резервная копия — файл JSON (Настройки → Данные), календарь — файл .ics.
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { accountOptions, appendOperations, bookOperationAllowed, cashAccount, EMPTY_BOOK, LIFE_ACCOUNT, RESERVE_ACCOUNT, validAmount, validDate, type AccountBook, type AccountOperation, type BankBalance, type CashAccount, type SplitDebit, type SplitPlan } from '../domain/accounts';
+import { accountOptions, appendOperations, bookOperationAllowed, cashAccount, EMPTY_BOOK, LIFE_ACCOUNT, RESERVE_ACCOUNT, validAmount, validDate, validSplitDebit, validSplitPlan, type AccountBook, type AccountOperation, type BankBalance, type CashAccount, type SplitDebit, type SplitPlan } from '../domain/accounts';
 import { DEFAULT_MODEL } from '../domain/models';
 import { coverageInput, safePrepayment } from '../domain/coverage';
 import { annuity } from '../domain/calendar';
@@ -109,7 +109,7 @@ interface Actions {
   updateExpense: (id: string, patch: Partial<Expense>) => void;
   removeExpense: (id: string) => void;
   /** отметить событие календаря; для платежа по долгу остаток уменьшается на оценку погашения */
-  markEvent: (e: CalEvent, done: boolean, amount?: number, paidFrom?: EventMark['paidFrom'], details?: { accountId?: string; principal?: number; interest?: number; fee?: number; paidDate?: string }) => void;
+  markEvent: (e: CalEvent, done: boolean, amount?: number, paidFrom?: EventMark['paidFrom'], details?: { accountId?: string; principal?: number; interest?: number; fee?: number; paidDate?: string; payrollActual?: { gross?: number; tax?: number; otherWithheld?: number } }) => void;
   updateDebt: (id: string, patch: Partial<Debt>) => void;
   /** точная сумма/дата платежа из банка */
   setOverride: (key: string, o: { amount?: number; date?: string }) => void;
@@ -273,6 +273,7 @@ export const useStore = create<State>()(
       saveOperation: op => {
         const s = get();
         if (!bookOperationAllowed(op, s.accountBook, s.debts, s.expenses)) return false;
+        if (op.status === 'confirmed' && op.date > today()) return false;
         if (op.eventKey && op.type === 'loan_disbursement' && !s.marks[op.eventKey]?.done) return false;
         const operations = appendOperations(s.accountBook.operations, [op]);
         if (operations === s.accountBook.operations) return false;
@@ -285,12 +286,12 @@ export const useStore = create<State>()(
         else if (accountOptions(s.accountBook).some(a => a.id === accountId)) paymentAccounts[key] = accountId;
         return { accountBook: { ...s.accountBook, paymentAccounts } };
       }),
-      saveSplitPlan: plan => set(s => ({
+      saveSplitPlan: plan => set(s => (validSplitPlan(plan, s.debts) ? {
         accountBook: { ...s.accountBook, splitPlans: [...s.accountBook.splitPlans.filter(p => p.id !== plan.id), plan] },
-      })),
-      saveSplitDebit: debit => set(s => ({
+      } : {})),
+      saveSplitDebit: debit => set(s => (validSplitDebit(debit, s.accountBook, s.debts) && !s.marks[`split-debit:${debit.id}`]?.done && !debit.replacesKeys.some(k => s.marks[k]?.done) ? {
         accountBook: { ...s.accountBook, splitDebits: [...s.accountBook.splitDebits.filter(d => d.id !== debit.id), debit] },
-      })),
+      } : {})),
       saveWork: work => {
         if (!validPayroll(work) || (work.accountId && !accountOptions(get().accountBook).some(a => a.id === work.accountId))) return false;
         set({ work });
@@ -393,6 +394,7 @@ export const useStore = create<State>()(
         const marks = { ...s.marks };
         let debts = s.debts;
         let accountBook = s.accountBook;
+        let work = s.work;
         const debt = e.debtId ? s.debts.find(d => d.id === e.debtId) : undefined;
         if (done) {
           if (prev?.done && e.kind !== 'weekly') return {};
@@ -405,20 +407,34 @@ export const useStore = create<State>()(
           marks[e.key] = { done: true, amount: paid, at, paidDate: date, ...(e.kind === 'payment' ? { paidFrom: from } : {}) };
           if (e.kind === 'weekly') return { marks, ...topUpMove(s, e.key, paid) };
           const accountId = details?.accountId ?? (from === 'card' ? LIFE_ACCOUNT : RESERVE_ACCOUNT);
-          if (e.kind === 'payment' && debt) {
+          const bookedAt = date === today() ? at : undefined;
+          if (e.kind === 'payment' && (debt || e.key.startsWith('split-debit:'))) {
             const op: AccountOperation = {
-              id: uid(), eventKey: e.key, type: 'debt_payment', debtId: debt.id, accountId, amount: paid,
-              date, at, origin: 'manual', status: 'confirmed', fundingSource: 'unknown',
+              id: uid(), eventKey: e.key, type: 'debt_payment', debtId: debt?.id, accountId, amount: paid,
+              date, at: bookedAt, origin: 'manual', status: 'confirmed', fundingSource: 'unknown',
               principal: details?.principal, interest: details?.interest, fee: details?.fee,
             };
             if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
             accountBook = { ...accountBook, operations: appendOperations(accountBook.operations, [op]) };
           }
-          if (e.kind === 'income' && (e.accountId || e.nominalDate)) {
-            const op: AccountOperation = { id: uid(), eventKey: e.key, type: 'income', amount: paid,
-              accountId: e.accountId ?? LIFE_ACCOUNT, date, at, origin: 'manual', status: 'confirmed', fundingSource: 'own' };
+          if (e.kind === 'payment' && !debt && !e.key.startsWith('split-debit:') && details?.accountId) {
+            const op: AccountOperation = { id: uid(), eventKey: e.key, type: 'expense', amount: paid,
+              accountId, date, at: bookedAt, origin: 'manual', status: 'confirmed', fundingSource: 'unknown' };
             if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
             accountBook = { ...accountBook, operations: appendOperations(accountBook.operations, [op]) };
+          }
+          if (e.kind === 'income' && (e.accountId || e.nominalDate)) {
+            const op: AccountOperation = { id: uid(), eventKey: e.key, type: 'income', amount: paid,
+              accountId: e.accountId ?? LIFE_ACCOUNT, date, at: bookedAt, origin: 'manual', status: 'confirmed', fundingSource: 'own' };
+            if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
+            accountBook = { ...accountBook, operations: appendOperations(accountBook.operations, [op]) };
+            if (work && details?.payrollActual && e.nominalDate) {
+              const key = e.incomeKind === 'salary' || e.incomeKind === 'advance' || e.incomeKind === 'bonusMonthly'
+                ? `inc:${e.incomeKind}:${monthKey(e.nominalDate)}` : e.key;
+              const updated = { ...work, actual: { ...work.actual, [key]: { ...details.payrollActual, asOf: date, verifiedBy: 'Расчётный листок' } } };
+              if (!validPayroll(updated)) return {};
+              work = updated;
+            }
           }
         } else {
           delete marks[e.key];
@@ -430,7 +446,7 @@ export const useStore = create<State>()(
             debts = s.debts.map(d => (d.id === debt.id ? { ...patchDebt(d, prev.prevBalance!), closedOn: undefined } : d));
           }
         }
-        return { marks, accountBook, ...withSnapshot(debts, s.snapshots) };
+        return { marks, accountBook, work, ...withSnapshot(debts, s.snapshots) };
       }),
 
       updateDebt: (id, patch) => set(s => {
@@ -458,7 +474,7 @@ export const useStore = create<State>()(
 
       applyBonus: ({ id, amount, accountId, title, eventKey, date = today() }) => {
         const s = get();
-        if (eventKey && s.marks[eventKey]?.done) return false;
+        if (date > today() || (eventKey && s.marks[eventKey]?.done)) return false;
         const at = nowIso();
         const op: AccountOperation = { id, amount, accountId, eventKey, date, at, type: 'income',
           origin: 'manual', status: 'confirmed', fundingSource: 'own', note: title };

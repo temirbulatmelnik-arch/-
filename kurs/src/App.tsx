@@ -1,5 +1,5 @@
 import { MotionConfig } from 'motion/react';
-import { startTransition, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, startTransition, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Island } from './components/Island';
 import { Salute } from './components/Salute';
 import { TABS, TabBar } from './components/TabBar';
@@ -29,6 +29,15 @@ import { Week } from './screens/Week';
 import { WeekSheet } from './screens/WeekSheet';
 import { cleanedTwins, useStore } from './store/store';
 import { toast as showToast, useUi, type Tab } from './store/ui';
+
+const FinanceSheet = lazy(() => import('./screens/FinanceSheet').then(m => ({ default: m.FinanceSheet })));
+const WorkSheet = lazy(() => import('./screens/WorkSheet').then(m => ({ default: m.WorkSheet })));
+
+function FinanceSheets() {
+  const finance = useUi(s => s.finance);
+  const work = useUi(s => s.workSheet);
+  return <Suspense fallback={null}>{finance && <FinanceSheet />}{work && <WorkSheet />}</Suspense>;
+}
 
 function useTheme() {
   const theme = useStore(s => s.settings.theme);
@@ -70,6 +79,7 @@ const SHEETS = (
     <SyncSheet />
     <UnlockSheet />
     <HubSheet />
+    <FinanceSheets />
     <Tour />
   </>
 );

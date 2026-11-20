@@ -1,3 +1,4 @@
+import { budgetExpenses } from '../domain/accounts';
 // Состояние интерфейса: какая вкладка и какие листы открыты. Не сохраняется.
 import { useEffect, useMemo, useState } from 'react';
 import { create } from 'zustand';
@@ -63,6 +64,8 @@ interface Ui {
   today: boolean;
   /** «Банк и чат»: выписка, сверка, обмен с чатом, премия — в одном месте */
   hub: boolean;
+  finance: boolean;
+  workSheet: boolean;
   /** знакомство с новым интерфейсом */
   tour: boolean;
   /** вид «Платежей»: месяц, хватит ли, список */
@@ -81,7 +84,7 @@ interface Ui {
 
 export const useUi = create<Ui>()(set => ({
   tab: 'week', add: null, scan: false, settings: false, event: null, bonus: null, debt: null, reserve: false,
-  week: null, savings: false, sync: false, fixed: false, card: false, loan: false, transfer: null, unlock: false, planView: 'debts', focus: null, settingsFocus: null, inbox: null, checkup: null, hub: false, tour: false, payView: 'list', scenario: 'base', today: false, stackOpen: null, toast: null, undo: null,
+  week: null, savings: false, sync: false, fixed: false, card: false, loan: false, transfer: null, unlock: false, planView: 'debts', focus: null, settingsFocus: null, inbox: null, checkup: null, hub: false, finance: false, workSheet: false, tour: false, payView: 'list', scenario: 'base', today: false, stackOpen: null, toast: null, undo: null,
   // прокрутку каждой вкладки помнит App (useTabScroll)
   setTab: tab => set({ tab }),
   set: p => set(p),
@@ -112,4 +115,10 @@ export function useToday(): string {
 export function useCal(): CalendarInput {
   const [debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge, accountBook, work, marks] = useStore(useShallow(s => [s.debts, s.incomes, s.fixed, s.oneOff, s.templateFrom, s.weeklyOverrides, s.overrides, s.bridge, s.accountBook, s.work, s.marks] as const));
   return useMemo(() => ({ debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge, accountBook, work, marks }), [debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge, accountBook, work, marks]);
+}
+
+
+export function useBudgetExpenses() {
+  const [expenses, book] = useStore(useShallow(s => [s.expenses, s.accountBook] as const));
+  return useMemo(() => budgetExpenses(expenses, book), [expenses, book]);
 }

@@ -45,7 +45,7 @@ export function spendEffect(s: SpendState, x: { amount: number; source: Source; 
   const thisWeek = monday === weekStart(x.now);
 
   if (x.source === 'reserve') {
-    return { text: `Из резерва: останется ${r(x.reserve - x.amount)}. В лимит недели не входит`, tone: 'rsv' };
+    return { text: `Из резерва: останется ${r(x.reserve - x.amount)}. Трата входит в недельный бюджет`, tone: 'rsv' };
   }
   if (week.left < 0) {
     const text = x.source === 'credit'

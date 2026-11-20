@@ -6,10 +6,9 @@ import { AmountInput, Money, PrimaryButton, Row, SecondaryButton, Sheet } from '
 import { GROUP_LABEL, whenText } from '../components/rows';
 import { eventGroup } from '../domain/calendar';
 import { addDays, dayMonth, relDays, weekdayFull } from '../domain/dates';
-import { heldKeys } from '../domain/ledger';
+import { heldKeys, ledger } from '../domain/ledger';
 import { parseAmount, rub } from '../domain/money';
 import type { CalEvent } from '../domain/types';
-import { weekReport } from '../domain/weekly';
 import { useStore } from '../store/store';
 import { toast, useToday, useUi } from '../store/ui';
 
@@ -37,7 +36,10 @@ function Body({ e }: { e: CalEvent }) {
   // пополнение по воскресеньям: до лимита следующей недели минус остаток уходящей
   const monday = e.kind === 'weekly' ? addDays(e.date, -6) : '';
   const [amount, setAmount] = useState(() => {
-    if (mark?.amount == null && e.kind === 'weekly') { const s = useStore.getState(); return String(Math.round(weekReport(s.expenses, s.debts, s.weeklyOverrides, monday, s.bridge).topUp)); }
+    if (mark?.amount == null && e.kind === 'weekly') {
+      const led = ledger(useStore.getState());
+      return led.card == null ? '' : String(Math.round(Math.max(0, e.amount - Math.max(0, led.card - led.heldOnCard - led.incomeOnCard))));
+    }
     return String(Math.round((mark?.amount ?? e.amount) * 100) / 100);
   });
   const [editing, setEditing] = useState(false);
@@ -45,18 +47,25 @@ function Body({ e }: { e: CalEvent }) {
   const [from, setFrom] = useState<'reserve' | 'card'>(() => mark?.paidFrom ?? (heldKeys(useStore.getState().reserveLog, useStore.getState().marks).has(e.key) ? 'card' : 'reserve'));
   const book = useStore(s => s.accountBook);
   const [account, setAccount] = useState(e.accountId ?? (from === 'card' ? LIFE_ACCOUNT : RESERVE_ACCOUNT));
+  const [paidDate, setPaidDate] = useState(now);
   const [principal, setPrincipal] = useState('');
   const [interest, setInterest] = useState('');
   const [fee, setFee] = useState('');
+  const [gross, setGross] = useState('');
+  const [withheld, setWithheld] = useState('');
+  const [otherWithheld, setOtherWithheld] = useState('');
   const [newAmount, setNewAmount] = useState(String(e.amount));
   const [newDate, setNewDate] = useState(e.date);
   const value = parseAmount(amount) ?? 0;
   const close = () => set({ event: null });
 
   const done = () => {
-    if (isBonus(e)) { set({ event: null, bonus: { event: { ...e, amount: value } } }); return; }
+    if (isBonus(e) && !e.nominalDate && e.economicType !== 'loan_disbursement') { set({ event: null, bonus: { event: { ...e, amount: value } } }); return; }
     markEvent(e, true, value, from, { accountId: account, principal: parseAmount(principal) ?? undefined,
-      interest: parseAmount(interest) ?? undefined, fee: parseAmount(fee) ?? undefined });
+      interest: parseAmount(interest) ?? undefined, fee: parseAmount(fee) ?? undefined, paidDate,
+      ...(gross || withheld || otherWithheld ? { payrollActual: { gross: parseAmount(gross) ?? undefined,
+        tax: parseAmount(withheld) ?? undefined, otherWithheld: parseAmount(otherWithheld) ?? undefined } } : {}),
+    });
     if (!useStore.getState().marks[e.key]?.done) { toast('Проверьте счёт и разбивку платежа'); return; }
     toast(e.kind === 'income' ? `Пришло на карту. В воскресной сверке приложение напомнит перевести ${rub(value)} в резерв` : e.kind === 'weekly' ? 'Отмечено: карта долита из резерва' : debt ? `Оплачено. В учёте отражена подтверждённая часть тела долга` : 'Отмечено: оплачено');
     close();
@@ -107,6 +116,9 @@ function Body({ e }: { e: CalEvent }) {
             <div className="mb-1.5 text-[12.5px] font-medium text-muted">{e.kind === 'income' ? 'Сколько пришло' : e.kind === 'weekly' ? 'Сколько долили' : 'Сколько заплатили'}</div>
             <AmountInput value={amount} onChange={setAmount} size="md" />
           </div>
+          {e.kind !== 'weekly' && <label className="block text-[13px]">
+            Фактическая дата<input className="field mt-1" type="date" value={paidDate} max={now} onChange={x => setPaidDate(x.target.value)} />
+          </label>}
           {e.kind === 'payment' && (
             <div>
               <div className="mb-1.5 text-[12.5px] font-medium text-muted">Откуда оплачено</div>
@@ -127,8 +139,15 @@ function Body({ e }: { e: CalEvent }) {
             </label>)}
             <p className="text-[12.5px] text-muted">Если разбивки нет, оставьте поля пустыми. Списание учтётся, тело долга уточняется по выписке.</p>
           </div>}
+          {e.nominalDate && e.kind === 'income' && <details className="text-[13px]">
+            <summary className="text-sea">Суммы из расчётного листка</summary>
+            {([{ label: 'Начислено до НДФЛ', value: gross, set: setGross }, { label: 'Фактический НДФЛ', value: withheld, set: setWithheld },
+                { label: 'Другие удержания', value: otherWithheld, set: setOtherWithheld }]).map(part => <label key={part.label} className="mt-2 block">
+              {part.label}<input className="field mt-1" inputMode="decimal" value={part.value} onChange={x => part.set(x.target.value)} />
+            </label>)}
+          </details>}
           {isBonus(e) && <p className="text-[12.5px] leading-snug text-muted">Дальше — распределение премии: резерв до следующей премии, остальное сегодня же в долг.</p>}
-          <PrimaryButton onClick={done} disabled={value <= 0}>
+          <PrimaryButton onClick={done} disabled={value <= 0 || !paidDate || paidDate > now}>
             {e.kind === 'income' ? (isBonus(e) ? 'Пришла — распределить' : 'Пришло') : e.kind === 'weekly' ? 'Долил' : 'Оплачено'}
           </PrimaryButton>
           {e.kind === 'weekly' ? (

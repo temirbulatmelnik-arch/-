@@ -1,3 +1,5 @@
+import { useCoverage } from '../components/Coverage';
+import { accountOptions, LIFE_ACCOUNT, monthDebtActivity } from '../domain/accounts';
 // «Сегодня»: сцена с мостом, остаток недели и кольцо дня. Под сценой — быстрые траты, один следующий шаг, строка
 // «Неделя», три сосуда «Где деньги» и плитки-входы «Траты» и «Долги». Плашка о перерасходе появляется при входе.
 import { ChevronRight, MessagesSquare, Scale, ScanText, Settings as Cog } from 'lucide-react';
@@ -20,12 +22,12 @@ import { heldKeys, transferPlan } from '../domain/ledger';
 import { rub } from '../domain/money';
 import { quickSpends, yesterdaySet, type QuickSpend } from '../domain/quick';
 import { spendEffect, suggestSource } from '../domain/sources';
-import { CATEGORY, currentPhase, phaseByDate, reserveNeed, totalDebt } from '../domain/plan';
-import { alerts as buildAlerts, type Alert, countsWeekly, dayBudget, monthByCategory, weekSummary } from '../domain/summary';
+import { CATEGORY, currentPhase, phaseByDate, reserveNeed } from '../domain/plan';
+import { alerts as buildAlerts, type Alert, dayBudget, monthByCategory, weekSummary } from '../domain/summary';
 import type { CalEvent } from '../domain/types';
 import { weekReport, weekToClose } from '../domain/weekly';
 import { useStore } from '../store/store';
-import { toast, useCal, useToday, useUi, withUndo } from '../store/ui';
+import { toast, useBudgetExpenses, useCal, useToday, useUi, withUndo } from '../store/ui';
 import { checkInbox, checkPlan } from './Sync';
 import { useLedger } from './Checkup';
 import { recordTransfer } from './TransferSheet';
@@ -78,9 +80,10 @@ function useOverPill(left: number, alert: boolean) {
 export function Week() {
   const now = useToday();
   const cal = useCal();
-  const [expenses, debts, marks, wishes, settings, overrides, startTotal, closures, checklist, checks, toggleCheck, bridge, checkups, reserveLog] = useStore(useShallow(s => [
-    s.expenses, s.debts, s.marks, s.wishes, s.settings, s.weeklyOverrides, s.planTrajectory[0]?.[1] ?? 0, s.closures, s.checklist, s.checks, s.toggleCheck, s.bridge, s.checkups, s.reserveLog,
+  const [debts, marks, wishes, settings, overrides, startTotal, closures, checklist, checks, toggleCheck, bridge, checkups, reserveLog, accountBook, snapshots] = useStore(useShallow(s => [
+    s.debts, s.marks, s.wishes, s.settings, s.weeklyOverrides, s.planTrajectory[0]?.[1] ?? 0, s.closures, s.checklist, s.checks, s.toggleCheck, s.bridge, s.checkups, s.reserveLog, s.accountBook, s.snapshots,
   ] as const));
+  const expenses = useBudgetExpenses();
   // только нужное из состояния интерфейса: иначе весь экран перерисовывался бы при каждом переключении вкладки и листе
   const ui = { set: useUi(s => s.set), setTab: useUi(s => s.setTab), stackOpen: useUi(s => s.stackOpen) };
   const todayIdx = (fromKey(now).getDay() + 6) % 7;
@@ -151,7 +154,17 @@ export function Week() {
   const list = useMemo(() => buildAlerts({ bridge, cal, marks, expenses, wishes, now, nowMs: Date.now(), lastBackupAt: settings.lastBackupAt, lastIcsAt: settings.lastIcsAt, checklist, checks }),
     [bridge, cal, marks, expenses, wishes, now, settings.lastBackupAt, settings.lastIcsAt, checklist, checks]);
   const pending = wishes.filter(w => !w.resolved);
-  const debt = totalDebt(debts);
+  const debt = Object.values(led.debtBalances).reduce((sum, item) => sum + item.estimated, 0);
+  const { cov: accountCoverage } = useCoverage();
+  const firstRisk = [accountCoverage.shortage, accountCoverage.accountRisk].filter(x => x != null)
+    .sort((a, b) => a.date.localeCompare(b.date))[0];
+  const firstPayment = useMemo(() => eventsBetween(cal, addDays(now, -45), addDays(now, 45))
+    .find(e => e.kind === 'payment' && !marks[e.key]?.done), [cal, marks, now]);
+  const paymentName = accountOptions(accountBook).find(a => a.id === firstPayment?.accountId)?.name;
+  const activity = monthDebtActivity(accountBook, expenses, now);
+  const prior = snapshots.filter(s => s.month < monthKey(now)).at(-1);
+  const confirmedNow = debts.filter(d => !d.closed).every(d => !!d.bankBalance);
+  const net = confirmedNow && prior ? prior.total - debts.reduce((sum, d) => sum + (d.closed ? 0 : d.bankBalance?.amount ?? 0), 0) : null;
   const over = week.left < 0;
   const dayAlert = today.mode !== 'ok';
   const pill = useOverPill(today.left, dayAlert);
@@ -183,7 +196,7 @@ export function Week() {
     const out: Step[] = [];
     // накануне вечером и в день платежа: перевести из резерва на карту, с которой он спишется. Сделали — резерв в
     // приложении сразу как в банке, а платёж потом отмечается «с карты»
-    const move = transferPlan({ events: eventsBetween(cal, now, addDays(now, 1)), marks, log: reserveLog, incomeOnCard: led.incomeOnCard, now, hour });
+    const move = transferPlan({ events: eventsBetween(cal, now, addDays(now, 1)).filter(e => e.kind !== 'payment' || e.accountId === LIFE_ACCOUNT), marks, log: reserveLog, incomeOnCard: led.incomeOnCard, now, hour });
     if (move) {
       const names = move.events.map(e => e.title).join(', ');
       const day = move.when === 'tomorrow' ? 'Завтра' : move.when === 'today' ? 'Сегодня' : 'Сегодня и завтра';
@@ -376,6 +389,18 @@ export function Week() {
           onCard={() => ui.set({ card: true })} onLoan={() => ui.set({ loan: true })} onReserve={() => ui.set({ reserve: true })} />
       </div>
 
+      <div className="relative z-[1] mx-4 mt-2 space-y-2 rounded-[18px] bg-surface p-3 text-[13px]">
+        <button type="button" className="flex w-full justify-between text-left" onClick={() => ui.set({ finance: true })}>
+          <span>Новые займы в этом месяце</span><Money value={activity.borrowed} />
+        </button>
+        {activity.borrowed > 0 && <p className="text-muted">В остатках на дебетовых счетах могут быть заёмные деньги.</p>}
+        {net != null && <div className="flex justify-between"><span>Изменение сверенного долга</span><Money value={-net} sign /></div>}
+        {firstPayment && <div className="text-muted">{ddmm(firstPayment.date)} · {firstPayment.title} · {paymentName ?? 'счёт уточняется'}</div>}
+        {firstRisk && <button type="button" className="text-left text-warn" onClick={() => { ui.set({ payView: 'cover' }); ui.setTab('payments'); }}>
+          Первый риск {ddmm(firstRisk.date)} · {firstRisk.title}
+        </button>}
+      </div>
+
       {/* «Траты» и «Долги» — плитки на месте прежних вкладок: внутри те же экраны целиком */}
       <div className="relative z-[1] bg-bg px-4 pt-2">
         <EntryTiles spent={monthSpent} limit={monthLimit} shares={monthShares} debt={debt} melted={Math.max(0, startTotal - debt)}
@@ -416,7 +441,7 @@ function Lamps({ monday, todayIdx, limit, dayNorm }: { monday: string; todayIdx:
   const strip = useRef<HTMLDivElement>(null);
   const spent = useMemo(() => [0, 1, 2, 3, 4, 5, 6].map(i => {
     const d = addDays(monday, i);
-    return expenses.filter(e => e.date === d && countsWeekly(e)).reduce((s, e) => s + e.amount, 0);
+    return expenses.filter(e => e.date === d).reduce((s, e) => s + e.amount, 0);
   }), [expenses, monday]);
   useEffect(() => {
     if (open == null || scrub) return;

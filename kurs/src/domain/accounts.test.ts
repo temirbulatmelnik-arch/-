@@ -41,3 +41,15 @@ describe('счета и экономический смысл операций',
     expect(eventsBetween(cal, date, date)).toEqual([expect.objectContaining({ key: 'split-debit:group', amount: 1700, accountId: 'debit' })]);
   });
 });
+
+describe('возврат и повторный импорт', () => {
+  it('уменьшает бюджет покупки без зарплатного дохода', async () => {
+    const { budgetExpenses } = await import('./accounts');
+    const purchase: Expense = { id: 'e', date, amount: 900, category: 'transport', source: 'life', accountId: account.id, createdAt: at };
+    const refund: AccountOperation = { ...common, id: 'r', type: 'refund', amount: 300, expenseId: purchase.id };
+    const book = { ...EMPTY_BOOK, accounts: [account], operations: appendOperations([], [refund, refund]) };
+    expect(budgetExpenses([purchase], book)[0].amount).toBe(600);
+    expect(accountProjection(book, [purchase], date)[0].expected).toBe(9400);
+    expect(book.operations[0].type).toBe('refund');
+  });
+});

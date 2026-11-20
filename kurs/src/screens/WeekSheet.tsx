@@ -1,3 +1,4 @@
+import { useLedger } from './Checkup';
 // Итог недели: траты по категориям против лимита, воскресное пополнение карты жизни из резерва до лимита и все траты недели.
 import { FileUp, Undo2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -10,7 +11,7 @@ import { CATEGORY } from '../domain/plan';
 import { bridgeWeek } from '../domain/bridge';
 import { weekReport } from '../domain/weekly';
 import { useStore } from '../store/store';
-import { toast, useUi } from '../store/ui';
+import { toast, useBudgetExpenses, useUi } from '../store/ui';
 
 export function WeekSheet() {
   const monday = useUi(s => s.week);
@@ -23,10 +24,14 @@ export function WeekSheet() {
 }
 
 function Body({ monday }: { monday: string }) {
-  const [expenses, debts, overrides, closure, closeWeek, reopenWeek, bridge] = useStore(useShallow(s => [s.expenses, s.debts, s.weeklyOverrides, s.closures[monday], s.closeWeek, s.reopenWeek, s.bridge] as const));
+  const expenses = useBudgetExpenses();
+  const [debts, overrides, closure, closeWeek, reopenWeek, bridge] = useStore(useShallow(s => [s.debts, s.weeklyOverrides, s.closures[monday], s.closeWeek, s.reopenWeek, s.bridge] as const));
   const set = useUi(s => s.set);
   const r = useMemo(() => weekReport(expenses, debts, overrides, monday, bridge), [expenses, debts, overrides, monday, bridge]);
-  const [amount, setAmount] = useState(String(Math.round(r.topUp)));
+  const led = useLedger();
+  const available = led.card == null ? null : Math.max(0, led.card - led.incomeOnCard - led.heldOnCard);
+  const topUp = available == null ? 0 : Math.max(0, r.nextLimit - available);
+  const [amount, setAmount] = useState(String(Math.round(topUp)));
   const value = parseAmount(amount) ?? 0;
   const max = Math.max(...r.byCategory.map(c => c.spent), 1);
   const list = useMemo(() => expenses.filter(e => e.date >= monday && e.date <= r.sunday).sort((a, b) => b.date.localeCompare(a.date)), [expenses, monday, r.sunday]);
@@ -84,10 +89,7 @@ function Body({ monday }: { monday: string }) {
         <div className="card space-y-3 p-4">
           <div className="text-[14px] leading-snug">
             В воскресенье вечером долейте карту жизни <b className="font-medium">из резерва</b> до лимита следующей недели — <Money value={r.nextLimit} />.{' '}
-            {r.leftover > 0
-              ? <>На карте осталось <Money value={r.leftover} />, они остаются там, поэтому долить нужно меньше.</>
-              : r.left < 0 ? <>Остатка нет: перерасход <Money value={-r.left} /> не переносится, долить нужно весь лимит.</>
-                : <>Остатка нет — долить весь лимит.</>}
+            {available == null ? 'Остаток карты требует сверки.' : <>Свободно на карте <Money value={available} /> · долить <Money value={topUp} />.</>}
           </div>
           <PrimaryButton onClick={() => set({ week: null, checkup: monday })}>Сверить с банком и закрыть</PrimaryButton>
           <p className="text-[12px] leading-snug text-muted">Впишете остатки на карте, в резерве и на кредитке — приложение найдёт невнесённые траты и посчитает перевод. Или без сверки:</p>
