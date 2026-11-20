@@ -1,3 +1,5 @@
+import type { BankBalance } from './accounts';
+
 // Модель данных «Курса». Все суммы — в рублях, даты — строки YYYY-MM-DD по местному времени.
 
 export type DebtKind = 'micro' | 'installment' | 'card' | 'split' | 'loan';
@@ -41,6 +43,7 @@ export interface Debt {
   note?: string;
   /** когда остаток обновлялся последний раз */
   updatedAt?: string;
+  bankBalance?: BankBalance;
 }
 
 export type CategoryId =
@@ -57,7 +60,11 @@ export interface Expense {
   category: CategoryId;
   note?: string;
   source: Source;
-  /** кредитка, с которой трата (id долга); без него — кредитка моста */
+  /** Фактический счёт для дебетовой покупки, если отличается от карты жизни или резерва. */
+  accountId?: string;
+  fundingSource?: 'own' | 'borrowed' | 'unknown';
+  occurredAt?: string;
+  /** Кредитка, с которой прошла трата. Без id покупка требует классификации. */
   creditCard?: string;
   /** откуда пришла: вручную, выписка, скриншот */
   origin?: 'manual' | 'csv' | 'text' | 'ai' | 'pdf' | 'chat';
@@ -82,6 +89,12 @@ export interface CalEvent {
   approx?: boolean;
   debtId?: string;
   incomeKind?: IncomeKind;
+  accountId?: string;
+  economicType?: 'income' | 'loan_disbursement' | 'debt_payment';
+  confidence?: 'confirmed' | 'regular' | 'estimate' | 'tentative';
+  accrualPeriod?: string;
+  nominalDate?: string;
+  expectedPayDate?: string;
   note?: string;
   /** дата перенесена вручную */
   moved?: boolean;
@@ -118,6 +131,7 @@ export interface ReserveMove {
   at?: string;
   /** остаток введён из банка целиком, а не сдвинут на сумму */
   abs?: boolean;
+  operationIds?: string[];
   /** перевод между картой и резервом: на сколько изменилась карта (− с карты в резерв) */
   card?: number;
   /** перевод на карту под платежи: ключи событий календаря. Пока платёж не отмечен, эти деньги лежат на карте
@@ -205,6 +219,8 @@ export interface ChecklistItem {
   note?: string;
   /** YYYY-MM-DD или YYYY-MM */
   due?: string;
+  eventKey?: string;
+  status?: 'review' | 'payment' | 'clarify';
   /** выполнено на момент составления плана */
   done?: boolean;
 }
@@ -238,6 +254,7 @@ export interface CardBalance {
   at?: string;
   /** Записи по дату банковского остатка, существовавшие на момент сверки. */
   includedExpenseIds?: string[];
+  operationIds?: string[];
 }
 
 /** Исходные данные плана (зашифрованы в seed.enc.json) */

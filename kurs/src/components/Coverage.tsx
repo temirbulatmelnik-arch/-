@@ -4,7 +4,8 @@ import { AnimatePresence, motion } from 'motion/react';
 import { CheckCircle2, ChevronDown, TriangleAlert } from 'lucide-react';
 import { useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { coverage, coverageHints, coverageInput, NARROW, type Coverage, type CoverageInput, type CoverageStep } from '../domain/coverage';
+import { coverage, coverageHints, coverageInput, NARROW, type Coverage, type CoverageInput, type CoverageStep, type Scenario } from '../domain/coverage';
+import { accountOptions, EMPTY_BOOK } from '../domain/accounts';
 import { dayMonth, ddmm, monthName } from '../domain/dates';
 import { num } from '../domain/money';
 import { useLedger } from '../screens/Checkup';
@@ -12,7 +13,7 @@ import { useStore } from '../store/store';
 import { useCal, useToday, useUi } from '../store/ui';
 import { haptic } from './haptics';
 import { ease, spring } from './motion';
-import { Money } from './ui';
+import { Money, Segmented } from './ui';
 
 /**
  * Прогноз покрытия — один на всё приложение: «Хватит ли», остаток дня в календаре, «самая тонкая точка» на карте и
@@ -20,20 +21,22 @@ import { Money } from './ui';
  * экраны, которые живут одновременно, не пересчитывают его каждый своё.
  */
 let covCache: { key: unknown[]; input: CoverageInput; cov: Coverage } | null = null;
-export function useCoverage(): { input: CoverageInput; cov: Coverage; now: string } {
+export function useCoverage(override?: Scenario): { input: CoverageInput; cov: Coverage; now: string } {
+  const selected = useUi(s => s.scenario);
+  const scenario = override ?? selected;
   const now = useToday();
   const cal = useCal();
   const [marks, expenses] = useStore(useShallow(s => [s.marks, s.expenses] as const));
   const led = useLedger();
   return useMemo(() => {
     // ключ — сами данные хранилища (у каждого экрана свой объект cal, но поля в нём общие)
-    const key = [...Object.values(cal), marks, expenses, led.reserve, led.incomeOnCard, now];
+    const key = [...Object.values(cal), marks, expenses, led.reserve, led.incomeOnCard, led.heldOnCard, led.card, led.cashAccounts, led.reserveVerified, now, scenario];
     if (!covCache || covCache.key.some((k, i) => k !== key[i])) {
       const input = coverageInput({ ...cal, marks, expenses }, led);
-      covCache = { key, input, cov: coverage(input, now) };
+      covCache = { key, input, cov: coverage(input, now, scenario) };
     }
     return { input: covCache.input, cov: covCache.cov, now };
-  }, [cal, marks, expenses, led.reserve, led.incomeOnCard, now]);
+  }, [cal, marks, expenses, led.reserve, led.incomeOnCard, led.heldOnCard, led.card, led.cashAccounts, led.reserveVerified, now, scenario]);
 }
 
 const W = 340, H = 132, PAD = 14;
@@ -103,33 +106,45 @@ export function CoverageCard() {
   const set = useUi(s => s.set);
   // резерв по учёту: минус оплаченное из него после последнего остатка из банка, плюс поступления, ждущие перевода с карты
   const { input, cov, now } = useCoverage();
-  const reserve = input.reserve;
+  const scenario = useUi(s => s.scenario);
+  const risk = cov.accountRisk;
+  const riskName = accountOptions(input.cal.accountBook ?? EMPTY_BOOK).find(a => a.id === risk?.accountId)?.name;
   const [open, setOpen] = useState(false);
   const hints = useMemo(() => coverageHints(input, now, cov), [input, now, cov]);
   const s = cov.shortage, m = cov.min;
   const focus = Math.max(0, (s ? cov.steps.findIndex(x => x.balance < 0) : m ? cov.steps.indexOf(m) : -1) + 1);
   const helpful = hints.filter(h => h.closes).slice(0, 2);
-  const fallback = !helpful.length && s;
+  const fallback = !helpful.length && s && !risk;
 
   return (
     <section className="mx-4 mt-4">
+      <div className="mb-3"><Segmented value={scenario} onChange={scenario => set({ scenario })} options={[
+        { id: 'base', label: 'Базовый' }, { id: 'cautious', label: 'Осторожный' }, { id: 'stress', label: 'Стрессовый' },
+      ]} /></div>
       <div className="deep-card px-5 pt-5 pb-4">
         <span aria-hidden="true" className="deep-sheen" />
         <div className="flex items-start gap-3">
-          {s ? <TriangleAlert size={22} strokeWidth={1.8} className="mt-0.5 shrink-0 text-[#ff9a70]" /> : <CheckCircle2 size={22} strokeWidth={1.8} className="mt-0.5 shrink-0 text-[#9ff0d4]" />}
+          {s || risk ? <TriangleAlert size={22} strokeWidth={1.8} className="mt-0.5 shrink-0 text-[#ff9a70]" /> : <CheckCircle2 size={22} strokeWidth={1.8} className="mt-0.5 shrink-0 text-[#9ff0d4]" />}
           <div className="min-w-0">
             <h2 className="font-display text-[21px] leading-tight font-medium">
-              {s ? <>{dayMonth(s.date)} не хватит {num(s.amount)} ₽</> : <>Хватает до {dayMonth(cov.to)}</>}
+              {s ? <>{dayMonth(s.date)} не хватит {num(s.amount)} ₽</> : risk ? <>Счёт требует проверки</> : <>Хватает по прогнозу до {dayMonth(cov.to)}</>}
             </h2>
             <p className="mt-1 text-[13.5px] leading-snug text-card-muted">
-              {s ? <>на «{s.title}». Резерв <Money value={reserve} className="text-card" /> и всё, что придёт, против платежей и пополнений карты.</>
-                : m ? <>Тоньше всего {dayMonth(m.date)}: останется <Money value={m.balance} className="text-card" />. Резерв <Money value={reserve} className="text-card" /> плюс всё, что придёт.</> : null}
+              {s ? <>Первый дефицит после «{s.title}». Показана максимальная нехватка.</>
+                : m ? <>Минимум {dayMonth(m.date)} · <Money value={m.balance} className="text-card" /></> : null}
             </p>
           </div>
         </div>
         <ReserveScrub steps={cov.steps} start={cov.start} from={cov.from} to={cov.to} focus={focus} />
       </div>
 
+      {risk && <div className="mt-3 rounded-[18px] bg-warn/12 px-4 py-3 text-[13.5px]">
+        <b>{dayMonth(risk.date)} · {risk.title}</b>
+        <div>{riskName ?? 'Счёт списания не указан'}{risk.amount != null ? <> · не хватает <Money value={risk.amount} /></> : riskName ? ' · остаток не подтверждён' : ''}</div>
+        {hints[0] && <p className="mt-1 text-muted">{hints[0].text}</p>}
+      </div>}
+      {cov.bufferRisk && <p className="mt-3 px-1 text-[13px] text-muted">С {dayMonth(cov.bufferRisk.date)} запас ниже цели на <Money value={cov.bufferRisk.amount} />.</p>}
+      {scenario === 'stress' && !input.cal.accountBook?.stress && <p className="mt-2 px-1 text-[13px] text-muted">Добавьте непредвиденный расход в настройках счетов для стресс-сценария.</p>}
       {s && (
         <div className="mt-3 space-y-2">
           {helpful.map((h, i) => (
@@ -176,7 +191,7 @@ export function CoverageCard() {
                 ))}
               </div>
             )}
-            <p className="mt-2 px-1 text-[11.5px] leading-snug text-faint">Суммы с ≈ — оценка. Недели вне моста — худший случай: лимит потрачен до нуля. Мост гасится в срок с процентами.</p>
+            <p className="mt-2 px-1 text-[11.5px] leading-snug text-faint">Суммы с ≈ — оценка. Линия показывает общую сумму по счетам. Для автоплатежа отдельно проверяется счёт списания.</p>
           </motion.div>
         )}
       </AnimatePresence>

@@ -24,6 +24,7 @@ export function ExpenseRow({ e, onClick }: { e: Expense; onClick?: () => void })
       <span className="flex shrink-0 flex-col items-end gap-0.5">
         <Money value={e.amount} className="text-[15px]" />
         {e.source === 'credit' && <span className="src-loan inline-flex items-center gap-1 rounded-full px-1.5 py-px text-[10.5px] font-medium"><CreditCard size={10} strokeWidth={2} />в долг</span>}
+        {e.source !== 'credit' && e.fundingSource === 'borrowed' && <span className="src-loan rounded-full px-1.5 py-px text-[10.5px]">из полученного займа</span>}
         {e.source === 'reserve' && <span className="src-rsv inline-flex items-center gap-1 rounded-full px-1.5 py-px text-[10.5px] font-medium"><PiggyBank size={10} strokeWidth={2} />резерв</span>}
       </span>
     </button>

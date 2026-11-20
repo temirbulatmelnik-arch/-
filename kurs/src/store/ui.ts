@@ -1,8 +1,10 @@
+import { budgetExpenses } from '../domain/accounts';
 // Состояние интерфейса: какая вкладка и какие листы открыты. Не сохраняется.
 import { useEffect, useMemo, useState } from 'react';
 import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 import type { CalendarInput } from '../domain/calendar';
+import type { Scenario } from '../domain/coverage';
 import { today } from '../domain/dates';
 import type { TransferPlan } from '../domain/ledger';
 import type { CalEvent, CategoryId, Expense, Source } from '../domain/types';
@@ -62,10 +64,13 @@ interface Ui {
   today: boolean;
   /** «Банк и чат»: выписка, сверка, обмен с чатом, премия — в одном месте */
   hub: boolean;
+  finance: boolean;
+  workSheet: boolean;
   /** знакомство с новым интерфейсом */
   tour: boolean;
   /** вид «Платежей»: месяц, хватит ли, список */
   payView: PayView;
+  scenario: Scenario;
   /** воскресная сверка с банком: понедельник закрываемой недели */
   checkup: string | null;
   /** раскрытая карточка в стопке «Недели»; null — выбрать по обстановке */
@@ -79,7 +84,7 @@ interface Ui {
 
 export const useUi = create<Ui>()(set => ({
   tab: 'week', add: null, scan: false, settings: false, event: null, bonus: null, debt: null, reserve: false,
-  week: null, savings: false, sync: false, fixed: false, card: false, loan: false, transfer: null, unlock: false, planView: 'debts', focus: null, settingsFocus: null, inbox: null, checkup: null, hub: false, tour: false, payView: 'list', today: false, stackOpen: null, toast: null, undo: null,
+  week: null, savings: false, sync: false, fixed: false, card: false, loan: false, transfer: null, unlock: false, planView: 'debts', focus: null, settingsFocus: null, inbox: null, checkup: null, hub: false, finance: false, workSheet: false, tour: false, payView: 'list', scenario: 'base', today: false, stackOpen: null, toast: null, undo: null,
   // прокрутку каждой вкладки помнит App (useTabScroll)
   setTab: tab => set({ tab }),
   set: p => set(p),
@@ -90,7 +95,7 @@ export const toast = (text: string, undo?: () => void) => useUi.getState().set({
 /** Сделать действие с данными и показать сообщение с «Отменить»: траты, отметки, долги и резерв вернутся как были */
 export function withUndo(text: string | (() => string), action: () => void) {
   const s = useStore.getState();
-  const before = { expenses: s.expenses, marks: s.marks, debts: s.debts, reserve: s.reserve, reserveLog: s.reserveLog };
+  const before = { expenses: s.expenses, marks: s.marks, debts: s.debts, reserve: s.reserve, reserveLog: s.reserveLog, accountBook: s.accountBook };
   action();
   toast(typeof text === 'function' ? text() : text, () => { useStore.setState(before); toast('Отменено'); });
 }
@@ -108,6 +113,12 @@ export function useToday(): string {
 }
 
 export function useCal(): CalendarInput {
-  const [debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge] = useStore(useShallow(s => [s.debts, s.incomes, s.fixed, s.oneOff, s.templateFrom, s.weeklyOverrides, s.overrides, s.bridge] as const));
-  return useMemo(() => ({ debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge }), [debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge]);
+  const [debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge, accountBook, work, marks] = useStore(useShallow(s => [s.debts, s.incomes, s.fixed, s.oneOff, s.templateFrom, s.weeklyOverrides, s.overrides, s.bridge, s.accountBook, s.work, s.marks] as const));
+  return useMemo(() => ({ debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge, accountBook, work, marks }), [debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, bridge, accountBook, work, marks]);
+}
+
+
+export function useBudgetExpenses() {
+  const [expenses, book] = useStore(useShallow(s => [s.expenses, s.accountBook] as const));
+  return useMemo(() => budgetExpenses(expenses, book), [expenses, book]);
 }

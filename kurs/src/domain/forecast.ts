@@ -1,7 +1,7 @@
 // Прогноз по модели плана: помесячно начисляем проценты, платим обязательное, живём по лимиту этапа,
 // в месяц премии всё сверх резерва (20 000 + нехватка до следующей премии) — досрочно по порядку лавины.
-import { addMonths, monthKey, monthsBetween } from './dates';
-import { annuity, estimatePayment } from './calendar';
+import { addMonths, dayIn, monthKey, monthsBetween } from './dates';
+import { annuity, estimatePayment, eventsBetween, type CalendarInput } from './calendar';
 import { currentPhase, FIXED_MONTHLY, nextBonusMonth, planConfig, RESERVE_BUFFER, shortfallFor } from './plan';
 import type { CalEvent, Debt, IncomeTemplate } from './types';
 
@@ -16,7 +16,7 @@ export interface Forecast {
   freeMonth: string | null;
 }
 
-export function forecast(opts: { debts: Debt[]; incomes: IncomeTemplate[]; reserve: number; from: string; horizon?: number; oneOff?: CalEvent[]; templateFrom?: string }): Forecast {
+export function forecast(opts: { debts: Debt[]; incomes: IncomeTemplate[]; reserve: number; from: string; horizon?: number; oneOff?: CalEvent[]; templateFrom?: string; cal?: CalendarInput }): Forecast {
   const debts = opts.debts.map(d => ({ ...d, rule: { ...d.rule } as Debt['rule'] }));
   const closeMonth: Record<string, string | null> = Object.fromEntries(debts.map(d => [d.id, d.closed ? (d.closedOn ? monthKey(d.closedOn) : null) : null]));
   const trajectory: [string, number][] = [];
@@ -30,8 +30,12 @@ export function forecast(opts: { debts: Debt[]; incomes: IncomeTemplate[]; reser
     const mon = Number(m.slice(5, 7));
     // до начала шаблона берём поступления из календаря плана: там уже учтены отпуск, 13-я и т. п.
     const early = !!opts.templateFrom && m < opts.templateFrom;
-    const earlyIncomes = early ? (opts.oneOff ?? []).filter(e => e.kind === 'income' && monthKey(e.date) === m) : [];
-    const income = early
+    const earlyIncomes = early ? (opts.oneOff ?? []).filter(e => e.kind === 'income' && e.economicType !== 'loan_disbursement' && monthKey(e.date) === m) : [];
+    const enterprise = opts.cal?.work || opts.cal?.accountBook?.operations.some(op => op.type === 'loan_disbursement' && op.eventKey);
+    const income = enterprise && opts.cal
+      ? eventsBetween(opts.cal, `${m}-01`, dayIn(m, 'last')).filter(e => e.kind === 'income' && e.economicType !== 'loan_disbursement' && e.confidence !== 'tentative')
+        .reduce((sum, e) => sum + e.amount, 0)
+      : early
       ? earlyIncomes.reduce((s, e) => s + e.amount, 0)
       : opts.incomes.filter(t => !t.months || t.months.includes(mon)).reduce((s, t) => s + t.amount, 0);
     const phase = currentPhase(debts, `${m}-15`);
@@ -56,7 +60,7 @@ export function forecast(opts: { debts: Debt[]; incomes: IncomeTemplate[]; reser
       const keepMonths = rule?.months ?? Math.max(0, monthsBetween(m, nextBonusMonth(m)) - 1);
       let keep = RESERVE_BUFFER;
       for (let k = 1; k <= keepMonths; k++) keep += shortfallFor(addMonths(m, k), debts);
-      let extra = cash - (rule?.full ? RESERVE_BUFFER : keep);
+      let extra = cash - keep;
       const queue = debts.filter(x => !x.closed && !x.noPrepay && x.balance > 0.5 && (!rule?.targets || rule.targets.includes(x.id))).sort((a, b) => a.order - b.order);
       for (const d of queue) {
         if (extra <= 0) break;

@@ -35,17 +35,17 @@ const r = (n: number) => `${num(Math.abs(n))} ₽`;
  * Что будет после записи траты — одной строкой под суммой. amount = 0 — что сейчас. skipId — правим эту трату:
  * её прежняя сумма не считается. reserve — резерв по учёту.
  */
-export function spendEffect(s: SpendState, x: { amount: number; source: Source; date: string; now: string; reserve: number; skipId?: string }): SpendEffect {
+export function spendEffect(s: SpendState, x: { amount: number; source: Source; date: string; now: string; reserve: number; skipId?: string; creditCard?: string }): SpendEffect {
   const base = x.skipId ? s.expenses.filter(e => e.id !== x.skipId) : s.expenses;
   const expenses: Expense[] = x.amount > 0
-    ? [...base, { id: '~', date: x.date, amount: x.amount, category: 'fun', source: x.source, createdAt: '' }]
+    ? [...base, { id: '~', date: x.date, amount: x.amount, category: 'fun', source: x.source, creditCard: x.creditCard ?? s.bridge?.card, createdAt: '' }]
     : base;
   const monday = weekStart(x.date);
   const week = weekMoney(expenses, s.debts, s.weeklyOverrides, s.bridge, monday);
   const thisWeek = monday === weekStart(x.now);
 
   if (x.source === 'reserve') {
-    return { text: `Из резерва: останется ${r(x.reserve - x.amount)}. В лимит недели не входит`, tone: 'rsv' };
+    return { text: `Из резерва: останется ${r(x.reserve - x.amount)}. Трата входит в недельный бюджет`, tone: 'rsv' };
   }
   if (week.left < 0) {
     const text = x.source === 'credit'
@@ -54,6 +54,7 @@ export function spendEffect(s: SpendState, x: { amount: number; source: Source; 
     return { text, tone: 'neg' };
   }
   if (x.source === 'credit') {
+    if (x.creditCard && x.creditCard !== s.bridge?.card) return { text: 'Трата увеличит долг по выбранной карте', tone: 'loan' };
     if (week.creditCap <= 0) return { text: 'Кредитки заморожены: это новый долг, запишу как нарушение плана', tone: 'neg' };
     const st = bridgeState(expenses, s.bridge);
     if (week.creditLeft < 0) return { text: `В долг сверх плана моста на неделю на ${r(week.creditLeft)}`, tone: 'warn' };

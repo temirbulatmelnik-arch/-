@@ -2,16 +2,18 @@
 // Резервная копия — файл JSON (Настройки → Данные), календарь — файл .ics.
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { accountOptions, appendOperations, bookOperationAllowed, cashAccount, EMPTY_BOOK, LIFE_ACCOUNT, RESERVE_ACCOUNT, validAmount, validDate, validSplitDebit, validSplitPlan, type AccountBook, type AccountOperation, type BankBalance, type CashAccount, type SplitDebit, type SplitPlan } from '../domain/accounts';
 import { DEFAULT_MODEL } from '../domain/models';
+import { coverageInput, safePrepayment } from '../domain/coverage';
 import { annuity } from '../domain/calendar';
 import { addDays, monthKey, monthsBetween, toKey, today } from '../domain/dates';
 import { setPlanSource, totalDebt, type PlanConfig } from '../domain/plan';
+import { validPayroll, type PayrollProfile } from '../domain/payroll';
 import { mergeSeed } from '../domain/planUpdate';
 import type { Bridge } from '../domain/bridge';
 import { fixDefaultCategories } from '../domain/categorize';
 import { dropChatTwins } from '../domain/exchange';
-import { accruedOnCard, freshReserve, heldKeys, type Checkup } from '../domain/ledger';
-import { salute } from './events';
+import { freshReserve, heldKeys, ledger, type Checkup } from '../domain/ledger';
 import type { CalEvent, CardBalance, ChecklistItem, Debt, DebtSnapshot, EventMark, Expense, FixedItem, IncomeTemplate, MemoryRule, PlanSeed, ReserveMove, Settings, StrategySection, WeekClosure, WeeklyOverride, WishItem } from '../domain/types';
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -65,6 +67,8 @@ interface Data {
   merchantMemory: Record<string, MemoryRule>;
   /** воскресные сверки с банком: журнал и точка отсчёта учёта по счетам */
   checkups: Checkup[];
+  accountBook: AccountBook;
+  work: PayrollProfile | null;
   /** последние импорты из чата со снимком данных до них — чтобы откатить неверный блок */
   imports: ImportRecord[];
   settings: Settings;
@@ -78,6 +82,13 @@ interface Actions {
   /** изменения из файла обмена с чатом: резерв и копилка пишутся в журнал, долги — в снимок месяца */
   /** summary — запомнить импорт и снимок данных до него (хранятся последние 5) */
   applySync: (patch: Partial<Data>, summary?: string) => void;
+  saveCashAccount: (id: string, name: string, amount?: number) => void;
+  saveOperation: (op: AccountOperation) => boolean;
+  setPaymentAccount: (key: string, accountId: string) => void;
+  saveSplitPlan: (plan: SplitPlan) => void;
+  saveSplitDebit: (debit: SplitDebit) => void;
+  saveWork: (work: PayrollProfile) => boolean;
+  setStress: (stress: AccountBook['stress']) => void;
   /** запомнить снимок данных до импорта из банка — откатить можно так же, как импорт из чата */
   beginImport: (summary: string) => void;
   /** запомнить продавца; null — забыть */
@@ -98,16 +109,16 @@ interface Actions {
   updateExpense: (id: string, patch: Partial<Expense>) => void;
   removeExpense: (id: string) => void;
   /** отметить событие календаря; для платежа по долгу остаток уменьшается на оценку погашения */
-  markEvent: (e: CalEvent, done: boolean, amount?: number, paidFrom?: EventMark['paidFrom']) => void;
+  markEvent: (e: CalEvent, done: boolean, amount?: number, paidFrom?: EventMark['paidFrom'], details?: { accountId?: string; principal?: number; interest?: number; fee?: number; paidDate?: string; payrollActual?: { gross?: number; tax?: number; otherWithheld?: number } }) => void;
   updateDebt: (id: string, patch: Partial<Debt>) => void;
   /** точная сумма/дата платежа из банка */
   setOverride: (key: string, o: { amount?: number; date?: string }) => void;
   addDebt: (d: Debt) => void;
   removeDebt: (id: string) => void;
   /** досрочное погашение; fromReserve — деньги взяты из резерва */
-  prepay: (id: string, amount: number, fromReserve: boolean, note?: string) => void;
+  prepay: (id: string, amount: number, accountId: string, parts: { principal: number; interest?: number; fee?: number }) => boolean;
   /** премия: резерв становится reserveAfter, остальное — досрочно по списку */
-  applyBonus: (opts: { amount: number; reserveAfter: number; allocations: { debtId: string; amount: number }[]; title: string; eventKey?: string }) => void;
+  applyBonus: (opts: { id: string; amount: number; accountId: string; title: string; eventKey?: string; date?: string }) => boolean;
   /** card — перевод между картой и резервом: на сколько изменилась карта */
   /** card — на сколько изменилась карта (перевод между картой и резервом); forKeys — платежи, под которые перевели */
   moveReserve: (amount: number, note: string, card?: number, forKeys?: string[]) => void;
@@ -137,9 +148,12 @@ const nowIso = () => new Date().toISOString();
 
 const includedAt = (expenses: Expense[], date: string) => expenses.filter(e => e.date <= date).map(e => e.id);
 
-function captureCardBalance(balance: CardBalance, expenses: Expense[]): CardBalance {
+const operationIdsAt = (book: AccountBook, date: string) =>
+  book.operations.filter(op => op.status === 'confirmed' && op.date <= date).map(op => op.id);
+
+function captureCardBalance(balance: CardBalance, expenses: Expense[], book: AccountBook): CardBalance {
   if (balance.at) return balance;
-  return { ...balance, ...(balance.date === today() ? { at: nowIso() } : {}), includedExpenseIds: includedAt(expenses, balance.date) };
+  return { ...balance, ...(balance.date === today() ? { at: nowIso() } : {}), includedExpenseIds: includedAt(expenses, balance.date), operationIds: operationIdsAt(book, balance.date) };
 }
 
 /** Старые файлы обмена сохраняли время импорта только в журнале. */
@@ -157,7 +171,7 @@ const EMPTY: Data = {
   ready: false, asOf: today(), debts: [], incomes: [], fixed: [], oneOff: [], templateFrom: monthKey(today()),
   weeklyOverrides: [], planTrajectory: [], baselineTrajectory: [], reserve: 0, reserveLog: [], expenses: [], marks: {}, wishes: [], snapshots: [], overrides: {}, plan: null,
   planRev: 0, planCode: '', checklist: [], strategy: [], rules: [], checks: {}, savings: 0, savingsLog: [], closures: {}, cardBalance: null, bridge: null, checkups: [], merchantMemory: {}, imports: [],
-  settings: DEFAULT_SETTINGS,
+  settings: DEFAULT_SETTINGS, accountBook: EMPTY_BOOK, work: null,
 };
 
 /** Снимок общего долга за текущий месяц — для графика «план против факта» */
@@ -167,6 +181,16 @@ function withSnapshot(debts: Debt[], snapshots: DebtSnapshot[]): { debts: Debt[]
 }
 
 /** Применить изменение к долгу: закрыт при нуле, аннуитету (Сплит) пересчитать платёж после досрочки */
+function bankDebt(debt: Debt, amount: number, s: Data): Debt {
+  const now = new Date();
+  const date = toKey(now);
+  const next = patchDebt(debt, amount);
+  return { ...next, updatedAt: now.toISOString(), bankBalance: {
+    amount: next.balance, date, at: now.toISOString(),
+    includedIds: [...operationIdsAt(s.accountBook, date), ...s.expenses.filter(e => e.creditCard === debt.id && e.date <= date).map(e => e.id)],
+  } };
+}
+
 // Пополнение карты жизни берётся из резерва: отметка в календаре сдвигает резерв на разницу с прежней отметкой.
 function topUpMove(s: Data, key: string, amount: number, note = 'Долил карту жизни до недельного лимита'): Partial<Pick<Data, 'reserve' | 'reserveLog'>> {
   const prev = s.marks[key]?.done ? s.marks[key].amount ?? 0 : 0;
@@ -221,20 +245,59 @@ export const useStore = create<State>()(
       updateFromSeed: (seed, code) => set(s => ({ ...mergeSeed(s, seed), planRev: seed.rev ?? s.planRev, planCode: code })),
       applySync: (patch, summary) => set(s => {
         const next: Partial<Data> = { ...patch };
-        if (patch.cardBalance) next.cardBalance = captureCardBalance(patch.cardBalance, patch.expenses ?? s.expenses);
+        if (patch.cardBalance) next.cardBalance = captureCardBalance(patch.cardBalance, patch.expenses ?? s.expenses, patch.accountBook ?? s.accountBook);
         if (summary != null) {
           const { imports, settings, planCode, ready, ...snapshot } = pickData(s);
           void settings; void planCode; void ready;
           next.imports = [...imports, { id: uid(), at: nowIso(), summary, snapshot }].slice(-5);
         }
         if (patch.reserve != null && patch.reserve !== s.reserve) {
-          next.reserveLog = [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), abs: true, amount: patch.reserve - s.reserve, note: 'Сверка из чата «Финансы»' }];
+          next.reserveLog = [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), abs: true, operationIds: operationIdsAt(patch.accountBook ?? s.accountBook, today()), amount: patch.reserve - s.reserve, note: 'Сверка из чата «Финансы»' }];
         }
         if (patch.savings != null && patch.savings !== s.savings) {
           next.savingsLog = [...s.savingsLog, { id: uid(), date: today(), amount: patch.savings - s.savings, note: 'Сверка из чата «Финансы»' }];
         }
         return patch.debts ? { ...next, ...withSnapshot(patch.debts, s.snapshots) } : next;
       }),
+      saveCashAccount: (id, name, amount) => set(s => {
+        if (!id || [LIFE_ACCOUNT, RESERVE_ACCOUNT].includes(id) || !name.trim() || (amount != null && !validAmount(amount))) return {};
+        const date = today();
+        const previous = s.accountBook.accounts.find(a => a.id === id);
+        const balance: BankBalance | undefined = amount == null ? previous?.balance : {
+          amount, date, at: nowIso(),
+          includedIds: [...operationIdsAt(s.accountBook, date), ...s.expenses.filter(e => cashAccount(e) === id && e.date <= date).map(e => e.id)],
+        };
+        const account: CashAccount = { id, name: name.trim(), balance };
+        return { accountBook: { ...s.accountBook, accounts: [...s.accountBook.accounts.filter(a => a.id !== id), account] } };
+      }),
+      saveOperation: op => {
+        const s = get();
+        if (!bookOperationAllowed(op, s.accountBook, s.debts, s.expenses)) return false;
+        if (op.status === 'confirmed' && op.date > today()) return false;
+        if (op.eventKey && op.type === 'loan_disbursement' && !s.marks[op.eventKey]?.done) return false;
+        const operations = appendOperations(s.accountBook.operations, [op]);
+        if (operations === s.accountBook.operations) return false;
+        set({ accountBook: { ...s.accountBook, operations } });
+        return true;
+      },
+      setPaymentAccount: (key, accountId) => set(s => {
+        const paymentAccounts = { ...s.accountBook.paymentAccounts };
+        if (!accountId) delete paymentAccounts[key];
+        else if (accountOptions(s.accountBook).some(a => a.id === accountId)) paymentAccounts[key] = accountId;
+        return { accountBook: { ...s.accountBook, paymentAccounts } };
+      }),
+      saveSplitPlan: plan => set(s => (validSplitPlan(plan, s.debts) ? {
+        accountBook: { ...s.accountBook, splitPlans: [...s.accountBook.splitPlans.filter(p => p.id !== plan.id), plan] },
+      } : {})),
+      saveSplitDebit: debit => set(s => (validSplitDebit(debit, s.accountBook, s.debts) && !s.marks[`split-debit:${debit.id}`]?.done && !debit.replacesKeys.some(k => s.marks[k]?.done) ? {
+        accountBook: { ...s.accountBook, splitDebits: [...s.accountBook.splitDebits.filter(d => d.id !== debit.id), debit] },
+      } : {})),
+      saveWork: work => {
+        if (!validPayroll(work) || (work.accountId && !accountOptions(get().accountBook).some(a => a.id === work.accountId))) return false;
+        set({ work });
+        return true;
+      },
+      setStress: stress => set(s => ({ accountBook: { ...s.accountBook, stress } })),
       beginImport: summary => set(s => {
         const { imports, settings, planCode, ready, ...snapshot } = pickData(s);
         void settings; void planCode; void ready;
@@ -250,7 +313,7 @@ export const useStore = create<State>()(
         if (i < 0) return {};
         const snapshot = s.imports[i].snapshot;
         const imports = s.imports.slice(0, i);
-        return { ...snapshot, imports, cardBalance: restoreCardTime(snapshot.cardBalance, imports) };
+        return { ...snapshot, imports, accountBook: snapshot.accountBook ?? EMPTY_BOOK, work: snapshot.work ?? null, cardBalance: restoreCardTime(snapshot.cardBalance, imports) };
       }),
       toggleCheck: id => set(s => {
         const base = s.checklist.find(c => c.id === id)?.done ?? false;
@@ -275,13 +338,14 @@ export const useStore = create<State>()(
         const key = `wk:${addDays(c.monday, 7)}`;
         const after = { card: Math.round((c.actual.card + c.topUp - c.toReserve) * 100) / 100, reserve: Math.round((c.actual.reserve - c.topUp + c.toReserve) * 100) / 100 };
         const includedExpenseIds = includedAt(s.expenses, date);
-        const entry: Checkup = { ...c, id: uid(), at, date, after };
+        const operationIds = operationIdsAt(s.accountBook, date);
+        const entry: Checkup = { ...c, id: uid(), at, date, after, operationIds };
         const marks = c.topUp > 0 ? { ...s.marks, [key]: { done: true, amount: c.topUp, at } } : s.marks;
         const closures = closure && !s.closures[c.monday] ? { ...s.closures, [c.monday]: { ...closure, topUp: c.topUp, at } } : s.closures;
         const note = [c.topUp > 0 ? `на карту ${Math.round(c.topUp)}` : '', c.toReserve > 0 ? `с карты ${Math.round(c.toReserve)}` : ''].filter(Boolean).join(', ');
         // долги кредиток — из банка: кредитка моста и остальные, сверенные в тот же раз
         let debts = s.debts;
-        const owe = (id: string, balance: number) => { debts = debts.map(d => (d.id === id ? patchDebt(d, balance) : d)); };
+        const owe = (id: string, balance: number) => { debts = debts.map(d => (d.id === id ? bankDebt(d, balance, s) : d)); };
         if (c.creditCard && c.actual.credit != null) owe(c.creditCard, c.actual.credit);
         for (const k of c.cards ?? []) owe(k.id, k.actual);
         return {
@@ -289,8 +353,8 @@ export const useStore = create<State>()(
           marks,
           closures,
           reserve: after.reserve,
-          reserveLog: [...s.reserveLog, { id: uid(), date, at, abs: true, amount: after.reserve - s.reserve, note: `Сверка с банком${note ? `: ${note}` : ''}` }],
-          cardBalance: { amount: after.card, date, source: 'manual' as const, at, includedExpenseIds },
+          reserveLog: [...s.reserveLog, { id: uid(), date, at, abs: true, operationIds, amount: after.reserve - s.reserve, note: `Сверка с банком${note ? `: ${note}` : ''}` }],
+          cardBalance: { amount: after.card, date, source: 'manual' as const, at, includedExpenseIds, operationIds },
           ...(debts !== s.debts ? withSnapshot(debts, s.snapshots) : {}),
         };
       }),
@@ -309,7 +373,7 @@ export const useStore = create<State>()(
         };
       }),
       moveSavings: (amount, note) => set(s => ({ savings: s.savings + amount, savingsLog: [...s.savingsLog, { id: uid(), date: today(), amount, note }] })),
-      setCardBalance: b => set(s => ({ cardBalance: b && captureCardBalance(b, s.expenses) })),
+      setCardBalance: b => set(s => ({ cardBalance: b && captureCardBalance(b, s.expenses, s.accountBook) })),
       setFixed: list => set({ fixed: list }),
       clearOverride: key => set(s => {
         const overrides = { ...s.overrides };
@@ -323,41 +387,74 @@ export const useStore = create<State>()(
       updateExpense: (id, patch) => set(s => ({ expenses: s.expenses.map(e => (e.id === id ? { ...e, ...patch } : e)) })),
       removeExpense: id => set(s => ({ expenses: s.expenses.filter(e => e.id !== id) })),
 
-      markEvent: (e, done, amount, paidFrom) => set(s => {
+      markEvent: (e, done, amount, paidFrom, details) => set(s => {
         const prev = s.marks[e.key];
+        const linked = s.accountBook.operations.find(op => op.eventKey === e.key);
+        if (linked?.type === 'loan_disbursement') return {};
         const marks = { ...s.marks };
         let debts = s.debts;
+        let accountBook = s.accountBook;
+        let work = s.work;
         const debt = e.debtId ? s.debts.find(d => d.id === e.debtId) : undefined;
         if (done) {
+          if (prev?.done && e.kind !== 'weekly') return {};
           const paid = amount ?? e.amount;
-          // деньги под платёж уже перевели на карту — он уходит с карты, резерв второй раз не уменьшается
-          marks[e.key] = { done: true, amount: paid, at: nowIso(), paidDate: today(), prevBalance: debt?.balance, ...(e.kind === 'payment' ? { paidFrom: paidFrom ?? (heldKeys(s.reserveLog, s.marks).has(e.key) ? 'card' : 'reserve') } : {}) };
+          if (!validAmount(paid) || paid < 0) return {};
+          const at = nowIso();
+          const date = details?.paidDate ?? today();
+          if (!validDate(date) || date > today()) return {};
+          const from = paidFrom ?? (heldKeys(s.reserveLog, s.marks).has(e.key) ? 'card' : 'reserve');
+          marks[e.key] = { done: true, amount: paid, at, paidDate: date, ...(e.kind === 'payment' ? { paidFrom: from } : {}) };
           if (e.kind === 'weekly') return { marks, ...topUpMove(s, e.key, paid) };
-          if (debt && e.kind === 'payment' && !prev?.done) {
-            // погашение основного долга ≈ платёж минус проценты; закрывающий платёж обнуляет долг. По кредитке проценты —
-            // по дням с последнего обновления остатка (его вносят из банка уже с процентами на тот день), по кредиту — за месяц
-            const paidOn = e.date < today() ? e.date : today();
-            const interest = debt.rule.type === 'schedule' ? 0
-              : debt.kind === 'card' && debt.updatedAt ? accruedOnCard(debt, paidOn)
-              : (debt.balance * debt.rate) / 12;
-            const closing = e.key.endsWith(':close') || paid >= debt.balance - 1;
-            debts = s.debts.map(d => (d.id === debt.id ? patchDebt(d, closing ? 0 : d.balance + interest - paid) : d));
-            // долг закрыт — салют над Невой
-            if (closing && !debt.closed) salute('big');
+          const accountId = details?.accountId ?? (from === 'card' ? LIFE_ACCOUNT : RESERVE_ACCOUNT);
+          const bookedAt = date === today() ? at : undefined;
+          if (e.kind === 'payment' && (debt || e.key.startsWith('split-debit:'))) {
+            const op: AccountOperation = {
+              id: uid(), eventKey: e.key, type: 'debt_payment', debtId: debt?.id, accountId, amount: paid,
+              date, at: bookedAt, origin: 'manual', status: 'confirmed', fundingSource: 'unknown',
+              principal: details?.principal, interest: details?.interest, fee: details?.fee,
+            };
+            if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
+            accountBook = { ...accountBook, operations: appendOperations(accountBook.operations, [op]) };
+          }
+          if (e.kind === 'payment' && !debt && !e.key.startsWith('split-debit:') && details?.accountId) {
+            const op: AccountOperation = { id: uid(), eventKey: e.key, type: 'expense', amount: paid,
+              accountId, date, at: bookedAt, origin: 'manual', status: 'confirmed', fundingSource: 'unknown' };
+            if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
+            accountBook = { ...accountBook, operations: appendOperations(accountBook.operations, [op]) };
+          }
+          if (e.kind === 'income' && (e.accountId || e.nominalDate)) {
+            const op: AccountOperation = { id: uid(), eventKey: e.key, type: 'income', amount: paid,
+              accountId: e.accountId ?? LIFE_ACCOUNT, date, at: bookedAt, origin: 'manual', status: 'confirmed', fundingSource: 'own' };
+            if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
+            accountBook = { ...accountBook, operations: appendOperations(accountBook.operations, [op]) };
+            if (work && e.nominalDate) {
+              const key = e.incomeKind === 'salary' || e.incomeKind === 'advance' || e.incomeKind === 'bonusMonthly'
+                ? `inc:${e.incomeKind}:${monthKey(e.nominalDate)}` : e.key;
+              const updated = { ...work, actual: { ...work.actual, [key]: { ...details?.payrollActual, expectedNet: e.amount, asOf: date,
+                verifiedBy: details?.payrollActual ? 'Расчётный листок' : undefined } } };
+              if (!validPayroll(updated)) return {};
+              work = updated;
+            }
           }
         } else {
           delete marks[e.key];
           if (e.kind === 'weekly') return { marks, ...topUpMove(s, e.key, 0, 'Пополнение карты отменено') };
-          if (debt && prev?.prevBalance != null) debts = s.debts.map(d => (d.id === debt.id ? { ...patchDebt(d, prev.prevBalance!), closedOn: undefined } : d));
+          if (linked) {
+            if (debt?.bankBalance?.at && Date.parse(debt.bankBalance.at) >= Date.parse(linked.at ?? '')) return {};
+            accountBook = { ...accountBook, operations: accountBook.operations.filter(op => op.id !== linked.id) };
+          } else if (debt && prev?.prevBalance != null && (!debt.updatedAt || !debt.bankBalance)) {
+            debts = s.debts.map(d => (d.id === debt.id ? { ...patchDebt(d, prev.prevBalance!), closedOn: undefined } : d));
+          }
         }
-        return { marks, ...withSnapshot(debts, s.snapshots) };
+        return { marks, accountBook, work, ...withSnapshot(debts, s.snapshots) };
       }),
 
       updateDebt: (id, patch) => set(s => {
         const debts = s.debts.map(d => {
           if (d.id !== id) return d;
           const next = { ...d, ...patch };
-          return patch.balance != null ? patchDebt(next, patch.balance) : next;
+          return patch.balance != null ? bankDebt(next, patch.balance, s) : next;
         });
         return withSnapshot(debts, s.snapshots);
       }),
@@ -365,36 +462,33 @@ export const useStore = create<State>()(
       addDebt: d => set(s => withSnapshot([...s.debts, d], s.snapshots)),
       removeDebt: id => set(s => withSnapshot(s.debts.filter(d => d.id !== id), s.snapshots)),
 
-      prepay: (id, amount, fromReserve, note) => set(s => {
+      prepay: (id, amount, accountId, parts) => {
+        const s = get();
         const debt = s.debts.find(d => d.id === id);
-        if (!debt) return {};
-        const debts = s.debts.map(d => (d.id === id ? patchDebt(d, d.balance - amount, true) : d));
-        return {
-          ...withSnapshot(debts, s.snapshots),
-          ...(fromReserve ? {
-            reserve: s.reserve - amount,
-            reserveLog: [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), amount: -amount, note: note ?? `Досрочно в ${debt.short}` }],
-          } : {}),
-        };
-      }),
+        const date = today();
+        const led = ledger({ ...s, now: date });
+        if (!debt || debt.closed || debt.noPrepay || parts.principal > led.debtBalances[id].estimated
+            || !validAmount(amount) || amount <= 0 || amount > safePrepayment(coverageInput(s, led), date, accountId)) return false;
+        return s.saveOperation({ ...parts, id: uid(), debtId: id, amount, accountId, type: 'debt_payment',
+          date, at: nowIso(), origin: 'manual', status: 'confirmed', fundingSource: 'unknown', note: 'Досрочное погашение' });
+      },
 
-      applyBonus: ({ amount, reserveAfter, allocations, title, eventKey }) => set(s => {
-        let debts = s.debts;
-        for (const a of allocations) debts = debts.map(d => (d.id === a.debtId ? patchDebt(d, d.balance - a.amount, true) : d));
-        if (debts.some(d => d.closed && !s.debts.find(x => x.id === d.id)?.closed)) salute('big');
-        const sent = allocations.reduce((t, a) => t + a.amount, 0);
-        const names = allocations.map(a => s.debts.find(d => d.id === a.debtId)?.short).filter(Boolean).join(', ');
-        const marks = eventKey ? { ...s.marks, [eventKey]: { done: true, amount, at: nowIso() } } : s.marks;
-        return {
-          ...withSnapshot(debts, s.snapshots),
-          marks,
-          reserve: reserveAfter,
-          reserveLog: [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), abs: true, amount: reserveAfter - s.reserve, note: `${title}: ${sent ? `в долг ${Math.round(sent)} (${names}), ` : ''}остальное в резерв` }],
-        };
-      }),
+      applyBonus: ({ id, amount, accountId, title, eventKey, date = today() }) => {
+        const s = get();
+        if (date > today() || (eventKey && s.marks[eventKey]?.done)) return false;
+        const at = nowIso();
+        const op: AccountOperation = { id, amount, accountId, eventKey, date, at, type: 'income',
+          origin: 'manual', status: 'confirmed', fundingSource: 'own', note: title };
+        if (!bookOperationAllowed(op, s.accountBook, s.debts, s.expenses)) return false;
+        const operations = appendOperations(s.accountBook.operations, [op]);
+        if (operations === s.accountBook.operations) return false;
+        const marks = eventKey ? { ...s.marks, [eventKey]: { done: true, amount, at, paidDate: date } } : s.marks;
+        set({ marks, accountBook: { ...s.accountBook, operations } });
+        return true;
+      },
 
       moveReserve: (amount, note, card, forKeys) => set(s => ({ reserve: s.reserve + amount, reserveLog: [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), amount, note, ...(card ? { card } : {}), ...(forKeys?.length ? { forKeys } : {}) }] })),
-      setReserve: (balance, note) => set(s => ({ reserve: balance, reserveLog: [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), abs: true, amount: balance - s.reserve, note }] })),
+      setReserve: (balance, note) => set(s => ({ reserve: balance, reserveLog: [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), abs: true, operationIds: operationIdsAt(s.accountBook, today()), amount: balance - s.reserve, note }] })),
 
       addWish: w => set(s => ({ wishes: [...s.wishes, { ...w, id: uid(), createdAt: nowIso() }] })),
       resolveWish: (id, r) => set(s => ({ wishes: s.wishes.map(w => (w.id === id ? { ...w, resolved: r, resolvedAt: nowIso() } : w)) })),
@@ -416,7 +510,7 @@ export const useStore = create<State>()(
     }),
     {
       name: 'kurs',
-      version: 4,
+      version: 5,
       partialize: s => pickData(s),
       // версия 1: обязательные платежи без id — добавляем, остальное новые поля берут значения по умолчанию;
       // версия 2: файл из чата задваивал траты, уже внесённые под другим названием, — убираем копии один раз;
@@ -430,7 +524,7 @@ export const useStore = create<State>()(
           cleanedTwins = r.removed.length;
         }
         if (version < 4 && expenses) expenses = fixDefaultCategories(expenses);
-        return { ...p, expenses, fixed: withIds(p.fixed ?? []) } as State;
+        return { ...p, expenses: expenses ?? [], accountBook: p.accountBook ?? EMPTY_BOOK, fixed: withIds(p.fixed ?? []) } as State;
       },
       merge: (persisted, current) => {
         const p = persisted as Partial<Data> | undefined;

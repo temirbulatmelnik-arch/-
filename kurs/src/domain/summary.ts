@@ -6,11 +6,6 @@ import { baselineOf, BIG_PURCHASE_HOURS, CATEGORIES, categoryLimit, currentPhase
 import { checklistDue } from './planUpdate';
 import type { CalEvent, CategoryId, ChecklistItem, Debt, EventMark, Expense, WeeklyOverride, WishItem } from './types';
 
-/** Трата идёт из недельного лимита: с карты жизни и не фиксированный платёж */
-/** В недельный лимит идёт всё, что ушло с карты жизни (и с кредитки), даже связь и подписки: остаток недели — это остаток
- *  на карте. Не идёт только оплаченное из резерва. */
-export const countsWeekly = (e: Expense) => e.source !== 'reserve';
-
 export interface WeekSummary {
   monday: string;
   sunday: string;
@@ -29,7 +24,7 @@ export interface WeekSummary {
 export function weekSummary(expenses: Expense[], debts: Debt[], overrides: WeeklyOverride[], now: string): WeekSummary {
   const monday = weekStart(now), sunday = addDays(monday, 6);
   const list = expenses.filter(e => e.date >= monday && e.date <= sunday);
-  const spent = list.filter(countsWeekly).reduce((s, e) => s + e.amount, 0);
+  const spent = list.reduce((s, e) => s + e.amount, 0);
   const limit = weeklyLimit(debts, now, overrides);
   const left = limit - spent;
   const daysLeft = daysBetween(now, sunday) + 1;
@@ -74,7 +69,7 @@ const floor10 = (n: number) => Math.max(0, Math.floor(n / 10) * 10);
 /** Кольцо дня: сколько можно потратить сегодня и каким станет лимит на день после сегодняшних трат */
 export function dayBudget(expenses: Expense[], debts: Debt[], overrides: WeeklyOverride[], now: string): DayBudget {
   const monday = weekStart(now), sunday = addDays(monday, 6);
-  const counted = expenses.filter(e => e.date >= monday && e.date <= now && countsWeekly(e));
+  const counted = expenses.filter(e => e.date >= monday && e.date <= now);
   const before = counted.filter(e => e.date < now).reduce((s, e) => s + e.amount, 0);
   const todays = counted.filter(e => e.date === now);
   const spentToday = todays.reduce((s, e) => s + e.amount, 0);

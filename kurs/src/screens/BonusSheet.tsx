@@ -1,12 +1,13 @@
 // Пришла премия: сколько оставить в резерве и сколько сегодня же отправить досрочно в долг.
-import { Minus, Plus } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { Money, PrimaryButton, Sheet } from '../components/ui';
-import { monthName } from '../domain/dates';
-import { parseAmount, rub } from '../domain/money';
-import { RESERVE_BUFFER, shortfallFor, splitBonus } from '../domain/plan';
-import { useStore } from '../store/store';
+import { useCoverage } from '../components/Coverage';
+import { AmountInput, Field, Money, PrimaryButton, Sheet } from '../components/ui';
+import { accountOptions, LIFE_ACCOUNT } from '../domain/accounts';
+import { safePrepayment } from '../domain/coverage';
+import { parseAmount } from '../domain/money';
+import { splitBonus } from '../domain/plan';
+import { uid, useStore } from '../store/store';
 import { toast, useToday, useUi } from '../store/ui';
 
 export function BonusSheet() {
@@ -23,82 +24,47 @@ function Body() {
   const now = useToday();
   const ev = useUi(s => s.bonus?.event);
   const set = useUi(s => s.set);
-  const [debts, reserve, applyBonus] = useStore(useShallow(s => [s.debts, s.reserve, s.applyBonus]));
+  const [debts, book, applyBonus] = useStore(useShallow(s => [s.debts, s.accountBook, s.applyBonus]));
+  const { input } = useCoverage('cautious');
+  const [id] = useState(uid);
   const [amount, setAmount] = useState(ev ? String(ev.amount) : '');
-  const [months, setMonths] = useState<number | null>(null);
+  const [account, setAccount] = useState(LIFE_ACCOUNT);
+  const [date, setDate] = useState(now);
   const value = parseAmount(amount) ?? 0;
-  const split = useMemo(() => splitBonus({ amount: value, reserve, date: now, debts, monthsOverride: months ?? undefined }), [value, reserve, now, debts, months]);
-  const [edits, setEdits] = useState<Record<string, string>>({});
-  const alloc = split.allocations.map(a => ({ ...a, amount: edits[a.debt.id] != null ? Math.min(a.debt.balance, parseAmount(edits[a.debt.id]) ?? 0) : a.amount }));
-  const sent = alloc.reduce((s, a) => s + a.amount, 0);
-  const reserveAfter = reserve + value - sent;
-  const n = months ?? split.months.length;
+  const current = input.cash?.[account];
+  // Введённая сумма только для превью. Не моделируем второй приход ожидаемой выплаты из календаря.
+  const safe = useMemo(() => current == null || !input.cash ? 0 : safePrepayment({
+    ...input, cash: { ...input.cash, [account]: current + value },
+    marks: ev ? { ...input.marks, [ev.key]: { done: true, at: '' } } : input.marks,
+  }, now, account), [current, input, account, value, ev, now]);
+  const split = useMemo(() => splitBonus({ amount: value, reserve: current ?? 0, date: now, debts, safeLimit: safe }), [value, current, now, debts, safe]);
 
-  const apply = () => {
-    applyBonus({ amount: value, reserveAfter, allocations: alloc.filter(a => a.amount > 0).map(a => ({ debtId: a.debt.id, amount: a.amount })), title: ev?.title ?? 'Премия', eventKey: ev?.key });
-    toast(sent ? `Готово: ${rub(sent)} в долг, резерв ${rub(reserveAfter)}` : `Готово: всё в резерв, ${rub(reserveAfter)}`);
+  const receive = () => {
+    if (!applyBonus({ id, amount: value, accountId: account, title: ev?.title ?? 'Премия', eventKey: ev?.key, date })) {
+      toast('Поступление уже учтено или данные неполны');
+      return;
+    }
+    toast('Фактическое поступление записано');
     set({ bonus: null });
   };
 
   return (
     <div className="space-y-4 pt-1">
-      <label className="block">
-        <span className="mb-1.5 block text-[13px] font-medium text-muted">{ev?.title ?? 'Сумма премии'}</span>
-        <div className="flex items-baseline gap-2 rounded-2xl border border-line bg-surface px-4 py-3">
-          <input value={amount} onChange={x => setAmount(x.target.value)} inputMode="decimal" placeholder="0" className="figure w-full bg-transparent text-[36px] leading-none outline-none" autoFocus={!ev} />
-          <span className="text-[22px] font-medium text-muted">₽</span>
-        </div>
-      </label>
-
-      {split.rule?.note && <p className="rounded-2xl bg-sea/10 p-4 text-[14px] leading-snug">{split.rule.note}</p>}
-
-      <div className="card p-4">
-        <div className="text-[13px] font-medium text-muted">Оставить в резерве</div>
-        <Money value={split.keep} className="figure mt-1 block text-[30px] leading-none" />
-        <div className="mt-2 text-[13px] leading-snug text-muted">
-          {rub(RESERVE_BUFFER)} на непредвиденное
-          {split.months.map(m => <span key={m}> + {rub(shortfallFor(m, debts))} нехватки за {monthName(m).split(' ')[0]}</span>)}
-        </div>
-        <div className="mt-3 flex items-center justify-between rounded-xl bg-surface-2 px-3 py-2">
-          <span className="text-[13.5px] font-medium">Месяцев до следующей премии</span>
-          <span className="flex items-center gap-2">
-            <button type="button" aria-label="Меньше" onClick={() => setMonths(Math.max(0, n - 1))} className="grid size-8 place-items-center rounded-full bg-surface"><Minus size={15} /></button>
-            <span className="w-5 text-center text-[16px] font-medium">{n}</span>
-            <button type="button" aria-label="Больше" onClick={() => setMonths(Math.min(6, n + 1))} className="grid size-8 place-items-center rounded-full bg-surface"><Plus size={15} /></button>
-          </span>
-        </div>
-        <div className="mt-2 text-[12.5px] text-faint">Сейчас в резерве {rub(reserve)} — учитывается.</div>
+      <div className="card space-y-3 p-4">
+        <Field label={ev?.title ?? 'Сумма поступления'}><AmountInput value={amount} onChange={setAmount} /></Field>
+        <Field label="Счёт зачисления"><select className="field" value={account} onChange={e => setAccount(e.target.value)}>
+          {accountOptions(book).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select></Field>
+        <Field label="Фактическая дата"><input className="field" type="date" value={date} max={now} onChange={e => setDate(e.target.value)} /></Field>
       </div>
-
-      <div className="card p-4">
-        <div className="text-[13px] font-medium text-muted">Сегодня же — досрочно в долг</div>
-        {alloc.length === 0 && <p className="mt-2 text-[14px] text-muted">{split.rule?.targets?.length === 0 ? 'По плану эти деньги целиком идут в резерв.' : 'Премии не хватает сверх резерва — всё остаётся в резерве.'}</p>}
-        <div className="mt-2 space-y-2">
-          {alloc.map(a => (
-            <div key={a.debt.id} className="rounded-xl bg-surface-2 p-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[15px] font-medium">{a.debt.short}{a.amount >= a.debt.balance - 0.5 ? ' — закрыть' : ''}</span>
-                <input value={edits[a.debt.id] ?? String(Math.round(a.amount))} onChange={x => setEdits({ ...edits, [a.debt.id]: x.target.value })} inputMode="decimal"
-                  className="w-32 rounded-lg bg-surface px-2 py-1 text-right text-[16px] font-medium outline-none" />
-              </div>
-              <div className="mt-1 text-[12.5px] leading-snug text-muted">
-                остаток {rub(a.debt.balance)}
-                {a.debt.kind === 'split' && '. При досрочном погашении выбрать «уменьшить платёж»'}
-                {a.debt.kind === 'loan' && '. В банке выбрать «сократить срок»'}
-                {a.debt.kind === 'card' && a.amount >= a.debt.balance - 0.5 && '. После погашения закрыть карту вместе со счётом'}
-              </div>
-            </div>
-          ))}
-        </div>
+      <div className="card space-y-2 p-4">
+        <div className="text-[13px] text-muted">Прогноз после фактического зачисления</div>
+        <p>По осторожному сценарию доступно на досрочное погашение до <Money value={safe} />.</p>
+        <p className="text-[13px] text-muted">Целевой запас по плану <Money value={split.keep} />.</p>
+        {split.allocations.map(a => <div key={a.debt.id}>{a.debt.short} · <Money value={a.amount} /></div>)}
+        <p className="text-[13px] text-muted">Фактически выполненный платёж отмечается отдельно в карточке долга.</p>
       </div>
-
-      <div className="rounded-2xl bg-sea/10 p-4 text-[14px] leading-relaxed">
-        <b>Резерв после распределения: {rub(reserveAfter)}</b>
-        {sent > 0 && <><br />В долг уходит {rub(sent)} — это примерно {rub(alloc.reduce((s, a) => s + (a.amount * a.debt.rate) / 12, 0))} процентов, которые не придётся платить в следующем месяце.</>}
-      </div>
-
-      <PrimaryButton onClick={apply} disabled={value <= 0}>Распределить и отметить</PrimaryButton>
-      <p className="text-center text-[12px] text-faint">Сами переводы делаются в приложениях банков — «Курс» только запоминает и пересчитывает.</p>
+      <PrimaryButton onClick={receive} disabled={value <= 0 || !date || date > now}>Подтвердить зачисление</PrimaryButton>
     </div>
   );
 }

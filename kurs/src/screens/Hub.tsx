@@ -1,6 +1,6 @@
 // «Банк и чат»: всё, что приходит снаружи, в одном месте — выписка и скриншоты, воскресная сверка, обмен с чатом
 // «Финансы», премия. Сверху — что приложение знает о счетах сейчас.
-import { BellRing, ChevronRight, Gift, MessagesSquare, Repeat, Scale, ScanText, Vault, WalletCards } from 'lucide-react';
+import { BellRing, BriefcaseBusiness, ChevronRight, Gift, MessagesSquare, Repeat, Scale, ScanText, Vault, WalletCards } from 'lucide-react';
 import { motion } from 'motion/react';
 import type { ReactNode } from 'react';
 import { item, list } from '../components/motion';
@@ -50,6 +50,8 @@ function Body() {
         text="Резерв до следующей премии, остальное сегодня же в долг — по правилам плана." />
 
       <motion.div variants={item} className="card divide-hair overflow-hidden">
+        <Small icon={<WalletCards size={17} />} title="Счета и операции" onClick={() => open({ finance: true })} />
+        <Small icon={<BriefcaseBusiness size={17} />} title="Работа и доходы" onClick={() => open({ workSheet: true })} />
         <Small icon={<WalletCards size={17} strokeWidth={1.5} />} title="Остаток на карте ВТБ" onClick={() => open({ card: true })} />
         <Small icon={<Vault size={17} strokeWidth={1.5} />} title="Резерв и его журнал" onClick={() => open({ reserve: true })} />
         <Small icon={<Repeat size={17} strokeWidth={1.5} />} title="Обязательные платежи" onClick={() => open({ fixed: true })} />

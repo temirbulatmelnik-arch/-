@@ -13,7 +13,7 @@ export type Proposal =
   | { id: string; type: 'tx'; on: boolean; tx: DraftTx }
   | { id: string; type: 'debt'; on: boolean; debt: Debt; balance: number; minPayment: number; dueDate: string; event: CalEvent | null }
   /** selfKey — перевод на своё имя закрыл платёж: запомнить, что это я */
-  | { id: string; type: 'mark'; on: boolean; event: CalEvent; amount: number; selfKey?: string }
+  | { id: string; type: 'mark'; on: boolean; event: CalEvent; amount: number; date?: string; selfKey?: string }
   | { id: string; type: 'income'; on: boolean; event: CalEvent | null; amount: number; date: string; bonus: boolean }
   | { id: string; type: 'reserve'; on: boolean; balance: number }
   | { id: string; type: 'card'; on: boolean; balance: number; date: string };
@@ -63,7 +63,7 @@ function paymentMarks(txs: DraftTx[], ctx: Ctx, items: Proposal[]) {
       // подписка или связь: по названию или по сумме (±2%)
       ev = matchEvent(ctx, t.date, e => e.key.startsWith('fix:') && (upper.includes(e.title.toUpperCase()) || Math.abs(e.amount - t.amount) <= e.amount * 0.02));
     }
-    if (ev && !items.some(i => i.type === 'mark' && i.event.key === ev!.key)) items.push({ id: pid(), type: 'mark', on: true, event: ev, amount: t.amount });
+    if (ev && !items.some(i => i.type === 'mark' && i.event.key === ev!.key)) items.push({ id: pid(), type: 'mark', on: true, event: ev, amount: t.amount, date: t.date });
   }
 }
 
@@ -108,7 +108,7 @@ export function fromAi(r: AiResult, ctx: Ctx): Review {
     const debtId = p.debtId || guessDebt(p.merchant ?? '', ctx.cal.debts);
     if (!debtId) continue;
     const ev = matchEvent(ctx, valid(p.date), e => e.kind === 'payment' && e.debtId === debtId);
-    if (ev && !items.some(i => i.type === 'mark' && i.event.key === ev.key)) items.push({ id: pid(), type: 'mark', on: true, event: ev, amount: p.amount });
+    if (ev && !items.some(i => i.type === 'mark' && i.event.key === ev.key)) items.push({ id: pid(), type: 'mark', on: true, event: ev, amount: p.amount, date: valid(p.date) });
   }
 
   const incomes = [...r.incomes, ...r.transactions.filter(t => t.direction === 'income').map(t => ({ kind: 'other' as const, amount: t.amount, date: t.date }))];
@@ -207,7 +207,7 @@ function dedupe(txs: DraftTx[], expenses: Expense[]): DraftTx[] {
   for (const t of out) if (take(`${t.date}|${Math.round(t.amount * 100)}`, e => e.fingerprint === t.fingerprint)) t.duplicate = true;
   for (const t of out) {
     if (t.duplicate) continue;
-    const e = take(`${t.date}|${Math.round(t.amount * 100)}`, x => !x.fingerprint?.includes('#')) ?? null;
+    const e = take(`${t.date}|${Math.round(t.amount * 100)}`, x => !x.fingerprint?.includes('#') && x.source === t.source && (!t.creditCard || x.creditCard === t.creditCard)) ?? null;
     if (e) { t.duplicate = true; if (!e.fingerprint?.includes('#')) t.linkId = e.id; }
   }
   return out;
@@ -219,7 +219,7 @@ export function fromBank(p: BankParse, ctx: BankCtx): { summary: string; warning
   const debts = ctx.cal.debts;
   const bankWord = p.bank === 'tbank' ? 'Т-БАНК' : p.bank === 'sber' ? 'СБЕР' : p.bank === 'vtb' ? 'ВТБ' : '';
   const creditId = p.credit && bankWord ? guessDebt(`${bankWord} КРЕДИТНАЯ КАРТА`, debts.filter(d => d.kind === 'card')) : '';
-  const source: Source = creditId ? 'credit' : 'life';
+  const source: Source = p.credit ? 'credit' : 'life';
   const info = (text: string, o: BankOp) => items.push({ id: pid(), type: 'info', on: false, text, amount: o.amount, date: o.date });
   const spends: DraftTx[] = [];
 
@@ -238,7 +238,7 @@ export function fromBank(p: BankParse, ctx: BankCtx): { summary: string; warning
         const debt = debts.find(d => d.id === creditId)!;
         if (incoming) {
           const ev = matchEvent(ctx, o.date, e => e.kind === 'payment' && e.debtId === creditId);
-          if (ev && Math.abs(daysBetween(ev.date, o.date)) <= 10) items.push({ id: pid(), type: 'mark', on: true, event: ev, amount: o.amount });
+          if (ev && Math.abs(daysBetween(ev.date, o.date)) <= 10) items.push({ id: pid(), type: 'mark', on: true, event: ev, amount: o.amount, date: o.date });
           else info(`Пополнение ${debt.short} — погашение, отметка в календаре уже есть или не нашлась`, o);
         } else info(`С ${debt.short} между счетами — это долг, а не трата`, o);
         continue;
@@ -257,7 +257,7 @@ export function fromBank(p: BankParse, ctx: BankCtx): { summary: string; warning
       }
       if (creditId) { warnings.push(`${ddmm(o.date)}: перевод ${rub(o.amount)} с кредитки — это новый долг, а не трата.`); info(`Перевод с кредитки ${o.name}`, o); continue; }
       const pay = samePayment(ctx, o.date, o.amount, 3);
-      if (pay && !pay.done) { items.push({ id: pid(), type: 'mark', on: true, event: pay.event, amount: o.amount, selfKey: key }); continue; }
+      if (pay && !pay.done) { items.push({ id: pid(), type: 'mark', on: true, event: pay.event, amount: o.amount, date: o.date, selfKey: key }); continue; }
       if (pay?.done) { info(`${pay.event.title}: уже отмечено, перевод себе — не трата`, o); continue; }
       if (mem === 'self') { info(`Перевод себе (${o.name}) — не трата`, o); continue; }
       const choice = mem ? 'spend' : null;
@@ -273,7 +273,7 @@ export function fromBank(p: BankParse, ctx: BankCtx): { summary: string; warning
           const ev = matchEvent(ctx, o.date, e => e.kind === 'payment' && e.debtId === debtId);
           return ev && Math.abs(daysBetween(ev.date, o.date)) <= 7 ? { event: ev, done: false } : null;
         })() : null;
-        if (pay && !pay.done) items.push({ id: pid(), type: 'mark', on: true, event: pay.event, amount: o.amount });
+        if (pay && !pay.done) items.push({ id: pid(), type: 'mark', on: true, event: pay.event, amount: o.amount, date: o.date });
         else info(`${o.name}: погашение${pay?.done ? ', уже отмечено' : ''} — не трата`, o);
         continue;
       }
@@ -296,7 +296,7 @@ export function fromBank(p: BankParse, ctx: BankCtx): { summary: string; warning
     // подписки и связь: сначала обязательные платежи календаря
     if (cat === 'Цифровой контент' || cat === 'Связь') {
       const fix = samePayment(ctx, o.date, o.amount, 5, e => e.key.startsWith('fix:'));
-      if (fix && !fix.done) { items.push({ id: pid(), type: 'mark', on: true, event: fix.event, amount: o.amount }); continue; }
+      if (fix && !fix.done) { items.push({ id: pid(), type: 'mark', on: true, event: fix.event, amount: o.amount, date: o.date }); continue; }
       if (fix?.done) { info(`${fix.event.title}: уже отмечено`, o); continue; }
     }
     const suggested: CategoryId = (mem && mem !== 'self' ? mem : null) ?? SPEND[cat] ?? categorize(o.name) ?? 'fun';
