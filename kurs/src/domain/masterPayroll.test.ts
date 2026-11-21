@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { EMPTY_BOOK } from './accounts';
 import { annualIncome } from './annualIncome';
 import { eventsBetween } from './calendar';
-import { coverage } from './coverage';
+import { coverage, coverageInput, safePrepayment } from './coverage';
 import { applyExchange, buildExchange, exchangeRevision, prepareExchange, type ExchangeFile, type ExchangeState } from './exchange';
 import { paymentPreparations } from './funds';
 import { possibleSubscriptionDuplicate } from './paymentRoutes';
@@ -127,6 +127,13 @@ describe('сроки подготовки и прогноз нехватки', (
     expect(eventsBetween(s, '2026-10-01', '2026-12-31').some(event => event.key === 'pay:existing:2026-12')).toBe(true);
     const marks = { 'pay:existing:2026-10': { done: true, amount: 1500, at: '2026-10-17' } };
     expect(eventsBetween({ ...s, marks }, '2026-10-01', '2026-12-31').some(event => event.key === 'pay:existing:2026-10')).toBe(true);
+  });
+  it('включает записанный резерв в общий прогноз и не считает его сверенным счётом', () => {
+    const s = state(null);
+    const model = coverageInput(s, { card: 1000, reserve: 5000, reserveVerified: false, incomeOnCard: 0, heldOnCard: 0 });
+    expect(coverage(model, today, 'base', today).start).toBe(6000);
+    expect(model.cash?.reserve).toBeNull();
+    expect(safePrepayment(model, today, 'reserve')).toBe(0);
   });
   it('отделяет сумму первого дефицита от максимума на общем горизонте', () => {
     const s = { ...state(null), oneOff: [{ ...payment, amount: 150, date: '2026-11-21' },

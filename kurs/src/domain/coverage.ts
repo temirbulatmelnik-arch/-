@@ -68,6 +68,7 @@ export interface CoverageInput {
   cal: CalendarInput;
   marks: Record<string, EventMark>;
   reserve: number;
+  reserveEstimate?: number;
   debts: Debt[];
   expenses: Expense[];
   bridge?: Bridge | null;
@@ -86,7 +87,7 @@ export interface CoverageInput {
  */
 export function coverageInput(s: CalendarInput & { marks: Record<string, EventMark>; expenses: Expense[] }, led: Pick<Ledger, 'reserve' | 'incomeOnCard' | 'heldOnCard'> & Partial<Pick<Ledger, 'card' | 'reserveVerified' | 'cashAccounts' | 'lifeAvailable' | 'heldForPayments' | 'pendingSweepToReserve'>>): CoverageInput {
   return { cal: s, marks: s.marks, reserve: led.reserve + led.incomeOnCard + led.heldOnCard, debts: s.debts, expenses: s.expenses, bridge: s.bridge ?? null,
-    lifeAvailable: led.lifeAvailable, held: led.heldForPayments, pending: led.pendingSweepToReserve,
+    reserveEstimate: led.reserve, lifeAvailable: led.lifeAvailable, held: led.heldForPayments, pending: led.pendingSweepToReserve,
     cash: s.accountBook ? { [LIFE_ACCOUNT]: led.card ?? null, [RESERVE_ACCOUNT]: led.reserveVerified ? led.reserve : null,
       ...Object.fromEntries((led.cashAccounts ?? []).map(a => [a.id, a.expected])) } : undefined };
 }
@@ -212,6 +213,9 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
   const balances = new Map(Object.entries(input.cash ?? {}).map(([id, amount]) => [id, amount === null ? null : cents(amount)]));
   let total = [...balances.values()].reduce<number>((sum, value) => sum + (value ?? 0), 0);
   const balanceOn = (id?: string) => id ? balances.get(id) ?? null : null;
+  // An existing book value still contributes to aggregate estimated liquidity. It cannot
+  // authorize a transfer or prepayment without a bank snapshot for the reserve.
+  if (balanceOn(RESERVE_ACCOUNT) == null && input.reserveEstimate != null) total += cents(input.reserveEstimate);
   const start = rubles(total);
   let weeklyCash = input.lifeAvailable == null ? input.lifeAvailable : cents(input.lifeAvailable);
   const preparing = input.held !== undefined;
