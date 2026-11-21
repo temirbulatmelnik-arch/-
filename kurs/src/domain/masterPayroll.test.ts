@@ -117,6 +117,17 @@ describe('сроки подготовки и прогноз нехватки', (
     expect(paymentPreparations([payment], {}, [], 5000)[0].toFund).toBeNull();
     expect(paymentPreparations([{ ...payment, date: '2027-01-01' }], {}, [], 5000)[0].remindDate).toBe('2026-12-30');
   });
+  it('не добавляет просрочку из старого шаблона поверх более свежей банковской сверки', () => {
+    const debt = { id: 'existing', name: 'Обязательство', short: 'Банк', kind: 'card' as const,
+      balance: 12000, startBalance: 15000, closed: false, frozen: true, order: 1, dueDay: 17, rate: 0.2,
+      rule: { type: 'fixed' as const, amount: 1500 },
+      bankBalance: { amount: 12000, date: today } };
+    const s = { ...state(null), debts: [debt] };
+    expect(eventsBetween(s, '2026-10-01', '2026-12-31').some(event => event.key === 'pay:existing:2026-10')).toBe(false);
+    expect(eventsBetween(s, '2026-10-01', '2026-12-31').some(event => event.key === 'pay:existing:2026-12')).toBe(true);
+    const marks = { 'pay:existing:2026-10': { done: true, amount: 1500, at: '2026-10-17' } };
+    expect(eventsBetween({ ...s, marks }, '2026-10-01', '2026-12-31').some(event => event.key === 'pay:existing:2026-10')).toBe(true);
+  });
   it('отделяет сумму первого дефицита от максимума на общем горизонте', () => {
     const s = { ...state(null), oneOff: [{ ...payment, amount: 150, date: '2026-11-21' },
       { ...payment, key: 'next', amount: 200, date: '2026-11-22' }] };

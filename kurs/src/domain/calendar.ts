@@ -67,6 +67,10 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
     return !!d && d.closed && (!d.closedOn || d.closedOn < date);
   };
 
+  // A recurring template cannot prove an overdue payment from before a later bank snapshot.
+  // Explicit events, manual overrides and payment marks still preserve the historical row.
+  const unconfirmedHistory = (debt: Debt, key: string, date: string) => Boolean(debt.bankBalance &&
+    monthKey(date) < monthKey(debt.bankBalance.date) && !ov[key] && !input.marks?.[key]);
   for (const e of input.oneOff) {
     if (e.date < from || e.date > to) continue;
     if (e.kind === 'payment' && closedBefore(e.debtId, e.date)) continue;
@@ -87,16 +91,21 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
     for (const d of input.debts) {
       if (d.closed || d.balance <= 0.5) continue;
       if (d.rule.type === 'schedule') {
-        d.rule.items.filter(i => monthKey(i.date) === m).forEach((i, n) => within({
-          key: `pay:${d.id}:${m}${n ? `:${n}` : ''}`, date: i.date, dateMode: 'exact', kind: 'payment', title: d.short, amount: i.amount, debtId: d.id,
-        }));
+        d.rule.items.filter(i => monthKey(i.date) === m).forEach((i, n) => {
+          const key = `pay:${d.id}:${m}${n ? `:${n}` : ''}`;
+          if (!unconfirmedHistory(d, key, i.date)) within({
+            key, date: i.date, dateMode: 'exact', kind: 'payment', title: d.short, amount: i.amount, debtId: d.id,
+          });
+        });
         continue;
       }
       const amount = estimatePayment(d, m);
       if (!amount) continue;
       const card = d.kind === 'card';
+      const key = `pay:${d.id}:${m}`, date = dayIn(m, d.dueDay);
+      if (unconfirmedHistory(d, key, date)) continue;
       within({
-        key: `pay:${d.id}:${m}`, date: dayIn(m, d.dueDay), dateMode: card ? 'until' : 'exact', kind: 'payment',
+        key, date, dateMode: card ? 'until' : 'exact', kind: 'payment',
         title: card ? `${d.short}, минимальный` : d.short, amount, approx: d.rule.type === 'interestPlus', debtId: d.id,
       });
     }

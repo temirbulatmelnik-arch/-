@@ -354,6 +354,7 @@ function DebtActivityPanel() {
     <h3 className="font-medium">Чистое изменение долга за месяц</h3>
     {start && <div className="flex justify-between"><span>Предыдущий снимок</span><Money value={start.total} /></div>}
     <div className="flex justify-between"><span>Заёмные зачисления</span><Money value={activity.loanDisbursements} kopecks /></div>
+    <div className="flex justify-between"><span>Операции по кредиткам</span><Money value={activity.creditOperations} kopecks /></div>
     <div className="flex justify-between"><span>Покупки с кредиток</span><Money value={activity.creditPurchases} kopecks /></div>
     <div className="flex justify-between"><span>Подтверждённые проценты и комиссии</span><Money value={activity.interestAndFees} sign /></div>
     <div className="flex justify-between"><span>Подтверждённое тело платежей</span><Money value={-activity.principal} sign /></div>

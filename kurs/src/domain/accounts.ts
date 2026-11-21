@@ -290,6 +290,7 @@ export function debtActivity(book: AccountBook, expenses: Expense[], from: strin
   totals.borrowed = totals.loanDisbursements + totals.creditPurchases;
   totals.interestAndFees = totals.interest + totals.fees;
   return { borrowed: rubles(totals.borrowed), loanDisbursements: rubles(totals.loanDisbursements), creditPurchases: rubles(totals.creditPurchases),
+    creditOperations: rubles(totals.creditPurchases + totals.fees + totals.interest),
     principal: rubles(totals.principal), interest: rubles(totals.interest), fees: rubles(totals.fees),
     interestAndFees: rubles(totals.interestAndFees), unknownPrincipal: rubles(totals.unknownPrincipal) };
 }

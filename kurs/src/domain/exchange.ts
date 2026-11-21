@@ -269,7 +269,7 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
         safePrepayment: Object.fromEntries(accountOptions(s.accountBook).map(a => [a.id, safePrepayment(input, now, a.id)])),
       } : {}),
       ledger: {
-        card: led.card == null ? null : r0(led.card), reserve: r0(led.reserve), credit: led.credit == null ? null : r0(led.credit),
+        card: led.card, reserve: led.reserve, credit: led.credit,
         lifeAvailable: led.lifeAvailable, heldForPayments: led.heldForPayments,
         pendingSweepToReserve: led.pendingSweepToReserve, unassignedOnCard: led.unassignedOnCard,
         allocationShortfall: led.allocationShortfall,
@@ -279,7 +279,7 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
     },
     limits: { weekly: s.weeklyOverrides, defaultWeekly: plan.defaultWeekly, phases: plan.phases, categories: plan.categories, bonusRules: plan.bonusRules ?? {}, shortfall: plan.shortfallOverrides ?? {} },
     debts: s.debts.map(d => ({
-      id: d.id, name: d.name, short: d.short, kind: d.kind, balance: r0(d.balance), rate: d.rate, dueDay: d.dueDay, order: d.order,
+      id: d.id, name: d.name, short: d.short, kind: d.kind, balance: d.balance, rate: d.rate, dueDay: d.dueDay, order: d.order,
       ...(d.phase != null ? { phase: d.phase } : {}), ...(d.targetClose ? { targetClose: d.targetClose } : {}), ...(d.note ? { note: d.note } : {}),
       ...(d.limit != null ? { limit: d.limit } : {}), closed: d.closed, ...(d.closedOn ? { closedOn: d.closedOn } : {}),
     })),
@@ -750,7 +750,7 @@ const stepCalendar: Step = (f, s, ctx) => {
         delete o.projection; changes.push('вернуть обычный прогноз поступления');
       }
       if (p.resetAmount && !mark?.done && o.amount != null) { delete o.amount; changes.push('вернуть расчётную сумму'); }
-      if (!p.resetAmount && isNum(p.amount) && Math.abs(p.amount - (e.originalAmount ?? e.amount)) >= 1) { o.amount = p.amount; changes.push(`сумма ${arrow(money(e.amount), money(p.amount))}`); }
+      if (!p.resetAmount && isNum(p.amount) && Math.abs(cents(p.amount) - cents(e.originalAmount ?? e.amount)) >= (['2.7', '2.8'].includes(f.protocolVersion ?? '') ? 1 : 100)) { o.amount = p.amount; changes.push(`сумма ${arrow(money(e.amount), money(p.amount))}`); }
       if (isDate(p.date) && p.date !== e.date) { o.date = p.date; changes.push(`дата ${arrow(ddmm(e.date), ddmm(p.date))}`); }
       if (['conditional', 'internal_transfer', 'review'].includes(p.projection ?? '') && o.projection !== p.projection) {
         o.projection = p.projection; changes.push(p.projection === 'conditional' ? 'только при подтверждении условий' :
