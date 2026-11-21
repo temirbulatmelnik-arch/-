@@ -36,7 +36,7 @@ interface OperationBase {
 export interface PaymentShare { key: string; amount: number }
 
 export type AccountOperation = OperationBase & (
-  { type: 'transfer'; toAccountId: string; purpose?: 'weekly' | 'sweep' | 'prepare' | 'return'; shares?: PaymentShare[]; weeklyExcess?: number }
+  { type: 'transfer'; toAccountId: string; purpose?: 'weekly' | 'sweep' | 'prepare' | 'return' | 'unassigned'; shares?: PaymentShare[]; weeklyExcess?: number }
   | { type: 'allocation'; shares: PaymentShare[]; existingCash?: boolean; toWeekly?: never }
   | { type: 'allocation'; toWeekly: true; shares?: never; existingCash?: never }
   | { type: 'loan_disbursement'; debtId: string; splitPlanId?: string; debtBooked?: boolean; auditId?: string }
@@ -81,7 +81,29 @@ export interface HistoricalLoan {
   amount: number;
 }
 
+export interface PayoffTerms {
+  closeDate?: string;
+  closeAmount?: number;
+  partialConfirmed?: boolean;
+  partialFee?: number;
+  rateLow?: number;
+  rateHigh?: number;
+  loanModes?: ('term' | 'payment')[];
+}
+
+export function validPayoffTerms(terms: PayoffTerms): boolean {
+  if (!terms || typeof terms !== 'object' || Array.isArray(terms)) return false;
+  if ((terms.closeDate != null || terms.closeAmount != null) &&
+      (!validDate(terms.closeDate) || !validAmount(terms.closeAmount) || terms.closeAmount <= 0)) return false;
+  return (terms.partialConfirmed == null || typeof terms.partialConfirmed === 'boolean') &&
+    (terms.partialFee == null || validAmount(terms.partialFee) && terms.partialFee >= 0) &&
+    [terms.rateLow, terms.rateHigh].every(rate => rate == null || typeof rate === 'number' && rate >= 0 && rate <= 5) &&
+    (terms.rateLow == null || terms.rateHigh == null || terms.rateLow <= terms.rateHigh) &&
+    (terms.loanModes == null || Array.isArray(terms.loanModes) && terms.loanModes.every(mode => mode === 'term' || mode === 'payment'));
+}
+
 export interface AccountBook {
+  payoffTerms?: Record<string, PayoffTerms>;
   paymentRouting?: 'life';
   accounts: CashAccount[];
   operations: AccountOperation[];
@@ -130,6 +152,7 @@ export function validOperation(op: AccountOperation): boolean {
       if (op.purpose === 'prepare' || op.purpose === 'return') return !op.eventKey && validShares(op.shares) &&
         (op.purpose === 'prepare' ? op.toAccountId !== RESERVE_ACCOUNT : op.toAccountId === RESERVE_ACCOUNT);
       if (op.purpose === 'sweep') return !op.eventKey && op.toAccountId === RESERVE_ACCOUNT;
+      if (op.purpose === 'unassigned') return !op.eventKey && op.toAccountId === LIFE_ACCOUNT;
       if (op.purpose === 'weekly') return op.eventKey?.startsWith('wk:') === true && op.accountId === RESERVE_ACCOUNT &&
         op.toAccountId === LIFE_ACCOUNT && (op.weeklyExcess == null ||
         (validAmount(op.weeklyExcess) && op.weeklyExcess >= 0 && cents(op.weeklyExcess) <= cents(op.amount)));

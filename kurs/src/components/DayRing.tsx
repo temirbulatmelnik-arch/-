@@ -73,9 +73,9 @@ export function DayRing({ day, canSpend, mode, overDay, nextWeek, onClick, scrub
   return (
     <button type="button" data-ring onClick={() => { if (moved.current) { moved.current = false; return; } onClick(); }} aria-label={`${aria}. Траты за сегодня`}
       onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
-      className="pointer-events-auto relative grid size-[140px] shrink-0 touch-none place-items-center rounded-full border backdrop-blur-md backdrop-saturate-150 transition-[background-color,transform] duration-700 active:scale-[.97]"
+      className="pointer-events-auto relative grid size-[clamp(5.25rem,32cqw,8.75rem)] min-w-0 shrink-0 touch-none place-items-center rounded-full border backdrop-blur-md backdrop-saturate-150 transition-[background-color,transform] duration-700 active:scale-[.97]"
       style={{ background: (scrub != null ? after < 0 : over) ? 'var(--glass-over)' : 'var(--glass)', borderColor: 'var(--glass-border)', boxShadow: 'var(--glass-shadow)' }}>
-      <svg viewBox="0 0 140 140" className="absolute -inset-px size-[140px]" aria-hidden="true">
+      <svg viewBox="0 0 140 140" className="absolute inset-0 size-full" aria-hidden="true">
         <defs>
           <linearGradient id="day-ring" x1="0" y1="0" x2="1" y2="1">
             <stop offset="0" style={v('--ring-1')} /><stop offset=".6" style={v('--ring-2')} /><stop offset="1" style={v('--ring-3')} />
@@ -103,13 +103,13 @@ export function DayRing({ day, canSpend, mode, overDay, nextWeek, onClick, scrub
       <span className="relative flex flex-col items-center gap-[3px]" aria-hidden="true">
         {scrub != null ? (
           <>
-            <span className="figure text-[25px] leading-none" style={{ color: ink }}>−<Money value={scrub} /></span>
-            <span className="text-center text-[11.5px] leading-tight" style={{ color: 'var(--ring-label)' }}>если потратить</span>
+            <span className="figure text-[clamp(1rem,6cqw,1.5625rem)] leading-none" style={{ color: ink }}>−<Money value={scrub} /></span>
+            <span className="px-1 text-center text-[clamp(0.625rem,2.8cqw,0.75rem)] leading-tight" style={{ color: 'var(--ring-label)' }}>если потратить</span>
           </>
         ) : (
           <>
-            <span className="figure text-[25px] leading-none" style={{ color: ink }}><Money value={Math.max(0, shown)} /></span>
-            <span className="text-center text-[11.5px] leading-tight" style={{ color: over ? 'var(--ring-neg)' : 'var(--ring-label)' }}>
+            <span className="figure text-[clamp(1rem,6cqw,1.5625rem)] leading-none" style={{ color: ink }}><Money value={Math.max(0, shown)} /></span>
+            <span className="px-1 text-center text-[clamp(0.625rem,2.8cqw,0.75rem)] leading-tight" style={{ color: over ? 'var(--ring-neg)' : 'var(--ring-label)' }}>
               {label}{mode === 'day' && <><br />на <Money value={overDay} /></>}
             </span>
           </>

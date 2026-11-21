@@ -9,6 +9,7 @@ import type { Forecast } from '../domain/forecast';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { DebtChart } from '../components/DebtChart';
+import { PrepaymentCard } from "./Prepayment";
 import { SkyHeader } from '../components/Petersburg';
 import { Bar, Chip, Empty, LinkButton, Money, SectionTitle } from '../components/ui';
 import { bridgeState } from '../domain/bridge';
@@ -211,6 +212,7 @@ function DebtsView() {
 
   return (
     <>
+      <PrepaymentCard />
       <BridgeCard />
 
       {target && (

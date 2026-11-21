@@ -73,7 +73,7 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
     monthKey(date) < monthKey(debt.bankBalance.date) && !ov[key] && !input.marks?.[key]);
   for (const e of input.oneOff) {
     if (e.date < from || e.date > to) continue;
-    if (e.kind === 'payment' && closedBefore(e.debtId, e.date)) continue;
+    if (e.kind === 'payment' && !input.marks?.[e.key]?.done && closedBefore(e.debtId, e.date)) continue;
     const incomeKind = e.incomeKind ?? (e.kind === 'income' && e.key.startsWith('inc:') ? e.key.split(':')[1] as IncomeKind : undefined);
     push(incomeKind ? { ...e, incomeKind } : e);
   }
@@ -89,20 +89,21 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
 
     if (m < input.templateFrom) continue;
     for (const d of input.debts) {
-      if (d.closed || d.balance <= 0.5) continue;
+      const open = !d.closed && d.balance > 0.5;
       if (d.rule.type === 'schedule') {
         d.rule.items.filter(i => monthKey(i.date) === m).forEach((i, n) => {
           const key = `pay:${d.id}:${m}${n ? `:${n}` : ''}`;
-          if (!unconfirmedHistory(d, key, i.date)) within({
+          if ((open || input.marks?.[key]?.done) && !unconfirmedHistory(d, key, i.date)) within({
             key, date: i.date, dateMode: 'exact', kind: 'payment', title: d.short, amount: i.amount, debtId: d.id,
           });
         });
         continue;
       }
-      const amount = estimatePayment(d, m);
-      if (!amount) continue;
       const card = d.kind === 'card';
       const key = `pay:${d.id}:${m}`, date = dayIn(m, d.dueDay);
+      if (!open && !input.marks?.[key]?.done) continue;
+      const amount = open ? estimatePayment(d, m) : input.marks?.[key]?.amount ?? 0;
+      if (!amount) continue;
       if (unconfirmedHistory(d, key, date)) continue;
       within({
         key, date, dateMode: card ? 'until' : 'exact', kind: 'payment',
@@ -132,11 +133,13 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
   }
 
   for (const plan of input.accountBook?.splitPlans ?? []) {
-    if (closedBefore(plan.debtId, from)) continue;
-    plan.schedule.forEach((payment, index) => push({
-      key: `split-plan:${plan.id}:${payment.date}:${index}`, date: payment.date, dateMode: 'exact', kind: 'payment',
-      title: plan.name, amount: payment.amount, debtId: plan.debtId,
-    }));
+    plan.schedule.forEach((payment, index) => {
+      const key = `split-plan:${plan.id}:${payment.date}:${index}`;
+      if (closedBefore(plan.debtId, payment.date) && !input.marks?.[key]?.done) return;
+      push({
+        key, date: payment.date, dateMode: 'exact', kind: 'payment', title: plan.name, amount: payment.amount, debtId: plan.debtId,
+      });
+    });
   }
   if (input.work) {
     const sourceMarks = input.marks ?? {};
@@ -193,10 +196,13 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
     ...splitDebits.flatMap(d => d.replacesKeys),
     ...(input.accountBook?.splitPlans ?? []).flatMap(plan => plan.replacesKeys ?? []).filter(key => !input.marks?.[key]?.done),
   ]);
-  for (const debit of splitDebits) out.push({
+  for (const debit of splitDebits) {
+    if (debit.debtIds.every(id => closedBefore(id, debit.date)) && !input.marks?.[`split-debit:${debit.id}`]?.done) continue;
+    out.push({
     key: `split-debit:${debit.id}`, date: debit.date, dateMode: 'exact', kind: 'payment',
     title: 'Сплит · общее автосписание', amount: debit.amount, accountId: debit.accountId, economicType: 'debt_payment', confidence: 'confirmed',
-  });
+    });
+  }
   const accounts = input.accountBook?.paymentAccounts;
   const singleCard = input.accountBook?.paymentRouting === 'life';
   const confirmedAccounts = new Map(input.accountBook?.operations.flatMap(op =>

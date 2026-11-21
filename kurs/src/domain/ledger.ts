@@ -108,7 +108,7 @@ export function fundingBalanceKnown(led: Pick<Ledger, 'card' | 'reserveVerified'
 const endOfDay = (date: string) => `${date}T23:59:59.999`;
 
 /** трата после точки: позже дня отсчёта; в сам день — только внесённая руками после сверки */
-const after = (e: Expense, at: string, date: string) => e.date > date || (e.date === date && e.origin === 'manual' && e.createdAt > at);
+const after = (e: Expense, at: string, date: string) => e.date > date || (e.date === date && (e.occurredAt ? Date.parse(e.occurredAt) > Date.parse(at) : e.origin === 'manual' && e.createdAt > at));
 
 type CardRef = { at: string; date: string; amount: number; dateOnly?: boolean; includedExpenseIds?: string[]; operationIds?: string[]; unmatchedOnCard?: number };
 
@@ -120,7 +120,7 @@ function afterCard(e: Expense, ref: CardRef, included: Set<string>): boolean {
   if (included.has(e.id) || e.date < ref.date) return false;
   if (e.date > ref.date) return true;
   if (ref.dateOnly) return false;
-  const elapsed = time(e.createdAt) - time(ref.at);
+  const elapsed = time(e.occurredAt ?? e.createdAt) - time(ref.at);
   return elapsed > 0 || (elapsed === 0 && ref.includedExpenseIds !== undefined);
 }
 

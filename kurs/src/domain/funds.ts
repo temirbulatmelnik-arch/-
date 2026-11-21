@@ -61,7 +61,7 @@ export function earmarks(operations: AccountOperation[], log: ReserveMove[], mar
   for (const op of operations) {
     if (op.status !== 'confirmed' || op.date > now) continue;
     if (op.type === 'transfer') {
-      if (op.purpose === 'weekly') unassignedLife += cents(op.weeklyExcess ?? 0);
+      if (op.purpose === 'weekly' || op.purpose === 'unassigned') unassignedLife += cents(op.purpose === 'unassigned' ? op.amount : op.weeklyExcess ?? 0);
       if ((op.purpose === 'prepare' || op.purpose === 'return') && op.shares) {
         change(op.accountId, op.shares, -1, op.date);
         if (op.purpose === 'prepare') change(op.toAccountId, op.shares, 1, op.date);

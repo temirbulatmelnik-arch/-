@@ -67,7 +67,7 @@ export interface Expense {
   /** Кредитка, с которой прошла трата. Без id покупка требует классификации. */
   creditCard?: string;
   /** откуда пришла: вручную, выписка, скриншот */
-  origin?: 'manual' | 'csv' | 'text' | 'ai' | 'pdf' | 'chat';
+  origin?: 'manual' | 'csv' | 'text' | 'ai' | 'screenshot' | 'pdf' | 'chat';
   /** для поиска дублей при импорте */
   fingerprint?: string;
   createdAt: string;

@@ -1,4 +1,4 @@
-import { accountOptions, appendOperations, bookOperationAllowed, budgetExpenses, cents, EMPTY_BOOK, LIFE_ACCOUNT, monthDebtActivity, RESERVE_ACCOUNT, rubles, validAmount, validBankBalance, validDate, validLoanReview, validSplitDebit, validSplitPlan, type AccountBook, type CashAccount } from './accounts';
+import { accountOptions, appendOperations, bookOperationAllowed, budgetExpenses, cents, EMPTY_BOOK, LIFE_ACCOUNT, monthDebtActivity, RESERVE_ACCOUNT, rubles, validAmount, validBankBalance, validDate, validLoanReview, validPayoffTerms, validSplitDebit, validSplitPlan, type AccountBook, type CashAccount } from './accounts';
 import { validPayroll, with2027Unit, type PayrollProfile, type PayRate, type Vacation } from './payroll';
 import { payrollRegister } from './payrollRegister';
 import { annualIncome } from './annualIncome';
@@ -1042,6 +1042,15 @@ const stepAccountBook: Step = (f, s, ctx) => {
       && accountsById.has(incoming.stress.accountId) && !same(book.stress, incoming.stress)) {
     book = { ...book, stress: incoming.stress };
     lines.push(`Стресс-сценарий ${incoming.stress.date} · ${money(incoming.stress.amount)}`);
+  }
+  for (const [id, entry] of Object.entries(incoming.payoffTerms ?? {})) {
+    if (!s.debts.some(d => d.id === id) || !validPayoffTerms(entry)) {
+      if (strict) errors.push('accountBook.payoffTerms: проверьте обязательство, ставку, сумму и дату');
+      continue;
+    }
+    if (same(book.payoffTerms?.[id], entry)) continue;
+    book = { ...book, payoffTerms: { ...book.payoffTerms, [id]: entry } };
+    lines.push(`Условия досрочного погашения · ${s.debts.find(d => d.id === id)!.short}`);
   }
   const marks = { ...s.marks };
   if (Array.isArray(incoming.operations)) for (const op of incoming.operations) {

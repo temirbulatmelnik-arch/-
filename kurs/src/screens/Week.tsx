@@ -181,19 +181,19 @@ export function Week() {
         )}
       </AnimatePresence>
       <WeekScene today={todayIdx} overlay={<Lamps monday={week.monday} todayIdx={todayIdx} limit={week.limit} dayNorm={today.day} />}>
-        <div className="flex items-start justify-between gap-3 px-5 pt-2.5">
+        <div className="flex items-start justify-between gap-2 px-[clamp(0.75rem,5cqw,1.25rem)] pt-2.5">
           <div style={{ color: 'var(--scene-ink)' }}>
-            <div className="text-[14px] first-letter:uppercase" style={{ color: 'var(--scene-muted)' }}>{weekdayFull(now)}, {dayMonth(now)}</div>
-            <div className="font-display mt-0.5 text-[19px] font-medium">Неделя {weekRange(week.monday, week.sunday)}</div>
+            <div className="text-sm first-letter:uppercase" style={{ color: 'var(--scene-muted)' }}>{weekdayFull(now)}, {dayMonth(now)}</div>
+            <div className="font-display mt-0.5 text-[1.1875rem] font-medium">Неделя {weekRange(week.monday, week.sunday)}</div>
           </div>
           <span className="pointer-events-auto flex gap-2"><SkyButton onClick={() => ui.set({ settings: true })} label="Настройки"><Cog size={18} strokeWidth={1.5} /></SkyButton></span>
         </div>
-        <div className="mt-1.5 flex items-start justify-between gap-3 pr-4 pl-5">
-          <div className="pt-3" style={{ color: over ? 'var(--neg)' : 'var(--scene-ink)' }}>
-            <div className="figure text-[36px] leading-[.95]" aria-live="polite">
+        <div className="mt-1 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-[clamp(0.75rem,5cqw,1.25rem)]">
+          <div className="min-w-0" style={{ color: over ? 'var(--neg)' : 'var(--scene-ink)' }}>
+            <div className="figure [overflow-wrap:anywhere] text-[clamp(1.3rem,9cqw,2.5rem)] leading-[1.06]" aria-live="polite">
               {over && <span className="mr-0.5">−</span>}<Roll value={Math.abs(week.left)} />
             </div>
-            <div className="mt-1.5 text-[14px] leading-snug" style={{ color: over ? 'var(--neg)' : 'var(--scene-muted)' }}>
+            <div className="mt-1.5 text-sm leading-snug" style={{ color: over ? 'var(--neg)' : 'var(--scene-muted)' }}>
               {over ? <>по бюджету<br />за неделю</> : <>по бюджету<br />до воскресенья</>}
             </div>
             {/* сколько на самом деле на карте (по учёту): остаток не сгорает, а уменьшает воскресное пополнение. При перерасходе

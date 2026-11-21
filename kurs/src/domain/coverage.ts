@@ -59,9 +59,15 @@ export interface Coverage {
   accountByDay?: Record<string, Record<string, number | null>>;
   paymentFunding?: PaymentFunding[];
   transferFunding?: TransferFunding[];
+  reserveLowByDay?: Record<string, number>;
   bufferRisk?: { date: string; amount: number } | null;
   maxShortfall: number;
   shortage: { date: string; title: string; amount: number } | null;
+}
+
+export interface CashProjection {
+  events: CalEvent[];
+  prepayments: { date: string; amount: number; releaseKeys: string[]; title: string }[];
 }
 
 export interface CoverageInput {
@@ -93,7 +99,7 @@ export function coverageInput(s: CalendarInput & { marks: Record<string, EventMa
 }
 
 /** Погашение моста и рост минималок по кредитке моста — как события прогноза */
-function bridgeEvents(input: CoverageInput, from: string, to: string): { extra: CoverageStep[]; minUp: Record<string, number> } {
+function bridgeEvents(input: CoverageInput, from: string, to: string, calendar = eventsBetween(input.cal, from, to)): { extra: CoverageStep[]; minUp: Record<string, number> } {
   const b = activeBridge(input.bridge);
   if (!b) return { extra: [], minUp: {} };
   const card = input.debts.find(d => d.id === b.card);
@@ -112,7 +118,7 @@ function bridgeEvents(input: CoverageInput, from: string, to: string): { extra: 
   // минималка кредитки моста растёт на ~2% от взятого + проценты за месяц, пока мост не погашен
   const minUp: Record<string, number> = {};
   const until = b.repayBy ?? to;
-  for (const e of eventsBetween(input.cal, from, to)) {
+  for (const e of calendar) {
     if (e.kind !== 'payment' || e.debtId !== b.card || e.date > until) continue;
     if (input.cal.overrides?.[e.key]?.amount != null) continue;
     const taken = takenBy(e.date);
@@ -209,7 +215,7 @@ export function projectedEvent(e: CalEvent, scenario: Scenario): CalEvent | null
 interface Deduction { accountId: string; amount: number }
 type Projection = ReturnType<typeof run>;
 
-function runAccounts(input: CoverageInput, from: string, to: string, scenario: Scenario, deduction?: Deduction): Projection {
+function runAccounts(input: CoverageInput, from: string, to: string, scenario: Scenario, deduction?: Deduction, projection?: CashProjection): Projection {
   const balances = new Map(Object.entries(input.cash ?? {}).map(([id, amount]) => [id, amount === null ? null : cents(amount)]));
   let total = [...balances.values()].reduce<number>((sum, value) => sum + (value ?? 0), 0);
   const balanceOn = (id?: string) => id ? balances.get(id) ?? null : null;
@@ -221,6 +227,8 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
   const preparing = input.held !== undefined;
   const earmarks = [...(input.held ?? [])];
   const daily: NonNullable<Coverage['accountByDay']> = {};
+  const reserveLowByDay: Record<string, number> = {};
+  let dayLow: number | null = null;
   const steps: CoverageStep[] = [];
   const paymentFunding: PaymentFunding[] = [];
   const transferFunding: TransferFunding[] = [];
@@ -229,7 +237,10 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
   let bufferRisk: Coverage['bufferRisk'] = null;
   const move = (id: string | undefined, delta: number) => {
     const value = balanceOn(id);
-    if (id && value != null) balances.set(id, value + delta);
+    if (id && value != null) {
+      balances.set(id, value + delta);
+      if (id === RESERVE_ACCOUNT) dayLow = Math.min(dayLow ?? value, value + delta);
+    }
   };
   const requireMoney = (id: string | undefined, amount: number, date: string, title: string) => {
     const available = balanceOn(id);
@@ -252,12 +263,12 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
     push({ date: from, title: 'Досрочное погашение', kind: 'payment', accountId: deduction.accountId }, -amount);
   }
   const byDate = new Map<string, CalEvent[]>();
-  const { extra, minUp } = bridgeEvents(input, from, to);
-  for (const event of eventsBetween(input.cal, addDays(from, -45), to)) {
+  const { extra, minUp } = bridgeEvents(input, from, to, projection?.events);
+  for (const event of projection?.events ?? eventsBetween(input.cal, addDays(from, -45), to)) {
     const weeklyDone = event.kind === 'weekly' && input.cal.accountBook?.operations.some(op => op.status === 'confirmed' && op.type === 'transfer' &&
       op.purpose === 'weekly' && op.eventKey === event.key);
     if ((input.marks[event.key]?.done && !weeklyDone) || (event.kind !== 'payment' && event.date < from)) continue;
-    const e = projectedEvent(event, scenario);
+    const e = projection ? event : projectedEvent(event, scenario);
     if (!e || e.date > to) continue;
     const date = e.date < from ? from : e.date;
     if (!byDate.has(date)) byDate.set(date, []);
@@ -280,9 +291,11 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
   };
   const transfers = (book?.operations ?? []).filter(op => op.type === 'transfer' && op.status === 'planned' && !(singleCard && op.purpose) && op.date >= from && op.date <= to);
   for (let date = from; date <= to; date = addDays(date, 1)) {
+    dayLow = balanceOn(RESERVE_ACCOUNT);
     const day = byDate.get(date) ?? [];
     const repayments = extra.filter(x => x.date === date);
     for (const step of repayments) {
+      if (projection?.prepayments.some(action => action.date < date && action.releaseKeys.includes('bridge:' + input.bridge?.card))) continue;
       const accountId = singleCard ? LIFE_ACCOUNT : book?.paymentAccounts['bridge-repayment'];
       const fundedFrom = singleCard ? RESERVE_ACCOUNT : accountId;
       requireMoney(fundedFrom, cents(-step.delta), date, step.title);
@@ -307,7 +320,7 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
         push({ date, title: 'Необходимые расходы недели', kind: 'weekly', key: e.key, accountId: RESERVE_ACCOUNT }, -target);
         continue;
       }
-      const amount = cents(e.amount + (minUp[e.key] ?? 0));
+      const amount = cents(e.amount + (projection ? 0 : minUp[e.key] ?? 0));
       if (amount <= 0) continue;
       const group = preparing ? paymentPreparations([{ ...e, projection: undefined, amount: rubles(amount) }], {}, earmarks,
         rubles(balanceOn(RESERVE_ACCOUNT) ?? 0))[0] : undefined;
@@ -363,11 +376,25 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
         incomeStatus: incomeStatus(e) }, cents(e.amount));
       if (accountId === LIFE_ACCOUNT) forecastSweep(e.key, date, cents(e.amount));
     }
+    for (const action of projection?.prepayments.filter(action => action.date === date) ?? []) {
+      for (const key of action.releaseKeys) {
+        const index = earmarks.findIndex(row => row.key === key && row.accountId === LIFE_ACCOUNT);
+        if (index < 0) continue;
+        const [row] = earmarks.splice(index, 1);
+        const amount = cents(row.amount);
+        move(LIFE_ACCOUNT, -amount);
+        move(RESERVE_ACCOUNT, amount);
+      }
+      requireMoney(RESERVE_ACCOUNT, cents(action.amount), date, action.title);
+      move(RESERVE_ACCOUNT, -cents(action.amount));
+      push({ date, title: action.title, kind: 'payment', accountId: RESERVE_ACCOUNT }, -cents(action.amount));
+    }
+    if (dayLow != null) reserveLowByDay[date] = rubles(dayLow);
     byDay[date] = rubles(total);
     daily[date] = Object.fromEntries([...balances].map(([id, value]) => [id, value === null ? null : rubles(value)]));
   }
   const min = steps.reduce<CoverageStep | null>((m, s) => (!m || s.balance < m.balance ? s : m), null);
-  return { start, from, to, steps, byDay, accountByDay: daily, accountRisk, paymentFunding, transferFunding, bufferRisk, min };
+  return { start, from, to, steps, byDay, accountByDay: daily, accountRisk, paymentFunding, transferFunding, bufferRisk, min, reserveLowByDay };
 }
 
 /** Сравнение двух расчётных единиц с одинаковыми остатками, счетами и обязательствами. */
@@ -381,7 +408,7 @@ export function compare2027Coverage(input: CoverageInput, from: string, scenario
   });
 }
 
-function scenarioInput(input: CoverageInput, scenario: Scenario): CoverageInput {
+export function scenarioInput(input: CoverageInput, scenario: Scenario): CoverageInput {
   const work = input.cal.work;
   return scenario !== 'base' && work?.cautiousUnit2027
     ? { ...input, cal: { ...input.cal, work: with2027Unit(work, work.cautiousUnit2027) } } : input;
@@ -410,10 +437,10 @@ export function safePrepayment(input: CoverageInput, from: string, accountId: st
 }
 
 /** Прогноз резерва от сегодня: не меньше 150 дней и до первой крупной премии после самого тонкого места */
-export function coverage(input: CoverageInput, from: string, scenario: Scenario = 'base', until?: string): Coverage {
+export function coverage(input: CoverageInput, from: string, scenario: Scenario = 'base', until?: string, projection?: CashProjection): Coverage {
   const model = scenarioInput(input, scenario);
   let to = until && until >= from ? until : addDays(from, HORIZON_DAYS);
-  const runModel = (end: string) => model.cash ? runAccounts(model, from, end, scenario) : run(model, from, end, undefined, scenario);
+  const runModel = (end: string) => model.cash ? runAccounts(model, from, end, scenario, undefined, projection) : run(model, from, end, undefined, scenario);
   let base = runModel(to);
   if (!until) {
     const big = eventsBetween(model.cal, base.min?.date ?? from, addDays(from, 400))

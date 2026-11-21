@@ -1,12 +1,14 @@
 import { cashAccount } from '../domain/accounts';
 // Выписка и скриншоты из банка → что на них → что обновить: траты по категориям, оплаченные платежи,
 // поступления (премия сразу открывает распределение), остаток на карте. После — итог недели.
-import { AlertTriangle, Camera, Check, ClipboardPaste, FileSpreadsheet, FileText, KeyRound, Loader2 } from 'lucide-react';
+import { AlertTriangle, Camera, Check, ClipboardPaste, FileSpreadsheet, FileText, Loader2 } from 'lucide-react';
 import { useRef, useState, type ReactNode } from 'react';
 import { Chip, Money, PrimaryButton, SecondaryButton, Sheet, Tile } from '../components/ui';
 import { ddmm, fromKey, today } from '../domain/dates';
 import { CATEGORIES } from '../domain/plan';
 import { fromAi, fromBank, fromDrafts, type AnyProposal } from '../domain/proposals';
+import { ScreenshotReview } from './ScreenshotImport';
+import { screenshotRows, type ScreenshotRow } from '../domain/screenshots';
 import { parseBankText } from '../domain/bankText';
 import { draft, parseCsv, parseText } from '../domain/statements';
 import type { CategoryId, Source } from '../domain/types';
@@ -25,7 +27,7 @@ export function ImportSheet() {
 }
 
 type Review = { summary: string; warnings: string[]; items: AnyProposal[] };
-type Step = { s: 'pick' } | { s: 'text' } | { s: 'busy'; label: string } | { s: 'review'; review: Review } | { s: 'error'; text: string };
+type Step = { s: 'pick' } | { s: 'text' } | { s: 'busy'; label: string } | { s: 'review'; review: Review } | { s: 'screenshots'; rows: ScreenshotRow[] } | { s: 'error'; text: string };
 
 function ctx() {
   const st = useStore.getState();
@@ -34,11 +36,8 @@ function ctx() {
 
 function Flow() {
   const [step, setStep] = useState<Step>({ s: 'pick' });
-  const [note, setNote] = useState('');
   const apiKey = useStore(s => s.settings.apiKey);
   const model = useStore(s => s.settings.model);
-  const setSettings = useStore(s => s.setSettings);
-  const [keyDraft, setKeyDraft] = useState('');
   const pdf = useRef<HTMLInputElement>(null);
   const pdfLocal = useRef<HTMLInputElement>(null);
   const shots = useRef<HTMLInputElement>(null);
@@ -55,9 +54,29 @@ function Flow() {
     const { analyze, AiError } = await import('../domain/ai');
     try {
       const c = ctx();
-      const r = await analyze({ files, apiKey, model, debts: c.cal.debts, now: c.now, note });
+      const r = await analyze({ files, apiKey, model, debts: c.cal.debts, now: c.now });
       setStep({ s: 'review', review: fromAi(r, c) });
     } catch (e) { fail(e, AiError); }
+  };
+
+  const runScreenshots = async (files: File[]) => {
+    if (!files.length) return;
+    setStep({ s: 'busy', label: 'Читаю скриншоты на устройстве…' });
+    try {
+      if (files.length > 8 || files.some(file => file.size > 15 * 1024 * 1024)) {
+        setStep({ s: 'error', text: 'Выберите до 8 изображений размером до 15 МБ каждое.' });
+        return;
+      }
+      const { readImageText } = await import('../domain/imageText');
+      const images = await readImageText(files);
+      const c = ctx();
+      const rows = [...new Map(images.flatMap(image =>
+        screenshotRows(image.text, c.now, image.id, image.confidence, c.memory).map(row => [row.fingerprint, row] as const))).values()];
+      setStep(rows.length ? { s: 'screenshots', rows } :
+        { s: 'error', text: 'Не распознаны строки операций с суммой и валютой. Попробуйте отдельный снимок операции или вставьте текст через «Фото».' });
+    } catch {
+      setStep({ s: 'error', text: 'Не удалось прочитать изображение. Выберите PNG, JPEG или используйте распознавание текста в «Фото».' });
+    }
   };
 
   const runPdfLocal = async (file?: File) => {
@@ -101,6 +120,7 @@ function Flow() {
       </div>
     );
   }
+  if (step.s === 'screenshots') return <ScreenshotReview rows={step.rows} onBack={() => setStep({ s: 'pick' })} />;
   if (step.s === 'review') return <ReviewList review={step.review} onBack={() => setStep({ s: 'pick' })} />;
   // одно касание: прочитать буфер (iPhone спросит «Вставить») и сразу показать, что нашлось
   const pasteBank = async () => {
@@ -117,9 +137,11 @@ function Flow() {
     <div className="space-y-2.5 pt-1">
       <input ref={pdf} type="file" accept="application/pdf" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void (apiKey ? runAi([f]) : runPdfLocal(f)); }} />
       <input ref={pdfLocal} type="file" accept="application/pdf" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; void runPdfLocal(f); }} />
-      <input ref={shots} type="file" accept="image/*" multiple hidden onChange={e => { const f = [...(e.target.files ?? [])]; e.target.value = ''; void runAi(f); }} />
+      <input ref={shots} type="file" accept="image/*" multiple hidden onChange={e => { const f = [...(e.target.files ?? [])]; e.target.value = ''; void runScreenshots(f); }} />
       <input ref={csv} type="file" accept=".csv,text/csv,text/plain,.txt" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; void runCsv(f); }} />
 
+      <SecondaryButton className="w-full" onClick={() => shots.current?.click()}><Camera size={18} /> Выбрать скриншот</SecondaryButton>
+      <p className="px-1 text-[12px] text-muted">Изображение распознаётся на устройстве. Перед записью можно поправить каждую операцию.</p>
       {/* главный способ: скопировать текст со снимка банка в «Фото» и вставить одним касанием */}
       <button type="button" onClick={pasteBank} className="deep-card flex w-full items-center gap-3.5 px-5 py-4 text-left transition-transform duration-100 active:scale-[.98]">
         <span aria-hidden="true" className="deep-sheen" />
@@ -139,24 +161,6 @@ function Flow() {
         text="В приложении банка: карта → «Выписка» → период «неделя» → поделиться PDF → «Сохранить в Файлы». Затем выберите файл здесь."
         onClick={() => pdf.current?.click()}>
         {apiKey && <button type="button" onClick={e => { e.stopPropagation(); pdfLocal.current?.click(); }} className="mt-2 text-[12.5px] font-medium text-sea">Разобрать без Claude, бесплатно</button>}
-      </Option>
-
-      <Option icon={<Camera size={19} strokeWidth={1.9} />} color="#8b63e0" title="Скриншоты" tag="Claude"
-        lead="Снимки экрана банка — приложение само поймёт, что на них"
-        text="Список операций, экран кредитки, чек платежа, зачисление, накопительный счёт — приложение поймёт, что это."
-        onClick={() => (apiKey ? shots.current?.click() : undefined)} disabled={!apiKey}>
-        {apiKey ? (
-          <input value={note} onChange={e => setNote(e.target.value)} onClick={e => e.stopPropagation()} placeholder="Комментарий для Claude (необязательно)" className="field mt-3 text-[14px]" />
-        ) : (
-          <div className="mt-3 space-y-2" onClick={e => e.stopPropagation()}>
-            <p className="text-[12.5px] leading-snug text-muted">Нужен ключ API Anthropic (console.anthropic.com → API Keys) — отдельно от подписки Claude, ≈ 3–5 ₽ за разбор. Хранится только на телефоне.</p>
-            <div className="flex gap-2">
-              <input value={keyDraft} onChange={e => setKeyDraft(e.target.value)} placeholder="sk-ant-…" autoCapitalize="off" autoCorrect="off" spellCheck={false} className="field text-[14px]" />
-              <button type="button" aria-label="Сохранить ключ" onClick={() => { if (keyDraft.trim().startsWith('sk-')) { setSettings({ apiKey: keyDraft.trim() }); toast('Ключ сохранён'); } else toast('Ключ начинается с sk-ant-'); }}
-                className="bg-sea-grad grid w-12 shrink-0 place-items-center rounded-[14px] text-on-sea"><KeyRound size={17} /></button>
-            </div>
-          </div>
-        )}
       </Option>
 
       <Option icon={<FileSpreadsheet size={19} strokeWidth={1.9} />} color="#2ba36a" title="Файл CSV" tag="на телефоне"

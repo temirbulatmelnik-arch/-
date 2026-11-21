@@ -2,10 +2,10 @@
 // Резервная копия — файл JSON (Настройки → Данные), календарь — файл .ics.
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { accountOptions, appendOperations, cents, kopecks, bookOperationAllowed, cashAccount, EMPTY_BOOK, LIFE_ACCOUNT, RESERVE_ACCOUNT, reversibleOperation, validAmount, validDate, validSplitDebit, validSplitPlan, type AccountBook, type AccountOperation, type BankBalance, type CashAccount, type SplitDebit, type SplitPlan } from '../domain/accounts';
+import { accountOptions, appendOperations, cents, kopecks, bookOperationAllowed, cashAccount, EMPTY_BOOK, LIFE_ACCOUNT, RESERVE_ACCOUNT, reversibleOperation, validAmount, validDate, validSplitDebit, validSplitPlan, validPayoffTerms, type PayoffTerms, type AccountBook, type AccountOperation, type BankBalance, type CashAccount, type SplitDebit, type SplitPlan } from '../domain/accounts';
 import { DEFAULT_MODEL } from '../domain/models';
-import { coverageInput, safePrepayment } from '../domain/coverage';
 import { DEFAULT_PREPARATION_TIME, moscowClock, paymentShares, partialPayments, weeklyTopUp, type FundingMode } from '../domain/funds';
+import { coverageInput, safePrepayment } from '../domain/coverage';
 import { annuity, cashIncomeEvent, eventsBetween } from '../domain/calendar';
 import { addDays, monthKey, monthsBetween, toKey, today, weekStart } from '../domain/dates';
 import { setPlanSource, totalDebt, weeklyLimit, type PlanConfig } from '../domain/plan';
@@ -92,6 +92,7 @@ interface Actions {
   sweepIncome: (id: string, accountId: string, amount: number, date: string) => boolean;
   returnEarmark: (id: string, accountId: string, key: string, amount: number, date: string) => boolean;
   confirmWeeklyTransfer: (key: string, amount: number, date?: string) => boolean;
+  savePayoffTerms: (id: string, terms: PayoffTerms) => boolean;
   saveOperation: (op: AccountOperation) => boolean;
   setPaymentAccount: (key: string, accountId: string) => void;
   saveSplitPlan: (plan: SplitPlan) => void;
@@ -118,14 +119,14 @@ interface Actions {
   updateExpense: (id: string, patch: Partial<Expense>) => void;
   removeExpense: (id: string) => void;
   /** отметить событие календаря; для платежа по долгу остаток уменьшается на оценку погашения */
-  markEvent: (e: CalEvent, done: boolean, amount?: number, paidFrom?: EventMark['paidFrom'], details?: { accountId?: string; bankVerified?: boolean; partialId?: string; principal?: number; interest?: number; fee?: number; paidDate?: string; payrollActual?: { gross?: number; tax?: number; otherWithheld?: number } }) => void;
+  markEvent: (e: CalEvent, done: boolean, amount?: number, paidFrom?: EventMark['paidFrom'], details?: { accountId?: string; bankAt?: string; externalId?: string; bankVerified?: boolean; partialId?: string; principal?: number; interest?: number; fee?: number; paidDate?: string; payrollActual?: { gross?: number; tax?: number; otherWithheld?: number } }) => void;
   updateDebt: (id: string, patch: Partial<Debt>) => void;
   /** точная сумма/дата платежа из банка */
   setOverride: (key: string, o: Pick<CalendarOverride, 'amount' | 'date' | 'prepareOn'>) => void;
   addDebt: (d: Debt) => void;
   removeDebt: (id: string) => void;
   /** досрочное погашение; fromReserve — деньги взяты из резерва */
-  prepay: (id: string, amount: number, accountId: string, parts: { principal: number; interest?: number; fee?: number }) => boolean;
+  prepay: (id: string, amount: number, accountId: string, parts: { principal: number; interest?: number; fee?: number; bankConfirmed?: true }) => boolean;
   /** премия: резерв становится reserveAfter, остальное — досрочно по списку */
   applyBonus: (opts: { id: string; amount: number; accountId: string; title: string; eventKey?: string; date?: string }) => boolean;
   /** card — перевод между картой и резервом: на сколько изменилась карта */
@@ -217,7 +218,7 @@ function topUpMove(s: Data, key: string, amount: number, note = 'Долил ка
 
 function patchDebt(d: Debt, balance: number, recalc = false): Debt {
   const b = Math.max(0, Math.round(balance * 100) / 100);
-  const closed = b <= 0.5;
+  const closed = b <= 0.5 && (d.kind !== 'card' || d.closed);
   let rule = d.rule;
   if (recalc && !closed && rule.type === 'annuity') {
     const left = monthsBetween(monthKey(today()), monthKey(rule.endDate));
@@ -374,6 +375,12 @@ export const useStore = create<State>()(
           marks: { ...s.marks, [key]: { done: true, amount: op.amount, paidDate: date, at: nowIso() } } });
         return true;
       },
+      savePayoffTerms: (id, terms) => {
+        const s = get();
+        if (!s.debts.some(d => d.id === id) || !validPayoffTerms(terms)) return false;
+        set({ accountBook: { ...s.accountBook, payoffTerms: { ...s.accountBook.payoffTerms, [id]: terms } } });
+        return true;
+      },
       saveOperation: op => {
         const s = get();
         if (!bookOperationAllowed(op, s.accountBook, s.debts, s.expenses)) return false;
@@ -525,6 +532,7 @@ export const useStore = create<State>()(
           if (linked?.type === 'loan_disbursement' || (linked?.type === 'transfer' && linked.purpose === 'weekly') || s.accountBook.historicalLoans?.some(loan => loan.eventKey === e.key) ||
               (done && (e.payroll?.documented && !details?.bankVerified || e.projection === 'internal_transfer'))) return {};
           const singleCard = s.accountBook.paymentRouting === 'life';
+          if (done && details?.externalId && s.accountBook.operations.some(op => op.externalId === details.externalId)) return {};
           if (done && e.economicType === 'loan_disbursement') return {};
           const marks = { ...s.marks };
           let debts = s.debts;
@@ -538,15 +546,15 @@ export const useStore = create<State>()(
             const at = nowIso();
             const date = details?.paidDate ?? moscowClock().date;
             if (!validDate(date) || date > moscowClock().date) return {};
-            const from = singleCard ? 'card' : paidFrom ?? (heldKeys(s.reserveLog, s.marks).has(e.key) ? 'card' : 'reserve');
+            const from = singleCard ? details?.externalId && details.accountId === RESERVE_ACCOUNT ? 'reserve' : 'card' : paidFrom ?? (heldKeys(s.reserveLog, s.marks).has(e.key) ? 'card' : 'reserve');
             marks[e.key] = { done: true, amount: paid, at, paidDate: date, ...(e.kind === 'payment' ? { paidFrom: from } : {}) };
             if (e.kind === 'weekly') return { marks, ...topUpMove(s, e.key, paid) };
-            const accountId = singleCard ? LIFE_ACCOUNT : details?.accountId ?? e.accountId ?? (from === 'card' ? LIFE_ACCOUNT : RESERVE_ACCOUNT);
-            const bookedAt = date === moscowClock().date ? at : undefined;
+            const accountId = singleCard && !details?.externalId ? LIFE_ACCOUNT : details?.accountId ?? e.accountId ?? (from === 'card' ? LIFE_ACCOUNT : RESERVE_ACCOUNT);
+            const bookedAt = details?.bankAt ?? (date === moscowClock().date ? at : undefined);
             const partialId = e.kind === 'payment' ? details?.partialId : undefined;
             const previouslyPaid = partialPayments(accountBook.operations).get(e.key) ?? 0;
             if (partialId && (cents(paid) <= 0 || cents(paid) >= cents(e.amount))) return {};
-            const link = partialId ? { id: partialId, partialFor: e.key } : { id: uid(), eventKey: e.key };
+            const link = { ...(partialId ? { id: partialId, partialFor: e.key } : { id: uid(), eventKey: e.key }), externalId: details?.externalId };
             if (e.kind === 'payment') {
               if (partialId) delete marks[e.key];
               else if (previouslyPaid) marks[e.key].amount = kopecks(paid + previouslyPaid / 100);
@@ -567,8 +575,8 @@ export const useStore = create<State>()(
               accountBook = { ...accountBook, operations: appendOperations(accountBook.operations, [op]) };
             }
             if (cashIncomeEvent(e) && (singleCard || e.accountId || e.nominalDate || e.incomeKind)) {
-              const op: AccountOperation = { id: uid(), eventKey: e.key, type: 'income', amount: paid,
-                accountId: singleCard ? LIFE_ACCOUNT : e.accountId ?? LIFE_ACCOUNT, date, at: bookedAt, origin: 'manual', status: 'confirmed', fundingSource: 'own', pendingSweep: true };
+              const op: AccountOperation = { ...link, type: 'income', amount: paid,
+                accountId: details?.externalId ? accountId : singleCard ? LIFE_ACCOUNT : e.accountId ?? LIFE_ACCOUNT, date, at: bookedAt, origin: 'manual', status: 'confirmed', fundingSource: 'own', pendingSweep: true };
               if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
               accountBook = { ...accountBook, operations: appendOperations(accountBook.operations, [op]) };
               if (work && e.nominalDate) {
@@ -615,11 +623,18 @@ export const useStore = create<State>()(
       prepay: (id, amount, accountId, parts) => {
         const s = get();
         const debt = s.debts.find(d => d.id === id);
-        const date = today();
-        const led = ledger({ ...s, now: date });
-        if (!debt || debt.closed || debt.noPrepay || parts.principal > led.debtBalances[id].estimated
-            || !validAmount(amount) || amount <= 0 || amount > safePrepayment(coverageInput(s, led), date, accountId)) return false;
-        return s.saveOperation({ ...parts, id: uid(), debtId: id, amount, accountId, type: 'debt_payment',
+        const date = moscowClock().date;
+        if (!debt || debt.closed || !validAmount(amount) || amount <= 0 ||
+            s.accountBook.operations.some(op => op.type === 'debt_payment' && op.status === 'confirmed' &&
+              !op.eventKey && !op.partialFor && op.debtId === id && op.date === date && op.accountId === accountId &&
+              cents(op.amount) === cents(amount))) return false;
+        if (!parts.bankConfirmed) {
+          const led = ledger({ ...s, now: date });
+          if (debt.noPrepay || parts.principal > led.debtBalances[id].estimated ||
+              amount > safePrepayment(coverageInput(s, led), date, accountId)) return false;
+        }
+        const { principal, interest, fee } = parts;
+        return s.saveOperation({ principal, interest, fee, id: uid(), debtId: id, amount, accountId, type: 'debt_payment',
           date, at: nowIso(), origin: 'manual', status: 'confirmed', fundingSource: 'unknown', note: 'Досрочное погашение' });
       },
 

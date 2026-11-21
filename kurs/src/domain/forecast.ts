@@ -33,7 +33,7 @@ export function forecast(opts: { debts: Debt[]; incomes: IncomeTemplate[]; reser
     const early = !!opts.templateFrom && m < opts.templateFrom;
     const earlyIncomes = early ? (opts.oneOff ?? []).filter(e => e.kind === 'income' && e.economicType !== 'loan_disbursement' && monthKey(e.date) === m) : [];
     const projected = opts.cal ? eventsBetween(opts.cal, `${m}-01`, dayIn(m, 'last'))
-      .filter(e => !opts.cal!.marks?.[e.key]?.done).flatMap(e => {
+      .filter(e => e.date >= opts.from && !opts.cal!.marks?.[e.key]?.done).flatMap(e => {
         const row = projectedEvent(e, 'cautious');
         return row && monthKey(row.date) === m ? [row] : [];
       }) : null;
@@ -61,7 +61,8 @@ export function forecast(opts: { debts: Debt[]; incomes: IncomeTemplate[]; reser
     // (с учётом решений плана по месяцам: например, премия месяца — только в один долг)
     const bonusMonth = early ? earlyIncomes.some(e => e.incomeKind && BONUS_KINDS.includes(e.incomeKind)) : opts.incomes.some(t => t.months?.includes(mon));
     const rule = planConfig().bonusRules?.[m];
-    if (!opts.cal && (bonusMonth || rule)) {
+    const budgetMonth = projected ? projected.some(e => e.kind === 'income' && e.amount > 0) : bonusMonth;
+    if (budgetMonth || rule) {
       const keepMonths = rule?.months ?? Math.max(0, monthsBetween(m, nextBonusMonth(m)) - 1);
       let keep = RESERVE_BUFFER;
       for (let k = 1; k <= keepMonths; k++) keep += shortfallFor(addMonths(m, k), debts);
@@ -75,7 +76,7 @@ export function forecast(opts: { debts: Debt[]; incomes: IncomeTemplate[]; reser
         extra -= pay;
         cash -= pay;
         if (d.balance <= 0.5) { d.closed = true; closeMonth[d.id] = m; }
-        else if (d.rule.type === 'annuity') {
+        else if (d.rule.type === 'annuity' && !opts.cal) {
           d.rule = { ...d.rule, amount: annuity(d.balance, d.rate, monthsBetween(m, monthKey(d.rule.endDate))) };
         }
       }

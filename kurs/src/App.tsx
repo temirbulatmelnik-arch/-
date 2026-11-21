@@ -192,7 +192,7 @@ export default function App() {
   return (
     <MotionConfig reducedMotion="user">
       <div className="pt-safe relative mx-auto min-h-dvh w-full max-w-md overflow-x-clip pb-36">
-        <div ref={mark} aria-hidden="true" className="pointer-events-none absolute left-0 h-px w-px" style={{ top: tab === 'week' ? 310 : 150 }} />
+        <div ref={mark} aria-hidden="true" className="pointer-events-none absolute left-0 h-px w-px" style={{ top: tab === 'week' ? 'clamp(340px, 101vw, 455px)' : 150 }} />
         <Island show={island} />
         <Salute />
         <div aria-hidden="true" className="fixed inset-x-0 top-0 z-40 h-[env(safe-area-inset-top)]" style={{ background: 'var(--sky-1)' }} />

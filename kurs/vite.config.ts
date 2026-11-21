@@ -46,6 +46,26 @@ function tonusRescue(): Plugin {
   };
 }
 
+// OCR model files are shipped with the application and never uploaded.
+function localOCR(): Plugin {
+  const models = ['rus', 'eng'];
+  const model = (lang: string) => readFileSync(`node_modules/@tesseract.js-data/${lang}/4.0.0_best_int/${lang}.traineddata.gz`);
+  return {
+    name: 'kurs-ocr-models',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const lang = req.url?.match(/\/ocr\/(rus|eng)\.traineddata\.gz$/)?.[1];
+        if (!lang) return next();
+        res.setHeader('Content-Type', 'application/gzip');
+        res.end(model(lang));
+      });
+    },
+    generateBundle() {
+      for (const lang of models) this.emitFile({ type: 'asset', fileName: `ocr/${lang}.traineddata.gz`, source: model(lang) });
+    },
+  };
+}
+
 // base: './' — приложение работает из любой папки (GitHub Pages, превью)
 export default defineConfig({
   base: './',
@@ -59,6 +79,7 @@ export default defineConfig({
   plugins: [
     webClipProfile(),
     tonusRescue(),
+    localOCR(),
     react(),
     tailwindcss(),
     VitePWA({
@@ -84,7 +105,7 @@ export default defineConfig({
         ],
       },
       // seed.enc.json кешируется тоже: план открывается и без интернета
-      workbox: { importScripts: ['./payment-push.js'], skipWaiting: true, clientsClaim: true, globPatterns: ['**/*.{js,css,html,svg,png,woff2,json}'], globIgnores: ['**/assets/main-{' + OLD_TONUS_SCRIPTS.join(',') + '}.js'] },
+      workbox: { maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, importScripts: ['./payment-push.js'], skipWaiting: true, clientsClaim: true, globPatterns: ['**/*.{js,css,html,svg,png,woff2,json,gz}'], globIgnores: ['**/assets/main-{' + OLD_TONUS_SCRIPTS.join(',') + '}.js'] },
     }),
   ],
   test: { environment: 'node' },

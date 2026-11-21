@@ -1,6 +1,4 @@
 import { accountOptions, RESERVE_ACCOUNT } from '../domain/accounts';
-import { safePrepayment } from '../domain/coverage';
-import { useCoverage } from '../components/Coverage';
 import { useLedger } from './Checkup';
 // Карточка долга: обновить остаток, внести досрочно, условия. И форма нового долга.
 import { Lock, Trash2 } from 'lucide-react';
@@ -37,7 +35,6 @@ function Body({ d }: { d: Debt }) {
   const now = useToday();
   const [updateDebt, prepay, removeDebt, book] = useStore(useShallow(s => [s.updateDebt, s.prepay, s.removeDebt, s.accountBook] as const));
   const projected = useLedger().debtBalances[d.id];
-  const { input } = useCoverage('cautious');
   const set = useUi(s => s.set);
   const [balance, setBalance] = useState(String(d.balance));
   const [extra, setExtra] = useState('');
@@ -45,7 +42,7 @@ function Body({ d }: { d: Debt }) {
   const [principal, setPrincipal] = useState('');
   const [interestPart, setInterestPart] = useState('');
   const [fee, setFee] = useState('');
-  const safe = safePrepayment(input, now, account);
+  const [confirmed, setConfirmed] = useState(false);
   const principalValue = parseAmount(principal);
   const extraValue = parseAmount(extra) ?? 0;
   const interest = (d.balance * d.rate) / 12;
@@ -99,15 +96,15 @@ function Body({ d }: { d: Debt }) {
       {!d.closed && (
         <>
           <div className="card space-y-3 p-4">
-            <Field label="Текущий остаток (из приложения банка)" hint="Или загрузите скриншот экрана долга — «Курс» обновит сам.">
+            <Field label="Текущий остаток (из приложения банка)" hint="Укажите сумму задолженности из банка на сегодня.">
               <input value={balance} onChange={e => setBalance(e.target.value)} inputMode="decimal" className="field text-[18px] font-medium" />
             </Field>
             <SecondaryButton className="w-full" disabled={parseAmount(balance) == null || parseAmount(balance) === d.balance}
               onClick={() => { updateDebt(d.id, { balance: parseAmount(balance)! }); toast('Остаток обновлён'); }}>Сохранить остаток</SecondaryButton>
           </div>
 
-          {!d.noPrepay && <div className="card space-y-3 p-4">
-            <Field label="Учесть досрочный платёж" hint={d.kind === 'split' ? 'При досрочном погашении выберите «уменьшить платёж».' : d.kind === 'loan' ? 'Выберите досрочное погашение с сокращением срока.' : 'Сначала внесите обязательный платёж, сверх него — досрочно.'}>
+          <div className="card space-y-3 p-4">
+            <Field label="Учесть досрочный платёж" hint="Укажите списание, которое уже отражено в приложении банка.">
               <input value={extra} onChange={e => setExtra(e.target.value)} inputMode="decimal" placeholder="0" className="field text-[18px] font-medium" />
             </Field>
             <Field label="Счёт списания"><select className="field" value={account} onChange={e => setAccount(e.target.value)}>
@@ -116,15 +113,19 @@ function Body({ d }: { d: Debt }) {
             <Field label="Погашено тела долга по выписке"><input className="field" inputMode="decimal" value={principal} onChange={e => setPrincipal(e.target.value)} /></Field>
             <Field label="Проценты по выписке"><input className="field" inputMode="decimal" value={interestPart} onChange={e => setInterestPart(e.target.value)} /></Field>
             <Field label="Комиссия по выписке"><input className="field" inputMode="decimal" value={fee} onChange={e => setFee(e.target.value)} /></Field>
-            <p className="text-[13px] text-muted">{safe > 0
-              ? <>По осторожному прогнозу доступно до <Money value={safe} /> при сохранении запаса 20 000 ₽.</>
-              : 'Безопасный лимит досрочки сейчас 0 ₽. Сверьте ближайшие платежи и поступления.'}</p>
-            <PrimaryButton disabled={extraValue <= 0 || extraValue > safe || principalValue == null} onClick={() => {
-              const ok = prepay(d.id, extraValue, account, { principal: principalValue!, interest: parseAmount(interestPart) ?? undefined, fee: parseAmount(fee) ?? undefined });
-              if (ok) { setExtra(''); setPrincipal(''); setInterestPart(''); setFee(''); }
-              toast(ok ? 'Досрочный платёж учтён' : 'Проверьте разбивку и обеспечение ближайших платежей');
+            <label className="flex min-h-11 items-center gap-2 text-[13px]"><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} /> Банк уже списал деньги</label>
+            <PrimaryButton disabled={!confirmed || extraValue <= 0 || principalValue == null} onClick={() => {
+              const ok = prepay(d.id, extraValue, account, { bankConfirmed: true, principal: principalValue!, interest: parseAmount(interestPart) ?? undefined, fee: parseAmount(fee) ?? undefined });
+              if (ok) { setExtra(''); setPrincipal(''); setInterestPart(''); setFee(''); setConfirmed(false); }
+              toast(ok ? 'Досрочный платёж учтён' : 'Проверьте разбивку и выписку: такой платёж уже может быть в истории');
             }}>Подтвердить платёж</PrimaryButton>
-          </div>}
+          </div>
+          {(d.balance < 0.01 || projected.estimated < 0.01) && <SecondaryButton className="w-full" onClick={() => {
+            if (window.confirm('Подтвердите, что в банке нет задолженности и договор закрыт.')) {
+              updateDebt(d.id, { balance: 0, closed: true, closedOn: now });
+              toast('Закрытие договора записано');
+            }
+          }}>Подтвердить закрытие договора</SecondaryButton>}
         </>
       )}
 

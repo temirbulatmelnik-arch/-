@@ -1,7 +1,7 @@
 // Иллюстрация «Петербург»: закат над Невой, Петропавловка, Исаакий, Адмиралтейство, Дворцовый мост и «Лахта» вдали.
 // Мост на «Неделе» при входе разводится полностью, фонари набережной — дни недели. Цвета — из index.css (--sky-*, --city-*),
 // поэтому тёмная тема превращает закат в светлые сумерки без отдельной картинки; солнце в ней заменяет луна.
-import { useEffect, useId, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 
 const f = (v: string): CSSProperties => ({ fill: `var(${v})` });
 const stop = (v: string, opacity?: number): CSSProperties => ({ stopColor: `var(${v})`, stopOpacity: opacity });
@@ -274,9 +274,28 @@ const DAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
 export function WeekScene({ today, children, overlay }: { today: number; children: ReactNode; overlay?: ReactNode }) {
   const { left, right, replay } = useLift();
   const { sun, moon, warm } = useSunset(130, 16_000, 34);
+  const host = useRef<HTMLDivElement>(null);
+  const instruments = useRef<HTMLDivElement>(null);
+  const [skyTop, setSkyTop] = useState(-32);
+  useLayoutEffect(() => {
+    const root = host.current, header = instruments.current;
+    if (!root || !header) return;
+    const measure = () => {
+      // The tallest spire starts at y=203 in the artwork. Keep the instrument
+      // row above it even when dynamic type or the spending preview adds height.
+      if (root.clientWidth) setSkyTop(Math.min(-32, 203 - Math.ceil((header.offsetHeight + 16) * 390 / root.clientWidth)));
+    };
+    measure();
+    const resize = new ResizeObserver(measure);
+    resize.observe(root);
+    resize.observe(header);
+    return () => resize.disconnect();
+  }, []);
+  const height = 512 - skyTop;
+  const lower = (y: number) => `${100 * (y - skyTop) / height}%`;
   return (
-    <div className="relative">
-      <svg viewBox="0 34 390 478" preserveAspectRatio="xMidYMax slice" className="block h-[clamp(270px,39dvh,350px)] w-full" role="img"
+    <div ref={host} className="relative [container-type:inline-size]">
+      <svg viewBox={`0 ${skyTop} 390 ${height}`} preserveAspectRatio="xMidYMin meet" className="block h-auto w-full" role="img"
         aria-label="Нева на закате, Дворцовый мост разводится">
         <defs>
           <SkyGradients id="ws" />
@@ -287,9 +306,11 @@ export function WeekScene({ today, children, overlay }: { today: number; childre
           <filter id="ws-rip" x="-5%" y="-5%" width="110%" height="110%"><feTurbulence type="fractalNoise" baseFrequency="0.006 0.11" numOctaves="1" seed="3" /><feDisplacementMap in="SourceGraphic" scale="7" xChannelSelector="R" yChannelSelector="G" /></filter>
         </defs>
 
-        <rect width="390" height="331" fill="url(#ws-sky)" />
-        <rect ref={warm} opacity="0" width="390" height="331" fill="url(#ws-warm)" />
+        <rect y={skyTop} width="390" height={331 - skyTop} fill="url(#ws-sky)" />
+        <rect ref={warm} opacity="0" y={skyTop} width="390" height={331 - skyTop} fill="url(#ws-warm)" />
         <g className="scene-night" fill="#fff">
+          {STARS.filter((_, i) => i % 3 === 0).map(([x, y], i) =>
+            <circle key={`upper-${i}`} className="sc-tw" cx={390 - x} cy={skyTop / 2 + y / 3} r=".8" opacity=".35" />)}
           {STARS.map(([x, y], i) => <circle key={i} className="sc-tw" style={{ animationDelay: `${-(i * 0.47) % 3.5}s` }} cx={x} cy={y} r={i % 3 ? 0.9 : 1.1} opacity={y < 160 ? 0.55 : 0.3} />)}
         </g>
         <g clipPath="url(#ws-skyclip)">
@@ -359,11 +380,11 @@ export function WeekScene({ today, children, overlay }: { today: number; childre
           );
         })}
       </svg>
-      <button type="button" onClick={replay} aria-label="Развести мост заново" className="absolute inset-x-0 top-[38%] bottom-[16%]" />
+      <button type="button" onClick={replay} aria-label="Развести мост заново" className="absolute inset-x-0 bottom-[16%]" style={{ top: lower(203) }} />
       {/* текст над небом не перехватывает нажатия: сцена под ним разводит мост заново */}
-      <div className="pointer-events-none absolute inset-x-0 top-0">{children}</div>
+      <div ref={instruments} data-week-instruments className="pointer-events-none absolute inset-x-0 top-0">{children}</div>
       {/* поверх всего — фонари-кнопки дней недели */}
-      {overlay && <div className="pointer-events-none absolute inset-0">{overlay}</div>}
+      {overlay && <div className="pointer-events-none absolute inset-x-0 bottom-0" style={{ top: lower(34) }}>{overlay}</div>}
     </div>
   );
 }
