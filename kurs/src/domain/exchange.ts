@@ -709,6 +709,12 @@ const stepCalendar: Step = (f, s, ctx) => {
       continue;
     }
     const mark = marks[e.key];
+    if (f.protocolVersion === '2.8' && !f.recovery && mark?.done && (p.done === false ||
+        p.done === true && (p.paid != null && cents(p.paid) !== cents(mark.amount ?? e.amount) ||
+          p.paidDate != null && p.paidDate !== paidOn(e, mark)))) {
+      lines.push(`Не найдено основание для изменения факта ${e.key}. Используйте сверенное исправление.`);
+      continue;
+    }
     const recorded = s.accountBook?.operations.find(op => op.eventKey === e.key && op.status === 'confirmed');
     const historical = s.accountBook?.historicalLoans?.find(op => op.eventKey === e.key);
     if ((recorded || historical) && (p.done === false || (p.done === true &&
@@ -928,9 +934,16 @@ const stepAccountBook: Step = (f, s, ctx) => {
   if (Array.isArray(incoming.historicalLoans)) {
     const history = new Map((book.historicalLoans ?? []).map(loan => [loan.eventKey, loan]));
     for (const loan of incoming.historicalLoans) {
-      if (!loan || typeof loan.eventKey !== 'string' || history.has(loan.eventKey) ||
-          !validDate(loan.date) || loan.date > ctx.now || !validAmount(loan.amount) || loan.amount <= 0 ||
-          !s.debts.some(d => d.id === loan.debtId)) continue;
+      if (!loan || !safeKey(loan.eventKey) || !validDate(loan.date) || loan.date > ctx.now ||
+          !validAmount(loan.amount) || loan.amount <= 0 || !s.debts.some(d => d.id === loan.debtId)) {
+        if (strict) errors.push('accountBook.historicalLoans: проверьте дату, сумму и долг');
+        continue;
+      }
+      const previous = history.get(loan.eventKey);
+      if (previous) {
+        if (strict && !same(previous, loan)) errors.push(`accountBook.historicalLoans.${loan.eventKey}: прежняя классификация расходится`);
+        continue;
+      }
       const event = s.oneOff.find(e => e.key === loan.eventKey && e.kind === 'income');
       const mark = s.marks[loan.eventKey];
       const recorded = book.operations.find(op => op.eventKey === loan.eventKey);
@@ -1101,10 +1114,13 @@ const stepWork: Step = (f, s, ctx) => {
   for (const [key, record] of Object.entries(incoming.actual ?? {})) {
     const former = actual[key];
     if (!record || typeof record !== 'object') { errors.push(`work.actual.${key}: требуется запись о выплате`); continue; }
-    const date = s.marks[key]?.done ? s.marks[key].paidDate : undefined;
+    const marked = s.marks[key]?.done ? s.marks[key] : undefined;
+    const bookEntry = s.accountBook?.operations.find(op => op.status === 'confirmed' && op.type === 'income' && op.eventKey === key);
+    const date = bookEntry?.date ?? marked?.paidDate;
+    const recordedNet = bookEntry?.amount ?? marked?.amount;
     const conflicts = ['net', 'gross', 'tax', 'otherWithheld', 'payDate'].filter(field => {
       const k = field as keyof typeof record;
-      const oldValue = field === 'payDate' ? date ?? former?.[k] : former?.[k];
+      const oldValue = field === 'payDate' ? date ?? former?.[k] : field === 'net' ? recordedNet ?? former?.[k] : former?.[k];
       return record[k] != null && oldValue != null && record[k] !== oldValue;
     });
     if (conflicts.length) {

@@ -100,6 +100,11 @@ export interface Ledger {
   unclassifiedCredit: Expense[];
 }
 
+export function fundingBalanceKnown(led: Pick<Ledger, 'card' | 'reserveVerified' | 'cashAccounts'>, id: string) {
+  return id === LIFE_ACCOUNT ? led.card != null : id === RESERVE_ACCOUNT ? led.reserveVerified
+    : led.cashAccounts.some(account => account.id === id && account.expected != null);
+}
+
 const endOfDay = (date: string) => `${date}T23:59:59.999`;
 
 /** трата после точки: позже дня отсчёта; в сам день — только внесённая руками после сверки */

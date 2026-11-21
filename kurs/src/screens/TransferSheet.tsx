@@ -4,6 +4,7 @@ import { accountOptions, LIFE_ACCOUNT, RESERVE_ACCOUNT } from '../domain/account
 import { eventsBetween } from '../domain/calendar';
 import { ddmm } from '../domain/dates';
 import { moscowClock, paymentPreparations, type FundingMode } from '../domain/funds';
+import { fundingBalanceKnown } from '../domain/ledger';
 import { parseAmount } from '../domain/money';
 import { uid, useStore } from '../store/store';
 import { toast, useCal, useUi } from '../store/ui';
@@ -29,13 +30,14 @@ function Body({ action, close }: { action: Action; close: () => void }) {
   const name = (id: string | undefined) => accountOptions(book).find(a => a.id === id)?.name ?? 'Счёт не назначен';
   const plan = action.kind === 'payment' ? paymentPreparations(eventsBetween(cal, action.plan.date, action.plan.date), marks,
     led.heldForPayments, led.reserve).find(group => group.id === action.plan.id) : undefined;
+  const verifyFirst = !!plan?.accountId && (!fundingBalanceKnown(led, plan.accountId) || !led.reserveVerified);
   const physical = plan?.accountId === LIFE_ACCOUNT ? led.card : led.cashAccounts.find(a => a.id === plan?.accountId)?.expected;
   const heldForAccount = led.heldForPayments.filter(row => row.accountId === plan?.accountId).reduce((sum, row) => sum + row.amount, 0);
   const pendingOnAccount = plan?.accountId ? led.pendingSweepToReserve[plan.accountId] ?? 0 : 0;
   const freeOnTarget = physical == null ? null : Math.max(0, physical - heldForAccount - pendingOnAccount);
   const [mode, setMode] = useState<FundingMode>(() => plan?.inTransit && !plan.toFund ? 'forward' : 'reserve');
   const maxFor = (mode: FundingMode) => {
-    if (!plan?.accountId || plan.accountId === RESERVE_ACCOUNT) return 0;
+    if (!plan?.accountId || verifyFirst || plan.accountId === RESERVE_ACCOUNT) return 0;
     if (mode === 'forward') return plan.inTransit;
     if (mode === 'existing') return Math.min(plan.toFund ?? 0, freeOnTarget ?? 0);
     if (mode === 'allocate') return Math.min(plan.toFund ?? 0, led.pendingSweepToReserve[plan.accountId] ?? 0);
@@ -74,7 +76,9 @@ function Body({ action, close }: { action: Action; close: () => void }) {
       <div className="font-medium">{ddmm(plan.date)} · {name(plan.accountId)}</div>
       {plan.events.map(e => <button key={e.key} type="button" className="flex w-full justify-between gap-3 text-left text-sea"
         onClick={() => eventLink(e.key)}><span>{e.title}</span><Money value={e.amount} approx={e.approx} kopecks className="shrink-0" /></button>)}
-      {plan.accountId ? <>
+      {verifyFirst ? <p className="text-warn">Чтобы рассчитать перевод, сверьте остаток счёта списания и резерва.
+        <button className="block min-h-11 text-sea" type="button" onClick={() => useUi.getState().set({ transfer: null, finance: true })}>Открыть счета</button>
+      </p> : plan.accountId ? <>
         <div>Уже выделено на счёте списания <Money value={plan.prepared} kopecks /></div>
         {physical != null && plan.accountId !== RESERVE_ACCOUNT && <div>Физический остаток на счёте <Money value={physical} kopecks /></div>}
         {freeOnTarget != null && plan.accountId !== LIFE_ACCOUNT && plan.accountId !== RESERVE_ACCOUNT &&
@@ -86,7 +90,7 @@ function Body({ action, close }: { action: Action; close: () => void }) {
       </> : <p className="text-warn">Уточните счёт списания в банке. Нажмите на платёж, чтобы назначить его.</p>}
     </section>}
     {action.kind === 'payment' && !plan && <p>Группа изменилась. Откройте актуальный платёж в календаре.</p>}
-    {action.kind === 'payment' && plan?.accountId && plan.accountId !== RESERVE_ACCOUNT && (plan.toFund || plan.inTransit) ? <Field label="Фактический маршрут">
+    {action.kind === 'payment' && !verifyFirst && plan?.accountId && plan.accountId !== RESERVE_ACCOUNT && (plan.toFund || plan.inTransit) ? <Field label="Фактический маршрут">
       <select className="field" value={mode} onChange={e => { const next = e.target.value as FundingMode; setMode(next); setAmount(String(maxFor(next))); }}>
         {choices.map(item => <option key={item.mode} value={item.mode}>{item.title}</option>)}
       </select>

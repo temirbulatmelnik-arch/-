@@ -1,4 +1,4 @@
-import { accountOptions, LIFE_ACCOUNT, RESERVE_ACCOUNT } from '../domain/accounts';
+import { accountOptions, LIFE_ACCOUNT, RESERVE_ACCOUNT, validDate } from '../domain/accounts';
 // Платёж, поступление или воскресное пополнение карты: отметить, поправить сумму и дату (у кредиток они плавают), распределить премию.
 import { CalendarDays, Undo2 } from 'lucide-react';
 import { useState } from 'react';
@@ -71,6 +71,7 @@ function Body({ e }: { e: CalEvent }) {
   const [otherWithheld, setOtherWithheld] = useState('');
   const [newAmount, setNewAmount] = useState(String(e.amount));
   const [newDate, setNewDate] = useState(e.date);
+  const [dateSource, setDateSource] = useState(() => pay ? useStore.getState().work?.payDateSources?.[pay.key] ?? '' : '');
   const value = parseAmount(amount) ?? 0;
   const close = () => set({ event: null });
 
@@ -98,6 +99,18 @@ function Body({ e }: { e: CalEvent }) {
   };
 
   const saveEdit = () => {
+    if (pay) {
+      const state = useStore.getState();
+      if (!state.work || !validDate(newDate) || !dateSource.trim()) { toast('Укажите дату и подтверждение бухгалтерии'); return; }
+      const changed = state.saveWork({ ...state.work,
+        payDates: { ...state.work.payDates, [pay.key]: newDate },
+        payDateSources: { ...state.work.payDateSources, [pay.key]: dateSource.trim() },
+      });
+      if (!changed) { toast('Дата не сохранена. Проверьте параметры работы.'); return; }
+      toast('Дата из графика бухгалтерии сохранена');
+      close();
+      return;
+    }
     const a = parseAmount(newAmount);
     setOverride(e.key, { ...(a != null && a !== e.amount ? { amount: a } : {}), ...(newDate && newDate !== e.date ? { date: newDate } : {}) });
     toast('Сумма и дата обновлены');
@@ -183,13 +196,15 @@ function Body({ e }: { e: CalEvent }) {
       ) : editing ? (
         <div className="card space-y-3 p-4">
           <div className="text-[13px] text-muted">{group === 'debt' ? 'Сумма и дата из приложения банка — у кредиток они меняются каждый месяц.' : 'Только для этого месяца.'}</div>
-          <AmountInput value={newAmount} onChange={setNewAmount} size="md" />
-          <input type="date" value={newDate} onChange={x => setNewDate(x.target.value || e.date)} className="field" aria-label="Дата платежа" />
+          {pay ? <label className="block text-[13px]">Подтверждение даты бухгалтерией
+            <input className="field mt-1" value={dateSource} onChange={e => setDateSource(e.target.value)} placeholder="Например, утверждённый график от …" />
+          </label> : <AmountInput value={newAmount} onChange={setNewAmount} size="md" />}
+          <input type="date" value={newDate} onChange={x => setNewDate(x.target.value || e.date)} className="field" aria-label={pay ? 'Дата выплаты' : 'Дата платежа'} />
           {debt && typeof debt.dueDay === 'number' && newDate.slice(8) !== String(debt.dueDay).padStart(2, '0') && (
             <button type="button" onClick={() => { updateDebt(debt.id, { dueDay: Number(newDate.slice(8)) }); toast(`Теперь ${debt.short} — ${Number(newDate.slice(8))}-го каждый месяц`); }}
               className="text-[13px] font-medium text-sea">Сделать {Number(newDate.slice(8))}-е днём платежа каждый месяц</button>
           )}
-          <PrimaryButton onClick={saveEdit} tone="ink">Сохранить</PrimaryButton>
+          <PrimaryButton onClick={saveEdit} tone="ink" disabled={!!pay && !dateSource.trim()}>Сохранить</PrimaryButton>
         </div>
       ) : (
         <>
@@ -243,7 +258,7 @@ function Body({ e }: { e: CalEvent }) {
             </>
           ) : (
             <SecondaryButton onClick={() => (group === 'fixed' ? set({ event: null, fixed: true }) : setEditing(true))} className="w-full">
-              <CalendarDays size={16} strokeWidth={1.5} /> {group === 'fixed' ? 'Изменить сумму или число месяца' : `Изменить сумму или дату${e.dateMode !== 'month' ? ` (${dayMonth(e.date)})` : ''}`}
+              <CalendarDays size={16} strokeWidth={1.5} /> {pay ? 'Указать дату по графику бухгалтерии' : group === 'fixed' ? 'Изменить сумму или число месяца' : `Изменить сумму или дату${e.dateMode !== 'month' ? ` (${dayMonth(e.date)})` : ''}`}
             </SecondaryButton>
           )}
         </>

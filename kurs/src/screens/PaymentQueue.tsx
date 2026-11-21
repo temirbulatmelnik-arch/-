@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { AccountablePayments, paymentRouteKey, possibleSubscriptionDuplicate } from '../domain/paymentRoutes';
-import { accountOptions, LIFE_ACCOUNT, RESERVE_ACCOUNT } from '../domain/accounts';
+import { accountOptions, RESERVE_ACCOUNT } from '../domain/accounts';
 import { eventsBetween } from '../domain/calendar';
 import { addDays, ddmm, dayIn, monthKey } from '../domain/dates';
+import { fundingBalanceKnown } from '../domain/ledger';
 import { paymentPreparations } from '../domain/funds';
 import { Field, Money, PrimaryButton, SecondaryButton, Segmented, Sheet } from '../components/ui';
 import { uid, useStore } from '../store/store';
@@ -31,8 +32,7 @@ function Queue() {
   const open = paymentPreparations(events, marks, led.heldForPayments, led.reserve);
   const close = events.filter(e => marks[e.key]?.done);
   const names = accountOptions(book);
-  const available = (id: string) => id === LIFE_ACCOUNT ? led.card != null : id === RESERVE_ACCOUNT ? led.reserveVerified :
-    led.cashAccounts.some(a => a.id === id && a.expected != null);
+  const available = (id: string) => fundingBalanceKnown(led, id) && led.reserveVerified;
   return <div className="space-y-3">
     <Segmented value={range} onChange={setRange} options={[{ id: 'today', label: 'Сегодня' }, { id: 'week', label: '7 дней' }, { id: 'month', label: 'Месяц' }]} />
     <SecondaryButton className="w-full" onClick={() => set({ paymentQueue: false, paymentRoutes: true })}>Счета списания</SecondaryButton>

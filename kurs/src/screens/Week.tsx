@@ -1,4 +1,4 @@
-import { accountOptions } from '../domain/accounts';
+import { accountOptions, RESERVE_ACCOUNT } from '../domain/accounts';
 // «Сегодня»: сцена с мостом, остаток недели и кольцо дня. Под сценой — быстрые траты, один следующий шаг, строка
 // «Неделя», три сосуда «Где деньги» и плитки-входы «Траты» и «Долги». Плашка о перерасходе появляется при входе.
 import { ChevronRight, MessagesSquare, Scale, ScanText, Settings as Cog } from 'lucide-react';
@@ -17,6 +17,7 @@ import { cashIncomeEvent, eventsBetween } from '../domain/calendar';
 import { activeBridge, bridgeState } from '../domain/bridge';
 import { addDays, dayMonth, ddmm, fromKey, monthKey, plural, weekdayFull, weekRange } from '../domain/dates';
 import { DEFAULT_PREPARATION_TIME, paymentPreparations, preparationDue, weeklyTopUp } from '../domain/funds';
+import { fundingBalanceKnown } from '../domain/ledger';
 import { rub } from '../domain/money';
 import { quickSpends, yesterdaySet, type QuickSpend } from '../domain/quick';
 import { DEFAULT_SPEND_SOURCE, spendEffect } from '../domain/sources';
@@ -123,15 +124,18 @@ export function Week() {
     const name = accountOptions(accountBook).find(a => a.id === plan.accountId)?.name;
     const title = plan.events.length > 1 ? `${plan.events.length} платежа с одного счёта` :
       debts.find(debt => debt.id === first.debtId)?.short ?? first.title;
+    const unknownBalance = !!plan.accountId && (!fundingBalanceKnown(led, plan.accountId) ||
+      plan.accountId !== RESERVE_ACCOUNT && !led.reserveVerified);
     const preparation = plan.date > clock.date || Boolean(plan.toFund || plan.inTransit) || !name;
     steps.push({ id: `move:${plan.id}`, tone: plan.reserveShortfall ? 'out' : 'rsv',
       kicker: plan.date < clock.date ? `Проверьте списание · ${ddmm(plan.date)}` : `Следующее действие · ${ddmm(plan.date)}`,
       title: !name ? `Указать счёт · ${title}` : title,
       amount: <Money value={plan.total} approx={plan.events.some(e => e.approx)} kopecks />,
-      text: !name ? 'Уточните карту или счёт в банке.' : <>{name}. {plan.toFund ? <>Из резерва <Money value={plan.toFund} kopecks />. </> : null}
+      text: !name ? 'Уточните карту или счёт в банке.' : unknownBalance ? 'Сверьте остатки счетов перед расчётом перевода.' : <>{name}. {plan.toFund ? <>Из резерва <Money value={plan.toFund} kopecks />. </> : null}
         {plan.inTransit > 0 && <>На промежуточной карте <Money value={plan.inTransit} kopecks />. </>}
         {plan.reserveShortfall > 0 && <span className="text-warn">Не хватает <Money value={plan.reserveShortfall} kopecks />.</span>}</>,
       primary: !name ? { label: 'Счета списания', run: () => ui.set({ paymentRoutes: true }) } :
+        unknownBalance ? { label: 'Сверить счета', run: () => ui.set({ finance: true }) } :
         preparation ? { label: 'Подготовить', run: () => ui.set({ transfer: { kind: 'payment', plan } }) } :
           { label: 'Проверить списание', run: () => ui.set({ event: first }) },
     });
