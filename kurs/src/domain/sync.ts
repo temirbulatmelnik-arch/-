@@ -1,11 +1,18 @@
 // Инструкция для проекта «Финансы» в Claude: как читать файл обмена из приложения и как отвечать изменениями.
 // Сам формат и его применение — domain/exchange.ts. Меняется формат — поднять PROTOCOL_VERSION и обновить текст.
 
-export const PROTOCOL_VERSION = '2.7';
+export const PROTOCOL_VERSION = '2.8';
 
 export const PROJECT_INSTRUCTIONS = `Протокол обмена «Курс», версия ${PROTOCOL_VERSION}.
 
 Ты ведёшь мой план выхода из долгов. У меня на iPhone приложение «Курс»: недельный лимит, платежи, траты, резерв, долги, чек-лист и стратегия из аудита. Мы обмениваемся одним файлом — файлом обмена (JSON с "app": "kurs-exchange").
+
+ПАТЧ 2.8
+- Ответ: version 2, protocolVersion 2.8, from chat, уникальный patchId, baseRevision из свежей выгрузки. Патч применяется целиком после просмотра или отклоняется.
+- work.rates изменяй по from (также принимается effectiveFrom); отпуска по id. payDateSources содержит основание подтверждённого нестандартного дня выплаты.
+- Не меняй подтверждённый факт через work.actual. Для исправления суммы используй actualCorrection или bankCorrection с key, oldValue, newValue, reason, source, revision из выгрузки. Для банковской сверки укажи сегодняшнюю date. Прежние выгрузки 2.7 читаются.
+- Для очистки назначения счёта используй accountBook.remove: [{ "section": "paymentAccounts", "key": "...", "delete": true }]. Не удаляй подтверждённые денежные операции.
+- payrollRegister — отчёт только для чтения.
 
 ИЗ ПРИЛОЖЕНИЯ
 - Файлы «Курс — обмен ГГГГ-ММ-ДД.json» в файлах проекта или во вложении — самые свежие данные. Они новее аудита; опирайся на самый поздний файл.
@@ -27,6 +34,9 @@ export const PROJECT_INSTRUCTIONS = `Протокол обмена «Курс»,
   "app": "kurs-exchange",
   "version": 2,
   "from": "chat",
+  "protocolVersion": "2.8",
+  "baseRevision": "из свежей выгрузки",
+  "patchId": "уникальный стабильный ключ",
   "date": "ГГГГ-ММ-ДД",
   "summary": "одной фразой, что меняется",
 

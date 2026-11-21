@@ -6,11 +6,12 @@ import { TABS, TabBar } from './components/TabBar';
 import { Toast } from './components/ui';
 import { CardSheet, SavingsSheet } from './screens/Accounts';
 import { LoanSheet } from './screens/LoanSheet';
+import { PaymentQueueSheet, PaymentRoutesSheet } from './screens/PaymentQueue';
 import { TransferSheet } from './screens/TransferSheet';
 import { AddExpenseSheet } from './screens/AddExpense';
 import { BonusSheet } from './screens/BonusSheet';
 import { Budget } from './screens/Budget';
-import { CheckupSheet, useSundayCheckup } from './screens/Checkup';
+import { CheckupSheet } from './screens/Checkup';
 import { DebtSheet } from './screens/DebtSheet';
 import { EventSheet } from './screens/EventSheet';
 import { FixedSheet } from './screens/FixedSheet';
@@ -23,7 +24,7 @@ import { updateBadge } from './screens/reminders';
 import { openPaymentReminder, pushConfigured, syncPaymentPush } from './screens/paymentPush';
 import { ReserveSheet } from './screens/ReserveSheet';
 import { SettingsSheet } from './screens/Settings';
-import { SyncSheet, UnlockSheet, useInbox, usePlanUpdates } from './screens/Sync';
+import { SyncSheet, UnlockSheet } from './screens/Sync';
 import { TodaySheet } from './screens/TodaySheet';
 import { Tour, TOUR_VERSION } from './screens/Tour';
 import { Week } from './screens/Week';
@@ -76,6 +77,8 @@ const SHEETS = (
     <CardSheet />
     <LoanSheet />
     <TransferSheet />
+    <PaymentRoutesSheet />
+    <PaymentQueueSheet />
     <FixedSheet />
     <SyncSheet />
     <UnlockSheet />
@@ -126,9 +129,6 @@ function useTabScroll(tab: Tab) {
 
 export default function App() {
   useTheme();
-  usePlanUpdates();
-  useInbox();
-  useSundayCheckup();
   const ready = useStore(s => s.ready);
   const tourSeen = useStore(s => s.settings.tourSeen ?? 0);
   const tab = useUi(s => s.tab);
@@ -193,7 +193,7 @@ export default function App() {
   return (
     <MotionConfig reducedMotion="user">
       <div className="pt-safe relative mx-auto min-h-dvh w-full max-w-md overflow-x-clip pb-36">
-        <div ref={mark} aria-hidden="true" className="pointer-events-none absolute left-0 h-px w-px" style={{ top: tab === 'week' ? 360 : 150 }} />
+        <div ref={mark} aria-hidden="true" className="pointer-events-none absolute left-0 h-px w-px" style={{ top: tab === 'week' ? 310 : 150 }} />
         <Island show={island} />
         <Salute />
         <div aria-hidden="true" className="fixed inset-x-0 top-0 z-40 h-[env(safe-area-inset-top)]" style={{ background: 'var(--sky-1)' }} />

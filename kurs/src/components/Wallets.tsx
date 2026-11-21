@@ -2,7 +2,6 @@
 // резерв. Сплошная вода — свои деньги, штриховка — чужие. Нажатие — подробности счёта.
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { BridgeState } from '../domain/bridge';
-import { Roll } from './motion';
 import { Money } from './ui';
 
 const WAVE = 'M0 4 Q7.5 1 15 4 T30 4 T45 4 T60 4 T75 4 T90 4 T105 4 T120 4';
@@ -27,28 +26,31 @@ function Vessel({ label, value, caption, level, fill, ink, onClick, i, alert }: 
       </span>
       <span className="relative text-[12px] font-medium" style={{ color: ink }}>{label}</span>
       {ripple > 0 && <span key={ripple} aria-hidden="true" className="vessel-ripple absolute left-1/2 size-10 rounded-[50%] border-2" style={{ bottom: `calc(${h * 100}% - 20px)`, borderColor: ink }} />}
-      <span className={`figure relative mt-0.5 text-[17px] leading-tight ${alert ? 'text-warn' : ''}`}>{Number.isInteger(value) ? <Roll value={value} /> : <Money value={value} kopecks />}</span>
+      <span className={`figure relative mt-0.5 max-w-full whitespace-nowrap text-[clamp(15px,4.6vw,20px)] leading-tight ${alert ? 'text-warn' : ''}`}><Money value={value} kopecks /></span>
       <span className="relative mt-auto pt-1 text-[11px] leading-tight text-muted">{caption}</span>
     </button>
   );
 }
 
-export function Wallets({ card, weekLimit, loan, reserve, need, onCard, onLoan, onReserve }: {
+export function Wallets({ card, weekLimit, loan, reserve, onCard, onLoan, onReserve }: {
   /** остаток карты по учёту; null — нет точки отсчёта */
   card: number | null; weekLimit: number;
   /** мост на кредитке; null — моста нет, с кредиток не берём */
   loan: BridgeState | null;
-  reserve: number; need: number;
+  reserve: number;
   onCard: () => void; onLoan: () => void; onReserve: () => void;
 }) {
   return (
-    <div className="grid grid-cols-3 gap-2" style={{ '--own-fill': 'linear-gradient(180deg, var(--own-2), var(--own))' } as CSSProperties}>
-      <Vessel i={0} label="Свои на неделю" value={Math.max(0, card ?? 0)} caption={card == null ? 'нет сверки' : 'свободно'} level={(card ?? 0) / Math.max(1, weekLimit)}
-        fill="linear-gradient(180deg, var(--own-2), var(--own))" ink="var(--own)" onClick={onCard} />
-      <Vessel i={1} label="В долг" value={loan?.used ?? 0} caption={loan ? <>из <Money value={loan.bridge.cap} /> моста</> : 'не берём'}
-        level={loan ? loan.used / Math.max(1, loan.bridge.cap) : 0} fill="var(--loan-hatch)" ink="var(--loan)" onClick={onLoan} />
-      <Vessel i={2} label="Резерв" value={reserve} alert={reserve < need} caption={reserve < need ? <>нужно <Money value={need} /></> : 'запас есть'}
-        level={reserve / Math.max(1, need)} fill="linear-gradient(180deg, var(--rsv-2), var(--rsv))" ink="var(--rsv)" onClick={onReserve} />
+    <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-2" style={{ '--own-fill': 'linear-gradient(180deg, var(--own-2), var(--own))' } as CSSProperties}>
+        <Vessel i={0} label="Свои на неделю" value={Math.max(0, card ?? 0)} caption={card == null ? 'уточнить остаток' : 'на покупки'}
+          level={(card ?? 0) / Math.max(1, weekLimit)} fill="linear-gradient(180deg, var(--own-2), var(--own))" ink="var(--own)" onClick={onCard} />
+        <Vessel i={1} label="Резерв" value={reserve} caption="платежи и запас"
+          level={reserve / Math.max(1, weekLimit * 6)} fill="linear-gradient(180deg, var(--rsv-2), var(--rsv))" ink="var(--rsv)" onClick={onReserve} />
+      </div>
+      {loan && loan.used > 0 && <button type="button" onClick={onLoan} className="flex min-h-11 w-full flex-wrap items-center justify-between gap-1 rounded-xl bg-surface px-3 py-2 text-left text-[13px]" style={{ color: 'var(--loan)' }}>
+        <span>Кредитный мост · уже использовано</span><Money value={loan.used} kopecks />
+      </button>}
     </div>
   );
 }

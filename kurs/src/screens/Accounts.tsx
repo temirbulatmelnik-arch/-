@@ -6,6 +6,7 @@ import { useCoverage } from '../components/Coverage';
 import { NARROW } from '../domain/coverage';
 import { addDays, dayMonth, ddmm, today } from '../domain/dates';
 import { parseAmount } from '../domain/money';
+import { useLedger } from './Checkup';
 import { useStore } from '../store/store';
 import { toast, useUi } from '../store/ui';
 
@@ -24,12 +25,21 @@ function CardBody({ onClose }: { onClose: () => void }) {
   const [amount, setAmount] = useState(cardBalance ? String(cardBalance.amount) : '');
   const [date, setDate] = useState(today());
   const value = parseAmount(amount);
+  const led = useLedger();
   // прогноз — общий: резерв к вечеру, как в календаре, в «Хватит ли» и в status.coverage; от остатка карты он не зависит
   const { cov } = useCoverage();
   const s = cov.shortage, low = cov.min;
 
   return (
     <div className="space-y-4 pt-1">
+      <div className="card space-y-2 p-4 text-[14px]">
+        <div className="flex justify-between gap-2"><span>На карте по учёту</span>{led.card == null ? 'Уточнить' : <Money value={led.card} kopecks />}</div>
+        {cardBalance && <div className="flex justify-between gap-2"><span>Сверено в банке {ddmm(cardBalance.date)}</span><Money value={cardBalance.amount} kopecks /></div>}
+        {cardBalance && led.card != null && led.card !== cardBalance.amount && <div className="flex justify-between gap-2"><span>Изменение после снимка</span><Money value={led.card - cardBalance.amount} kopecks sign /></div>}
+        {led.heldOnCard > 0 && <div className="flex justify-between gap-2"><span>Под платежи</span><Money value={led.heldOnCard} kopecks /></div>}
+        {led.incomeOnCard > 0 && <div className="flex justify-between gap-2"><span>Ожидает перевода в резерв</span><Money value={led.incomeOnCard} kopecks /></div>}
+        {led.unassignedOnCard > 0 && <div className="flex justify-between gap-2"><span>Требует сверки назначения</span><Money value={led.unassignedOnCard} kopecks /></div>}
+      </div>
       <Field label="Сколько сейчас на карте" hint="От этого остатка приложение ведёт учёт карты до следующей сверки. Выписка обновит остаток сама.">
         <AmountInput value={amount} onChange={setAmount} size="md" />
       </Field>

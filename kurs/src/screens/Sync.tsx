@@ -10,7 +10,7 @@ import { usePan } from '../components/motion';
 import { Field, PrimaryButton, SecondaryButton, Segmented, Sheet, Tile } from '../components/ui';
 import { today } from '../domain/dates';
 import {
-  applyExchange, buildExchange, exchangeDigest, exchangeFileName, normalize, parseExchange, previewExchange, type ExchangeFile, type ExchangeSection, type SectionId,
+  applyExchange, buildExchange, exchangeDigest, exchangeFileName, normalize, parseExchange, prepareExchange, type ExchangeFile, type ExchangeSection, type SectionId,
 } from '../domain/exchange';
 import { downloadFile } from '../domain/ics';
 import { PROJECT_INSTRUCTIONS, PROTOCOL_VERSION } from '../domain/sync';
@@ -38,6 +38,7 @@ async function copy(text: string) {
 function Body() {
   const inbox = useUi(s => s.inbox);
   const [text, setText] = useState(inbox?.text ?? '');
+  const [errors, setErrors] = useState<string[]>([]);
   const [file, setFile] = useState<ExchangeFile | null>(null);
   const [sections, setSections] = useState<ExchangeSection[]>([]);
   const [off, setOff] = useState<Set<SectionId>>(new Set());
@@ -63,7 +64,10 @@ function Body() {
     const p = parseExchange(raw);
     if (!p) { toast('Не нашёл файл обмена: нужен JSON с "app": "kurs-exchange"'); return; }
     const f = normalize(p, useStore.getState());
-    const list = previewExchange(f, useStore.getState(), today());
+    const result = prepareExchange(f, useStore.getState(), today());
+    setErrors(result.errors);
+    const list = result.sections;
+    if (result.errors.length) return;
     if (!list.length) { toast('В файле нет ничего нового'); return; }
     setFile(f); setSections(list); setOff(new Set()); setDigest(exchangeDigest(f, useStore.getState(), today()));
   };
@@ -76,10 +80,13 @@ function Body() {
   };
   const apply = () => {
     if (!file) return;
-    seenInbox();
     const s = useStore.getState();
     const only = new Set(sections.map(x => x.id).filter(id => !off.has(id)));
-    s.applySync(applyExchange(file, s, today(), only, uid), file.summary || digest.join('; ') || 'Изменения из чата');
+    const patch = applyExchange(file, s, today(), only, uid);
+    if (!Object.keys(patch).length) { setFile(null); setErrors(['Данные изменились. Разберите актуальный файл ещё раз.']); return; }
+    const corrections = sections.find(x => x.id === 'corrections')?.lines;
+    s.applySync(patch, corrections?.join(' · ') || file.summary || digest.join(' · ') || 'Изменения из чата');
+    seenInbox();
     toast('Изменения из чата применены');
     setFile(null); setText('');
     useUi.getState().set({ sync: false });
@@ -98,6 +105,19 @@ function Body() {
   };
 
   // ответ чата разобран — на экране только его изменения, по одному
+  if (file && (file.recovery || file.protocolVersion === '2.8')) {
+    return <div className="space-y-3">
+      <h3 className="text-[17px] font-medium">{file.recovery ? 'Безопасное восстановление' : 'До и после применения'}</h3>
+      {file.summary && <p>{file.summary}</p>}
+      {digest.map(line => <p key={line} className="text-[13px] text-muted">{line}</p>)}
+      {sections.map(section => <details className="card p-4" key={section.id} open={section.id === 'corrections'}>
+        <summary className="min-h-8 font-medium">{section.title} · {section.lines.length}</summary>
+        <ul className="space-y-2 text-[13px] [overflow-wrap:anywhere]">{section.lines.map((line, index) => <li key={index}>{line}</li>)}</ul>
+      </details>)}
+      <PrimaryButton onClick={apply}>{file.recovery ? 'Восстановить недостающее' : 'Подтвердить и применить весь патч'}</PrimaryButton>
+      <SecondaryButton onClick={() => setFile(null)} className="w-full">Назад</SecondaryButton>
+    </div>;
+  }
   if (file) {
     return <Review file={file} sections={sections} digest={digest} off={off} decide={decide} onBack={() => { seenInbox(); setFile(null); }} onApply={apply} />;
   }
@@ -134,6 +154,9 @@ function Body() {
       <section className="card space-y-3 p-4">
         <h3 className="flex items-center gap-2.5 text-[15px] font-medium"><Tile c="#1f8fb0" className="size-8 !rounded-[10px]"><ArrowDownToLine size={16} strokeWidth={2} /></Tile>Из чата в приложение</h3>
         <p className="text-[13.5px] leading-snug">Попросите в чате: <i>«внеси изменения в приложение»</i>. Чат ответит файлом обмена — блоком кода или файлом. Вставьте ответ целиком или выберите файл.</p>
+        {errors.length > 0 && <ul role="alert" className="space-y-1 rounded-xl bg-neg/10 p-3 text-[13px] text-neg">
+          {errors.map((error, index) => <li key={index}>{error}</li>)}
+        </ul>}
         <textarea value={text} onChange={e => setText(e.target.value)} rows={5} placeholder='{ "app": "kurs-exchange", … }' className="field font-mono text-[13px]" />
         <input ref={picker} type="file" accept="application/json,.json,.txt,text/plain" hidden onChange={async e => {
           const f = e.target.files?.[0];
@@ -156,7 +179,9 @@ function Body() {
               <div key={r.id} className="flex items-start gap-3 py-2.5">
                 <span className="min-w-0 flex-1 text-[13px] leading-snug"><span className="text-muted">{new Date(r.at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span><br />{r.summary}</span>
                 <button type="button" className="shrink-0 rounded-full border border-line px-3 py-1.5 text-[12.5px] font-medium"
-                  onClick={() => { if (confirm('Вернуть данные к виду до этого импорта? Более поздние импорты тоже отменятся.')) { useStore.getState().rollbackImport(r.id); toast('Импорт откатан'); } }}>Откатить</button>
+                  onClick={() => { if (confirm('Вернуть данные к виду до этого импорта? Более поздние импорты тоже отменятся.')) { useStore.getState().rollbackImport(r.id);
+                    toast(useStore.getState().imports.some(entry => entry.id === r.id)
+                      ? 'После импорта были новые записи. Они сохранены, откат отменён.' : 'Импорт откатан'); } }}>Откатить</button>
               </div>
             ))}
           </div>
@@ -317,18 +342,6 @@ export async function checkInbox(): Promise<boolean> {
     useUi.getState().set({ sync: true, inbox: { id: sealed.id, text: plain } });
     return true;
   } catch { return false; /* нет сети или файла */ }
-}
-
-/** При запуске — проверить новую редакцию плана */
-export function usePlanUpdates() {
-  const ready = useStore(s => s.ready);
-  useEffect(() => { if (ready) void checkPlan(); }, [ready]);
-}
-
-/** При запуске — проверить файл обмена с сайта */
-export function useInbox() {
-  const ready = useStore(s => s.ready);
-  useEffect(() => { if (ready) void checkInbox(); }, [ready]);
 }
 
 export function UnlockSheet() {

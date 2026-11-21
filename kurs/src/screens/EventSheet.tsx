@@ -44,7 +44,8 @@ function Body({ e }: { e: CalEvent }) {
   const group = eventGroup(e);
   const pay = e.payroll;
   const status = incomeStatus(e, mark);
-  const locked = e.economicType === 'loan_disbursement' || pay?.documented ||
+  const [bankVerified, setBankVerified] = useState(false);
+  const locked = e.economicType === 'loan_disbursement' || (pay?.documented && !bankVerified && !mark?.done) ||
     e.projection === 'conditional' || e.projection === 'internal_transfer';
 
   // пополнение по воскресеньям: до лимита следующей недели минус остаток уходящей
@@ -61,7 +62,7 @@ function Body({ e }: { e: CalEvent }) {
   const [account, setAccount] = useState(assigned ?? (e.kind === 'payment' ? '' : LIFE_ACCOUNT));
   const prep = paymentPreparations([{ ...e, accountId: assigned, prepareOn: override?.prepareOn ?? e.prepareOn }], mark ? { [e.key]: mark } : {}, led.heldForPayments, led.reserve)[0];
   const from = account === LIFE_ACCOUNT ? 'card' : 'reserve';
-  const [paidDate, setPaidDate] = useState(() => moscowClock().date);
+  const [paidDate, setPaidDate] = useState(() => pay?.documented && pay.actualPayDate ? pay.actualPayDate : moscowClock().date);
   const [principal, setPrincipal] = useState('');
   const [interest, setInterest] = useState('');
   const [fee, setFee] = useState('');
@@ -79,9 +80,10 @@ function Body({ e }: { e: CalEvent }) {
       else toast('Пополнение уже отмечено или остатки требуют сверки');
       return;
     }
+    if (pay?.documented && !bankVerified) return;
     if (e.kind === 'payment' && partial && value >= e.amount) { toast('Для частичного платежа введите меньшую сумму'); return; }
     if (isBonus(e) && !e.nominalDate && e.economicType !== 'loan_disbursement') { set({ event: null, bonus: { event: { ...e, amount: value } } }); return; }
-    markEvent(e, true, value, from, { accountId: account || undefined, partialId: partial ? partialId : undefined, principal: parseAmount(principal) ?? undefined,
+    markEvent(e, true, value, from, { accountId: account || undefined, bankVerified, partialId: partial ? partialId : undefined, principal: parseAmount(principal) ?? undefined,
       interest: parseAmount(interest) ?? undefined, fee: parseAmount(fee) ?? undefined, paidDate,
       ...(gross || withheld || otherWithheld ? { payrollActual: { gross: parseAmount(gross) ?? undefined,
         tax: parseAmount(withheld) ?? undefined, otherWithheld: parseAmount(otherWithheld) ?? undefined } } : {}),
@@ -147,6 +149,7 @@ function Body({ e }: { e: CalEvent }) {
             <Row label={pay.actualGrossKnown ? 'Начислено по листку' : 'Оценка начисления'}>{pay.gross ? <Money value={pay.gross} approx={!pay.actualGrossKnown} kopecks /> : 'Нет данных'}</Row>
             <Row label={pay.actualTaxKnown ? 'НДФЛ по листку' : 'Оценка НДФЛ'}><Money value={pay.tax} approx={!pay.actualTaxKnown} kopecks /></Row>
             {!!pay.taxDeduction && <Row label="Предполагаемый вычет"><Money value={pay.taxDeduction} approx /></Row>}
+            {pay.workDays != null && <Row label="Рабочие дни">{pay.paidDays} из {pay.workDays} · 1–15 числа {pay.firstPaidDays} из {pay.firstWorkDays}</Row>}
             <Row label="Основание">{pay.documentarySource ?? pay.source}</Row>
           </>}
           {e.dateMode !== 'month' && !mark?.done && actionableEvent(e) && <Row label="Осталось">{relDays(now, e.date)}</Row>}
@@ -162,12 +165,14 @@ function Body({ e }: { e: CalEvent }) {
           Вернуть остаток в резерв <Money value={mark?.done || row.accountId !== assigned ? row.amount : row.amount - e.amount} kopecks />
         </SecondaryButton>)}
       {locked ? (
-        <p className="rounded-2xl bg-surface-2 px-4 py-3 text-[14px] text-muted">
+        <div className="space-y-2"><p className="rounded-2xl bg-surface-2 px-4 py-3 text-[14px] text-muted">
           {e.economicType === 'loan_disbursement' ? 'Подтверждённое заёмное поступление. В доходы не входит.'
-            : pay?.documented ? 'Историческая выплата по документам. Банковское движение не создаётся.'
+            : pay?.documented ? 'Сумма известна по расчётному листку. Для банковского зачисления сверьте дату и сумму по выписке.'
             : e.projection === 'internal_transfer' ? 'Пополнение своего счёта. В обязательные расходы не входит.'
             : 'Условная досрочка. После прихода денег допустимую сумму проверяет осторожный прогноз.'}
         </p>
+        {pay?.documented && !mark?.done && <SecondaryButton onClick={() => setBankVerified(true)} className="w-full">Есть зачисление в выписке</SecondaryButton>}
+        </div>
       ) : mark?.done ? (
         <>
           <p className="rounded-2xl bg-pos/10 px-4 py-3 text-[14px] text-pos">

@@ -47,6 +47,7 @@ export interface PayrollProfile {
   actual?: Record<string, PayrollActual>;
   extras?: Record<string, PayrollExtra>;
   payDates?: Record<string, string>;
+  payDateSources?: Record<string, string>;
   aliases?: Record<string, string>;
 }
 
@@ -83,6 +84,7 @@ export interface WorkPay {
   actualNet?: number;
   actualMonth?: string;
   documented?: boolean;
+  bankConfirmed?: boolean;
   documentarySource?: string;
   actualGrossKnown?: boolean;
   actualTaxKnown?: boolean;
@@ -96,6 +98,11 @@ export interface WorkPay {
   confidence: NonNullable<CalEvent['confidence']>;
   source: string;
   provisionalCalendar: boolean;
+  workDays?: number;
+  firstWorkDays?: number;
+  paidDays?: number;
+  firstPaidDays?: number;
+  cashYear?: number;
   vacationId?: string;
 }
 
@@ -120,7 +127,7 @@ export function with2027Unit(profile: PayrollProfile, unit: number): PayrollProf
 }
 const PAYMENTS = {
   advance: { day: 25, title: 'Аванс' }, salary: { day: 10, title: 'Зарплата' },
-  bonusMonthly: { day: 15, title: 'Ежемесячная премия' },
+  bonusMonthly: { day: 15, title: 'Ежемесячное поощрение' },
 } as const;
 export const isRegularWork = (kind?: IncomeKind) => kind === 'advance' || kind === 'salary' || kind === 'bonusMonthly';
 
@@ -132,7 +139,7 @@ export function payComponents(r: PayRate) {
   const bonus = position * r.monthlyBonus;
   const base = position + rank + seniority + conditions;
   return { position: rubles(position), rank: rubles(rank), seniority: rubles(seniority),
-    conditions: rubles(conditions), base: rubles(base), bonus: Math.round(bonus / 100), total: rubles(base) + Math.round(bonus / 100) };
+    conditions: rubles(conditions), base: rubles(base), bonus: rubles(Math.round(bonus)), total: rubles(base + Math.round(bonus)) };
 }
 
 const dateRange = (from: string, to: string): string[] => {
@@ -162,6 +169,8 @@ const payKinds = new Set<IncomeKind>(['salary', 'advance', 'bonusMonthly', 'bonu
 
 export function validPayroll(profile: PayrollProfile): boolean {
   if (!profile || !validDate(profile.from) || !Array.isArray(profile.rates) || !profile.rates.length) return false;
+  if (profile.advancesBy != null && profile.advancesBy !== 'days' && profile.advancesBy !== 'hours') return false;
+  if (profile.accountId != null && (typeof profile.accountId !== 'string' || !profile.accountId.trim())) return false;
   if (profile.cautiousUnit2027 != null && (!validAmount(profile.cautiousUnit2027) || profile.cautiousUnit2027 <= 0)) return false;
   if (!profile.rates.every(r => r && validDate(r.from) && validAmount(r.unit) && r.unit > 0 &&
       [r.positionUnits, r.rankUnits, r.seniority, r.conditions, r.monthlyBonus].every(amount => validAmount(amount) && amount >= 0) &&
@@ -190,6 +199,7 @@ export function validPayroll(profile: PayrollProfile): boolean {
       Number.isFinite(a.paidDays) && a.paidDays >= 0 && a.paidDays <= 31 &&
       Number.isFinite(a.firstPaidDays) && a.firstPaidDays >= 0 && a.firstPaidDays <= Math.min(15, a.paidDays))
     && Object.values(profile.payDates ?? {}).every(validDate)
+    && Object.values(profile.payDateSources ?? {}).every(value => typeof value === 'string' && !!value.trim())
     && Object.values(profile.aliases ?? {}).every(key => typeof key === 'string' && !!key)
     && new Set(Object.values(profile.aliases ?? {})).size === Object.keys(profile.aliases ?? {}).length
     && Object.values(profile.extras ?? {}).every(e => e && validDate(e.date) && payKinds.has(e.kind) &&
@@ -218,25 +228,29 @@ export function accrual(profile: PayrollProfile, month: string) {
   const firstDays = workDays.filter(d => Number(d.date.slice(8)) <= 15).length;
   const monthRate = workDays[0]?.rate;
   const attendance = profile.attendance?.[month];
-  let base = 0, advance = 0, monthly = 0;
+  let base = 0, advance = 0, monthly = 0, paidDays = 0, firstPaidDays = 0;
   for (const day of workDays) {
     if (!day.rate || day.vacation) continue;
     const allowed = Math.max(0, day.norm - Math.max(0, profile.absenceHours?.[day.date] ?? 0));
     const units = byHours ? allowed : allowed / day.norm;
+    paidDays += allowed / day.norm;
+    if (Number(day.date.slice(8)) <= 15) firstPaidDays += allowed / day.norm;
     const c = payComponents(day.rate);
     base += cents(c.base) * units / norm;
     monthly += day.rate.unit * day.rate.positionUnits * day.rate.monthlyBonus * units / norm;
     if (Number(day.date.slice(8)) <= 15) advance += cents(c.base) * units / norm;
   }
   if (attendance && !byHours && monthRate && workDays.every(d => d.rate === monthRate)) {
-    base = cents(payComponents(monthRate).base) * Math.min(attendance.paidDays, norm) / norm;
-    advance = cents(payComponents(monthRate).base) * Math.min(attendance.firstPaidDays, firstDays) / norm;
-    monthly = monthRate.unit * monthRate.positionUnits * monthRate.monthlyBonus * Math.min(attendance.paidDays, norm) / norm;
+    paidDays = Math.min(attendance.paidDays, norm);
+    firstPaidDays = Math.min(attendance.firstPaidDays, firstDays, paidDays);
+    base = cents(payComponents(monthRate).base) * paidDays / norm;
+    advance = cents(payComponents(monthRate).base) * firstPaidDays / norm;
+    monthly = monthRate.unit * monthRate.positionUnits * monthRate.monthlyBonus * paidDays / norm;
   }
   const gross = Math.round(base);
   const first = Math.round(advance);
-  return { base: rubles(gross), advance: rubles(first), salary: rubles(gross - first), bonusMonthly: Math.round(kopecks(monthly)),
-    days: workDays.length, firstDays };
+  return { base: rubles(gross), advance: rubles(first), salary: rubles(gross - first), bonusMonthly: kopecks(monthly),
+    days: workDays.length, firstDays, paidDays: kopecks(paidDays), firstPaidDays: kopecks(firstPaidDays) };
 }
 
 const TAX = [[2_400_000, 13], [5_000_000, 15], [20_000_000, 18], [50_000_000, 20], [Infinity, 22]] as const;
@@ -268,12 +282,15 @@ export function workPayments(profile: PayrollProfile, from: string, to: string, 
       const nominalDate = dayIn(nominalMonth, item.day);
       const key = `inc:${kind}:${nominalMonth}`;
       const normalDate = workdayOnOrBefore(nominalDate, off);
-      const expectedPayDate = profile.payDates?.[key] ?? normalDate;
+      const manualDate = profile.payDates?.[key];
+      const accepted = !!manualDate && !!profile.payDateSources?.[key]?.trim();
+      const expectedPayDate = accepted ? manualDate : normalDate;
       if (nominalDate < profile.from) continue;
       const provisionalCalendar = !calendarApproved(Number(nominalDate.slice(0, 4)));
       const confidence = provisionalCalendar ? 'estimate' : 'regular';
       lines.push({ key, kind, title: item.title, accrualPeriod: m, nominalDate, expectedPayDate,
-        ...(normalDate !== expectedPayDate ? { alternatePayDate: normalDate } : {}),
+        ...(manualDate && manualDate !== normalDate ? { alternatePayDate: accepted ? normalDate : manualDate } : {}),
+        workDays: calc.days, firstWorkDays: calc.firstDays, paidDays: calc.paidDays, firstPaidDays: calc.firstPaidDays,
         gross: calc[kind], source: rate.source ?? 'Параметры работодателя', confidence, provisionalCalendar });
     }
   }
@@ -313,8 +330,11 @@ export function workPayments(profile: PayrollProfile, from: string, to: string, 
     if (actual.net == null || !actual.kind || lines.some(p => p.key === key)) continue;
     const date = actual.payDate ?? (actual.payMonth && dayIn(actual.payMonth, 'last'));
     if (!date) continue;
-    lines.push({ key, kind: actual.kind, title: actual.title ?? 'Выплата по документам', accrualPeriod: actual.accrualPeriod ?? monthKey(date),
-      nominalDate: date, expectedPayDate: date, gross: actual.gross ?? 0,
+    const regular = isRegularWork(actual.kind) && key.startsWith(`inc:${actual.kind}:`) && actual.payMonth
+      ? PAYMENTS[actual.kind as keyof typeof PAYMENTS] : null;
+    const nominalDate = regular ? dayIn(actual.payMonth!, regular.day) : date;
+    lines.push({ key, kind: actual.kind, title: actual.title ?? regular?.title ?? 'Выплата по документам', accrualPeriod: actual.accrualPeriod ?? monthKey(date),
+      nominalDate, expectedPayDate: regular ? workdayOnOrBefore(nominalDate, off) : date, gross: actual.gross ?? 0,
       source: actual.verifiedBy ?? 'Расчётный листок', confidence: 'confirmed', provisionalCalendar: false });
   }
   const actualDate = (line: GrossPay) => {
@@ -344,8 +364,8 @@ export function workPayments(profile: PayrollProfile, from: string, to: string, 
     if (within) bases.set(year, before + taxable);
     if (date < from || date > to) return [];
     const net = Math.max(0, kopecks(gross - tax - (actual?.otherWithheld ?? 0)));
-    return [{ ...p, gross, tax, net, actualPayDate, actualNet, actualMonth: actualNet != null ? monthKey(date) : undefined,
-      documented: actual?.net != null, documentarySource: actual?.verifiedBy,
+    return [{ ...p, gross, tax, net, cashYear: Number(year), actualPayDate, actualNet, actualMonth: actualNet != null ? monthKey(date) : undefined,
+      documented: actual?.net != null, bankConfirmed: paid?.done === true, documentarySource: actual?.verifiedBy,
       actualGrossKnown: actual?.gross != null, actualTaxKnown: actual?.tax != null, taxDeduction, recordedForecast: actual?.expectedNet,
       ...(known || actualNet != null ? {} : { netRange: [kopecks(gross * 0.78), kopecks(gross * 0.87)] as [number, number] }) }];
   });

@@ -9,7 +9,7 @@ import { INSTALL_URL } from '../install/platform';
 import { useStore } from '../store/store';
 import { CATEGORY } from '../domain/plan';
 import { toast, useUi } from '../store/ui';
-import { disablePaymentPush, enablePaymentPush, pushConfigured, pushEnabled, testPaymentPush } from './paymentPush';
+import { disablePaymentPush, enablePaymentPush, paymentPushDiagnostics, pushConfigured, pushEnabled, testPaymentPush } from './paymentPush';
 import { enableBadge, exportCalendar, exportCalendarTest, reminderDiagnostics, updateBadge } from './reminders';
 
 export function SettingsSheet() {
@@ -208,6 +208,12 @@ function Body() {
 
 function ReminderStatus() {
   const [enabled, setEnabled] = useState(pushEnabled);
+  const [technical, setTechnical] = useState<Awaited<ReturnType<typeof paymentPushDiagnostics>> | null>(null);
+  useEffect(() => {
+    let active = true;
+    void paymentPushDiagnostics().then(value => { if (active) setTechnical(value); }).catch(() => {});
+    return () => { active = false; };
+  }, [enabled]);
   const [busy, setBusy] = useState(false);
   const status = reminderDiagnostics();
   const permissions = { granted: 'разрешение выдано', denied: 'разрешение запрещено', default: 'разрешение не запрашивали', unavailable: 'разрешение недоступно' };
@@ -215,6 +221,10 @@ function ReminderStatus() {
     <p>Режим {status.mode ? 'с экрана «Домой»' : 'в браузере'}. {status.online ? 'Сеть доступна.' : 'Сети нет. Календарь работает с ранее импортированными событиями.'}</p>
     <p>Web Push {status.worker && status.push ? 'поддерживается устройством' : 'недоступен в этом режиме'}, {permissions[status.permission]}.</p>
     {pushConfigured ? <>
+      {technical && <p>Подписка {technical.subscribed ? 'есть' : 'отсутствует'}. Отправитель {
+        technical.backend === 'online' ? 'ответил' : technical.backend === 'unavailable' ? 'не ответил' : 'ожидает проверки'}.
+        {technical.latestSync && <> Последняя сверка {new Date(technical.latestSync).toLocaleString('ru-RU')}.</>}
+        {technical.scheduled != null && <> Напоминаний в очереди {technical.scheduled}.</>}</p>}
       <Switch checked={enabled} onChange={async next => {
         if (busy) return;
         setBusy(true);

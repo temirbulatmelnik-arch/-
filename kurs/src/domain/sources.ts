@@ -17,11 +17,8 @@ export interface SpendState {
   bridge?: Bridge | null;
 }
 
-/** Что предложить: карта, пока на ней есть недельные деньги; карта пуста, а на неделе есть мост — кредитка моста */
-export function suggestSource(s: SpendState, date: string): Source {
-  const m = weekMoney(s.expenses, s.debts, s.weeklyOverrides, s.bridge, weekStart(date));
-  return m.creditCap > 0 && m.cardLeft <= 0 && m.creditLeft > 0 ? 'credit' : 'life';
-}
+/** Новый расход по умолчанию использует собственные деньги; кредитка выбирается вручную. */
+export const DEFAULT_SPEND_SOURCE: Source = 'life';
 
 export interface SpendEffect {
   text: string;

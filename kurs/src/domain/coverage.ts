@@ -60,6 +60,7 @@ export interface Coverage {
   paymentFunding?: PaymentFunding[];
   transferFunding?: TransferFunding[];
   bufferRisk?: { date: string; amount: number } | null;
+  maxShortfall: number;
   shortage: { date: string; title: string; amount: number } | null;
 }
 
@@ -119,7 +120,7 @@ function bridgeEvents(input: CoverageInput, from: string, to: string): { extra: 
   return { extra, minUp };
 }
 
-function run(input: CoverageInput, from: string, to: string, shift?: { key: string; date: string }, scenario: Scenario = 'base'): Omit<Coverage, 'narrow' | 'months' | 'shortage'> {
+function run(input: CoverageInput, from: string, to: string, shift?: { key: string; date: string }, scenario: Scenario = 'base'): Omit<Coverage, 'narrow' | 'months' | 'shortage' | 'maxShortfall'> {
   const { marks } = input;
   // всё неотмеченное до сегодня включительно — платежи, поступления, воскресное пополнение карты — входит сегодняшним
   // днём: в учёте резерва этих денег ещё нет (не ушли и не пришли). В день платежа, пока он не отмечен, прогноз
@@ -183,7 +184,7 @@ export interface TransferFunding {
 
 const REGULAR = new Set(['salary', 'advance', 'bonusMonthly']);
 function includeIncome(e: CalEvent, scenario: Scenario): boolean {
-  if (!cashIncomeEvent(e) || e.payroll?.documented) return false;
+  if (!cashIncomeEvent(e) || e.payroll?.documented || e.payroll?.bankConfirmed) return false;
   if (e.payroll?.vacationId) return true;
   if (incomeStatus(e) === 'conditional') return scenario === 'base';
   if (e.confidence === 'confirmed' || e.confidence === 'regular' || (e.incomeKind && REGULAR.has(e.incomeKind))) return true;
@@ -314,10 +315,11 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
           available: rubles(Math.min(cents(group.inTransit), Math.max(0, balanceOn(LIFE_ACCOUNT) ?? 0))),
           status: routeUnverified ? 'unverified' : 'projected' });
       }
+      const unverifiedFunding = !e.accountId || physical == null || (preparing && e.accountId !== RESERVE_ACCOUNT && balanceOn(RESERVE_ACCOUNT) == null);
       paymentFunding.push({ key: e.key, date, title: e.title, accountId: e.accountId, amount: rubles(amount),
-        available: available == null ? null : rubles(available),
-        shortfall: !e.accountId || available == null ? null : rubles(Math.max(0, amount - available)), prepareBy: group?.remindDate ?? addDays(e.date, -1),
-        ...(group ? { held: group.prepared, fromReserve: group.toFund, inTransit: group.inTransit, reserveShortfall: group.reserveShortfall } : {}) });
+        available: unverifiedFunding || available == null ? null : rubles(available),
+        shortfall: unverifiedFunding || available == null ? null : rubles(Math.max(0, amount - available)), prepareBy: group?.remindDate ?? addDays(e.date, -1),
+        ...(group ? { held: group.prepared, fromReserve: unverifiedFunding ? null : group.toFund, inTransit: group.inTransit, reserveShortfall: unverifiedFunding ? undefined : group.reserveShortfall } : {}) });
       if (group?.accountId && group.accountId !== RESERVE_ACCOUNT) {
         move(group.accountId, -(available ?? 0));
         move(LIFE_ACCOUNT, -cents(group.inTransit));
@@ -418,8 +420,8 @@ export function coverage(input: CoverageInput, from: string, scenario: Scenario 
   }
 
   const firstNeg = base.start < 0 ? { balance: base.start, date: from, title: 'Остатки на начало прогноза' } : steps.find(s => s.balance < 0);
-  const shortage = firstNeg ? { date: firstNeg.date, title: firstNeg.title, amount: -Math.min(firstNeg.balance, ...steps.filter(s => s.date >= firstNeg.date).map(s => s.balance)) } : null;
-  return { ...base, narrow, months: [...months.values()], shortage, to, min };
+  const shortage = firstNeg ? { date: firstNeg.date, title: firstNeg.title, amount: -firstNeg.balance } : null;
+  return { ...base, narrow, months: [...months.values()], shortage, maxShortfall: Math.max(0, -Math.min(base.start, min?.balance ?? base.start)), to, min };
 }
 
 export const COVERAGE_SCENARIOS = ['base', 'cautious', 'stress'] as const;
@@ -454,7 +456,7 @@ export function compareCoverage(input: CoverageInput, from: string, to: string) 
     const criticalDates = cov.narrow.filter(step => step.balance < 0).slice(0, 5)
       .map(({ date, title, balance }) => ({ date, title, balance }));
     return { scenario, from, to, min, minDate: cov.min && cov.min.balance < cov.start ? cov.min.date : from,
-      firstShortage: cov.shortage, accountRisk: cov.accountRisk, bufferRisk: cov.bufferRisk,
+      firstShortage: cov.shortage, maxShortfall: cov.maxShortfall, accountRisk: cov.accountRisk, bufferRisk: cov.bufferRisk,
       assumptions: SCENARIO_ASSUMPTIONS[scenario], criticalDates, changedFlows,
       comparisonDate, closingOnComparisonDate: rubles(cents(cov.start) + flows.forecastIncome + flows.conditionalIncome + flows.expenses),
       flowsOnComparisonDate: { forecastIncome: rubles(flows.forecastIncome), conditionalIncome: rubles(flows.conditionalIncome), expenses: rubles(-flows.expenses) } };
@@ -488,12 +490,6 @@ export function coverageHints(input: CoverageInput, from: string, cov: Coverage)
       const ok = !moved.steps.some(x => x.balance < 0);
       hints.push({ text: `Перенести пополнение карты ${ddmm(top.date)} на ${ddmm(income.date)} (${income.title})${ok ? ' — нехватка закрывается' : ' — не хватает всё равно'}`, closes: ok });
     }
-  }
-  const b = activeBridge(input.bridge);
-  if (b) {
-    const planned = b.weeks.reduce((sum, w) => sum + w.fromCredit, 0);
-    const room = Math.max(0, b.cap - planned);
-    if (room > 0) hints.push({ text: `Мост на Сбер-кредитке на неделю до ${ddmm(s.date)}: ещё до ${room.toLocaleString('ru-RU')} ₽ — только покупки, из недельных денег`, closes: room >= s.amount });
   }
   const oneOff = cov.steps.filter(x => x.kind === 'payment' && x.date <= s.date && x.key && !x.key.startsWith('pay:') && !x.key.startsWith('fix:'));
   for (const o of oneOff) hints.push({ text: `Если «${o.title}» ещё не оплачено — сдвинуть или уменьшить`, closes: -o.delta >= s.amount });

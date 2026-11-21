@@ -34,6 +34,7 @@ function Accounts() {
   const show = (p: { card?: true; reserve?: true }) => set({ finance: false, ...p });
   return <>
     <div className="card divide-y divide-line p-4">
+      <button type="button" className="min-h-11 w-full text-left text-sea" onClick={() => set({ finance: false, paymentRoutes: true })}>Счета списания</button>
       <AccountRow name="Карта жизни" value={led.card} onClick={() => show({ card: true })} />
       <AccountRow name="Резерв" value={led.reserveVerified ? led.reserve : null} onClick={() => show({ reserve: true })} />
       {led.cashAccounts.map(a => <AccountRow key={a.id} name={a.name} value={a.expected} onClick={() => setAccount(a)} />)}
@@ -180,7 +181,8 @@ function Journal() {
   return <>
     <div className="card space-y-1 p-4 text-[13px]">
       <h3 className="font-medium">Движение по долгам за {monthKey(now)}</h3>
-      <p>Заёмные зачисления <Money value={activity.loanDisbursements} /> · траты по кредиткам <Money value={activity.creditPurchases} /></p>
+      <p>Комиссии <Money value={activity.fees} kopecks /> · проценты <Money value={activity.interest} kopecks /> · погашено тело <Money value={activity.principal} kopecks /></p>
+      <p>Заёмные зачисления <Money value={activity.loanDisbursements} kopecks /> · покупки с кредиток <Money value={activity.creditPurchases} kopecks /></p>
       <p>Проценты <Money value={activity.interest} /> · комиссии <Money value={activity.fees} /></p>
       <p>Погашено тело долга <Money value={activity.principal} /></p>
       {activity.unknownPrincipal > 0 && <p className="text-muted">Платежи без разбивки <Money value={activity.unknownPrincipal} /></p>}

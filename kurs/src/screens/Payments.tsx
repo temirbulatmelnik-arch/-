@@ -99,6 +99,10 @@ export function Payments() {
           <span className="min-w-0 flex-1">{said.text}</span><ChevronRight size={16} className="shrink-0 opacity-70" />
         </button>
       )}
+      <div className="mx-4 mt-3 grid grid-cols-2 gap-2 text-[13px]">
+        <button type="button" className="min-h-11 rounded-xl bg-surface px-2 text-sea" onClick={() => set({ paymentQueue: true })}>Все платежи</button>
+        <button type="button" className="min-h-11 rounded-xl bg-surface px-2 text-sea" onClick={() => set({ workSheet: true })}>Работа и доходы</button>
+      </div>
       <Pager<PayView> className="mt-3" value={view === 'month' ? 'month' : 'list'} onChange={v => set({ payView: v })} pages={[
         { id: 'list', label: 'Лента', render: () => <ListView month={month} events={events} total={total} incomes={incomes} /> },
         { id: 'month', label: 'Месяц', render: () => <MonthView months={[prev, cur, next]} selected={selected} onSelect={setPicked} onShift={shift} flip={flip} /> },

@@ -276,7 +276,7 @@ export function WeekScene({ today, children, overlay }: { today: number; childre
   const { sun, moon, warm } = useSunset(130, 16_000, 34);
   return (
     <div className="relative">
-      <svg viewBox="0 34 390 478" className="block h-auto w-full" role="img"
+      <svg viewBox="0 34 390 478" preserveAspectRatio="xMidYMax slice" className="block h-[clamp(270px,39dvh,350px)] w-full" role="img"
         aria-label="Нева на закате, Дворцовый мост разводится">
         <defs>
           <SkyGradients id="ws" />

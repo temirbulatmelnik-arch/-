@@ -1,13 +1,14 @@
 import { useCoverage } from '../components/Coverage';
 import { annualIncome, INCOME_GROUPS } from '../domain/annualIncome';
+import { payrollRegister } from '../domain/payrollRegister';
 import { compare2027Coverage } from '../domain/coverage';
 import { useMemo, useState } from 'react';
 import { Field, Money, PrimaryButton, SecondaryButton, Segmented, Sheet } from '../components/ui';
 import { accountOptions, LIFE_ACCOUNT, validDate } from '../domain/accounts';
 import { cashIncomeEvent, eventsBetween, incomeStatus, INCOME_STATUS_LABEL } from '../domain/calendar';
-import { ddmmyyyy } from '../domain/dates';
+import { addDays, ddmm, ddmmyyyy } from '../domain/dates';
 import { parseAmount } from '../domain/money';
-import { payComponents, payRateOn, progressiveTax, UNIT_2027, UNIT_REFERENCE, vacationDays, vacationGross, with2027Unit, type PayrollProfile, type PayRate, type Vacation } from '../domain/payroll';
+import { isRegularWork, payComponents, payRateOn, progressiveTax, UNIT_2027, UNIT_REFERENCE, vacationDays, vacationGross, with2027Unit, type PayrollProfile, type PayRate, type Vacation } from '../domain/payroll';
 import { uid, useStore } from '../store/store';
 import { toast, useCal, useToday, useUi } from '../store/ui';
 
@@ -53,8 +54,11 @@ function Income({ profile, now, calendar }: { profile: PayrollProfile; now: stri
   const cautious = useMemo(() => annualIncome(law, 2027, now, 'cautious'), [law, now]);
   const events = useMemo(() => eventsBetween(year === '2027' && unit === 'law' ? law : cal, year + '-01-01', year + '-12-31')
     .filter(cashIncomeEvent), [cal, law, year, unit]);
-  const upcoming = events.find(e => !cal.marks?.[e.key]?.done && !e.payroll?.documented && e.date >= now);
-  const relevant = calendar ? events : upcoming ? [upcoming] : [];
+  const nearby = useMemo(() => eventsBetween(cal, now, addDays(now, 70)).filter(e => cashIncomeEvent(e) &&
+    isRegularWork(e.incomeKind) && !cal.marks?.[e.key]?.done && !e.payroll?.documented && !e.payroll?.bankConfirmed).slice(0, 3), [cal, now]);
+  const relevant = calendar ? events : [];
+  const missing = useMemo(() => calendar ? payrollRegister(year === '2027' && unit === 'law' ? law : cal, Number(year), Number(year))
+    .regular.filter(r => r.status === 'missing') : [], [calendar, year, unit, law, cal]);
   const firstRate = payRateOn(profile, '2026-12-31');
   const nextRate = payRateOn(profile, '2027-01-01');
   const result = year === '2026' ? historical : main;
@@ -62,6 +66,15 @@ function Income({ profile, now, calendar }: { profile: PayrollProfile; now: stri
   const amount = (value: number | null) => value == null ? '—' : <Money value={value} />;
 
   return <>
+    {!calendar && nearby.length > 0 && <section className="card divide-y divide-line px-4">
+      <h3 className="pt-3 text-[15px] font-medium">Ближайшие выплаты от работодателя</h3>
+      {nearby.map(e => <button className="flex min-h-11 w-full items-center justify-between gap-2 py-3 text-left" key={e.key} type="button"
+        onClick={() => set({ workSheet: false, event: e })}>
+        <span className="min-w-0"><span className="font-medium">{ddmm(e.date)} · {e.title}</span>
+          <span className="block text-[12px] text-muted">{e.accrualPeriod} · расчёт</span></span>
+        <Money value={e.amount} approx kopecks className="shrink-0" />
+      </button>)}
+    </section>}
     <Segmented value={year} onChange={setYear} options={[{ id: '2026', label: '2026' }, { id: '2027', label: '2027' }]} />
     {calendar && year === '2027' && <Segmented value={unit} onChange={setUnit} options={[
       { id: 'proposal', label: 'Основной' }, { id: 'law', label: 'По закону' },
@@ -71,6 +84,7 @@ function Income({ profile, now, calendar }: { profile: PayrollProfile; now: stri
         <h3 className="font-medium">Доходы в {year}</h3>
         <div className="grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 text-[13px]">
           <span>Фактически зачислено</span><b className="text-right">{amount(result.actual)}</b>
+          {result.documentary > 0 && <><span>По документам, без отметки банка</span><b className="text-right">{amount(result.documentary)}</b></>}
           <span>Ожидается до конца года</span><b className="text-right">{amount(result.expected || null)}</b>
           {result.conditional > 0 && <><span>Из прогноза на условиях</span><b className="text-right">{amount(result.conditional)}</b></>}
           <span>{year === '2026' ? 'Известные суммы и остаток года' : 'Основной прогноз за год'}</span><b className="text-right">{amount(result.total)}</b>
@@ -86,7 +100,7 @@ function Income({ profile, now, calendar }: { profile: PayrollProfile; now: stri
           <div className="mt-2 divide-y divide-line">
             {result.breakdown.filter(row => row.total != null).map(row => <div className="py-2" key={row.group}>
               <p>{INCOME_GROUPS[row.group]}</p>
-              <p className="text-muted">Факт {amount(row.actual)} · ожидается {amount(row.expected || null)}
+              <p className="text-muted">Поступило {amount(row.actual)}{row.documentary > 0 && <> · по листкам {amount(row.documentary)}</>} · ожидается {amount(row.expected || null)}
                 {row.conditional > 0 && <> · условно {amount(row.conditional)}</>}</p>
             </div>)}
           </div>
@@ -111,6 +125,11 @@ function Income({ profile, now, calendar }: { profile: PayrollProfile; now: stri
         </table>
       </div>
     </>}
+    {missing.length > 0 && <details className="card p-3 text-[13px]">
+      <summary>Периоды без ставки или документа · {missing.length}</summary>
+      {missing.map(row => <p className="pt-2 text-muted" key={row.key}>{ddmm(row.nominalDate)} · {
+        row.kind === 'advance' ? 'Аванс' : row.kind === 'salary' ? 'Зарплата' : 'Ежемесячное поощрение'}</p>)}
+    </details>}
     {calendar && relevant.length === 0 && <p className="px-1 text-[14px] text-muted">В этом периоде выплат нет.</p>}
     {relevant.length > 0 && <div className="card divide-y divide-line">
       {relevant.map(e => {
@@ -119,7 +138,7 @@ function Income({ profile, now, calendar }: { profile: PayrollProfile; now: stri
         const actual = mark?.done ? mark.amount ?? e.amount : pay?.actualNet;
         const status = incomeStatus(e, mark);
         return <button type="button" key={e.key} className="block w-full px-4 py-3 text-left" onClick={() => set({ workSheet: false, event: e })}>
-          <div className="flex justify-between gap-2"><span className="font-medium">{e.title}</span><Money value={actual ?? e.amount} approx={actual == null} /></div>
+          <div className="flex justify-between gap-2"><span className="min-w-0 font-medium">{e.title}</span><Money value={actual ?? e.amount} approx={actual == null} kopecks className="shrink-0" /></div>
           <div className="mt-1 text-[13px] text-muted">
             {e.dateMode === 'month' ? fmtMonth(e.date.slice(0, 7)) : ddmmyyyy(e.date)}
             {e.accrualPeriod && <> · расчётный период {e.accrualPeriod}</>}
@@ -128,6 +147,7 @@ function Income({ profile, now, calendar }: { profile: PayrollProfile; now: stri
           {pay && <p className="mt-1 text-[12px] text-muted">
             {(!pay.documented || pay.actualGrossKnown) && <>Начислено <Money value={pay.gross} /> · </>}
             {(!pay.documented || pay.actualTaxKnown) && <>НДФЛ <Money value={pay.tax} /> · </>}
+            {pay.workDays != null && <>Отработано {pay.paidDays} из {pay.workDays} дней · </>}
             {pay.documentarySource ?? pay.source}
           </p>}
         </button>;
@@ -149,7 +169,7 @@ function RateCard({ rate, label }: { rate: PayRate; label: string }) {
 
 const fields = [
   ['unit', 'Расчётная единица, ₽'], ['positionUnits', 'Должностной оклад, единиц'], ['rankUnits', 'Классный чин, единиц'],
-  ['seniority', 'Выслуга, %'], ['conditions', 'Особые условия, %'], ['monthlyBonus', 'Ежемесячная премия, % оклада'],
+  ['seniority', 'Выслуга, %'], ['conditions', 'Особые условия, %'], ['monthlyBonus', 'Ежемесячное поощрение, % оклада'],
 ] as const;
 type RateField = typeof fields[number][0];
 const asTexts = (r?: PayRate): Record<RateField, string> => ({

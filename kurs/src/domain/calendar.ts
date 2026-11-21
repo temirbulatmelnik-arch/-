@@ -101,6 +101,9 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
       });
     }
     for (const inc of input.incomes) {
+      const key = `inc:${inc.kind}:${m}`;
+      if (input.work && (isRegularWork(inc.kind) || inc.kind === 'vacation' || inc.kind === 'bonusQuarter' || inc.kind === 'bonusYear') &&
+          !input.marks?.[key]?.done && !(ov[key] && (inc.kind === 'bonusQuarter' || inc.kind === 'bonusYear'))) continue;
       if (inc.months && !inc.months.includes(Number(m.slice(5, 7)))) continue;
       within({
         key: `inc:${inc.kind}:${m}`, date: dayIn(m, inc.day), dateMode: 'approx', kind: 'income',
@@ -130,8 +133,13 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
     const sourceMarks = input.marks ?? {};
     const work = { ...input.work, payDates: { ...input.work.payDates } };
     const canonicalMarks = { ...sourceMarks };
+    for (const op of input.accountBook?.operations ?? []) {
+      if (op.type === 'income' && op.status === 'confirmed' && op.fundingSource !== 'borrowed' && op.eventKey) {
+        canonicalMarks[op.eventKey] = { done: true, amount: op.amount, paidDate: op.date, at: op.at ?? op.date };
+      }
+    }
     for (const [key, alias] of Object.entries(work.aliases ?? {})) {
-      if (sourceMarks[alias]?.done) canonicalMarks[key] = sourceMarks[alias];
+      if (canonicalMarks[alias]?.done) canonicalMarks[key] = canonicalMarks[alias];
     }
     for (const [key, custom] of Object.entries(ov)) {
       if (custom.date && !canonicalMarks[key]?.done && !work.payDates[key]) work.payDates[key] = custom.date;
@@ -150,23 +158,23 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
       if (old) { aliases.set(e.key, old); used.add(old.key); }
     }
     for (const [key, old] of aliases) {
-      const mark = sourceMarks[old.key];
+      const mark = canonicalMarks[old.key];
       if (mark?.done) canonicalMarks[key] = { ...mark, paidDate: mark.paidDate ?? paidOn(old, mark) };
       const customDate = ov[old.key]?.date;
       if (customDate && !mark?.done) work.payDates[key] = customDate;
     }
     const modelled = workEvents(work, from, to, canonicalMarks);
     const recognised = new Set(modelled.map(e => e.key));
-    const vacationMonths = new Set(modelled.filter(e => e.key.startsWith('work:vacation:') || e.key.startsWith('work:allowance:')).map(e => monthKey(e.date)));
     const remaining = out.filter(e => !used.has(e.key) && !recognised.has(e.key) &&
-      !(e.key.startsWith('inc:vacation:') && !sourceMarks[e.key]?.done && vacationMonths.has(monthKey(e.date))));
+      !(e.kind === 'income' && !sourceMarks[e.key]?.done && !journalLoans.has(e.key) && !historicalLoans.has(e.key) &&
+        (isRegularWork(e.incomeKind) || e.incomeKind === 'vacation' || (e.incomeKind === 'bonusQuarter' || e.incomeKind === 'bonusYear') && !ov[e.key])));
     out.length = 0;
     out.push(...remaining, ...modelled.map(e => {
       const old = aliases.get(e.key);
       if (!old) return work.aliases?.[e.key] && canonicalMarks[e.key]?.done ? { ...e, key: work.aliases[e.key] } : e;
       const mark = sourceMarks[old.key];
       return { ...e, key: old.key,
-        date: mark?.done ? mark.paidDate ?? e.date : e.date,
+        date: e.payroll?.actualPayDate ?? (mark?.done ? mark.paidDate ?? e.date : e.date),
         note: old.note ?? e.note,
       };
     }));
@@ -208,15 +216,16 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
       if (e.economicType === 'loan_disbursement') return e;
       const mark = input.marks?.[e.key];
       const fact = e.kind === 'income' && (mark?.done || e.payroll?.documented);
+      const legacy = e.payroll ? undefined : custom;
       const status = incomeStatus({ ...e, projection: custom?.projection ?? e.projection }, mark);
       const scenario = status === 'conditional';
       return { ...e,
-        amount: fact ? mark?.amount ?? e.amount : custom?.amount ?? e.amount,
-        date: fact ? mark?.paidDate ?? e.date : custom?.date ?? e.date,
+        amount: e.payroll ? e.amount : fact ? mark?.amount ?? e.amount : legacy?.amount ?? e.amount,
+        date: e.payroll ? e.date : fact ? mark?.paidDate ?? e.date : legacy?.date ?? e.date,
         prepareOn: custom?.prepareOn ?? e.prepareOn,
         dateMode: scenario && e.dateMode !== 'month' ? 'approx' as const : e.dateMode,
         economicType: custom?.economicType ?? e.economicType, projection: custom?.projection ?? e.projection,
-        approx: scenario || (!fact && custom?.amount == null && e.approx),
+        approx: scenario || (!fact && legacy?.amount == null && e.approx),
         moved: !fact && custom?.date != null && custom.date !== e.date };
     });
   const datedByKey = new Map(dated.map(e => [e.key, e]));
@@ -249,7 +258,7 @@ const optionalPay = new Set<IncomeKind>(['bonusQuarter', 'bonusYear', 'thirteent
 
 export function incomeStatus(event: CalEvent, mark?: EventMark): IncomeStatus | undefined {
   if (event.kind !== 'income') return undefined;
-  if (mark?.done) return 'recorded';
+  if (mark?.done || event.payroll?.bankConfirmed) return 'recorded';
   if (event.payroll?.documented) return 'documented';
   if (event.projection === 'review' || event.projection === 'conditional' ||
       (event.incomeKind && optionalPay.has(event.incomeKind)) ||

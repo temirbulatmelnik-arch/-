@@ -1,4 +1,5 @@
 import { cents, kopecks, LIFE_ACCOUNT, RESERVE_ACCOUNT, rubles, type AccountOperation, type PaymentShare } from './accounts';
+import { federalHoliday, workdayOnOrBefore } from './workdays';
 import { addDays } from './dates';
 import type { CalEvent, EventMark, ReserveMove } from './types';
 
@@ -92,7 +93,9 @@ export function paymentPreparations(events: CalEvent[], marks: Record<string, Ev
   for (const e of events) {
     if (e.kind !== 'payment' || e.projection || marks[e.key]?.done || e.amount <= 0) continue;
     const id = JSON.stringify([e.date, e.accountId ?? null]);
-    const remindDate = e.prepareOn && e.prepareOn < e.date ? e.prepareOn : addDays(e.date, -1);
+    const dayBefore = addDays(e.date, -1);
+    const remindDate = e.prepareOn && e.prepareOn < e.date ? e.prepareOn
+      : federalHoliday(e.date) || federalHoliday(dayBefore) ? workdayOnOrBefore(dayBefore) : dayBefore;
     const group = groups.get(id) ?? { id, date: e.date, remindDate, accountId: e.accountId,
       events: [], total: 0, prepared: 0, inTransit: 0, toFund: null, reserveShortfall: 0 };
     const prepared = Math.min(cents(e.amount), cents(held.find(row => row.key === e.key && row.accountId === e.accountId)?.amount ?? 0));

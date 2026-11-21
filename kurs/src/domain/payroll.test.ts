@@ -9,11 +9,11 @@ const model: PayrollProfile = { from: '2026-01-01', rates: [rate, { ...rate, fro
 
 describe('трудовые выплаты и календарь', () => {
   it('расходится только разбивка аванса, а полный месяц сохраняет начисление', () => {
-    expect(payComponents(rate)).toMatchObject({ base: 111834, total: 137722 });
-    expect(accrual(model, '2026-11')).toEqual({ days: 20, firstDays: 9, base: 111834, advance: 50325.30, salary: 61508.70, bonusMonthly: 25888 });
+    expect(payComponents(rate)).toMatchObject({ base: 111834, total: 137721.50 });
+    expect(accrual(model, '2026-11')).toMatchObject({ days: 20, firstDays: 9, base: 111834, advance: 50325.30, salary: 61508.70, bonusMonthly: 25887.50 });
     expect(accrual(model, '2026-12').base).toBe(111834);
-    expect(payComponents({ ...rate, unit: 2167 }).total).toBe(144106);
-    expect(payComponents({ ...rate, unit: 2157 }).total).toBe(143441);
+    expect(payComponents({ ...rate, unit: 2167 }).total).toBe(144105.50);
+    expect(payComponents({ ...rate, unit: 2157 }).total).toBe(143440.50);
   });
 
   it('учитывает переносы и сохраняет один ключ выплаты при переносе в другой год', () => {
@@ -71,7 +71,7 @@ it('моделирует отпускные раньше начала отпус
 
 it('uses one payment and the new tax year when the employer pays after the holidays', () => {
   const key = 'inc:salary:2027-01';
-  const profile = { ...model, payDates: { [key]: '2027-01-11' }, taxBase: { 2026: { asOf: '2026-12-25', base: 3000000 } } };
+  const profile = { ...model, payDates: { [key]: '2027-01-11' }, payDateSources: { [key]: 'Подтверждённый график' }, taxBase: { 2026: { asOf: '2026-12-25', base: 3000000 } } };
   const payments = workPayments(profile, '2026-12-27', '2027-01-20');
   const january = payments.filter(p => p.key === key);
   expect(january).toMatchObject([{ expectedPayDate: '2027-01-11', alternatePayDate: '2026-12-30' }]);
@@ -85,7 +85,7 @@ it('uses one payment and the new tax year when the employer pays after the holid
 it('rounds the earned bonus only after applying the fraction of paid days', () => {
   const example = { ...model, attendance: { '2026-10': { paidDays: 12, firstPaidDays: 7 } } };
   const earned = accrual(example, '2026-10');
-  expect(earned.bonusMonthly).toBe(Math.round(rate.unit * rate.positionUnits * rate.monthlyBonus * 12 / 22));
+  expect(earned.bonusMonthly).toBeCloseTo(rate.unit * rate.positionUnits * rate.monthlyBonus * 12 / 22, 2);
   expect(earned.advance).toBeCloseTo(payComponents(rate).base * 7 / 22, 2);
   const count = Array.from({ length: 365 }, (_, i) => new Date(Date.UTC(2027, 0, i + 1)).toISOString().slice(0, 10)).filter(isWorkday);
   expect(count).toHaveLength(247);

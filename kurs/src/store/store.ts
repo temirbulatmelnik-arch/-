@@ -13,7 +13,7 @@ import { validPayroll, type PayrollProfile } from '../domain/payroll';
 import { mergeSeed } from '../domain/planUpdate';
 import type { Bridge } from '../domain/bridge';
 import { fixDefaultCategories } from '../domain/categorize';
-import { dropChatTwins } from '../domain/exchange';
+import { dropChatTwins, exchangeRevision } from '../domain/exchange';
 import { freshReserve, heldKeys, ledger, reserveAnchor, type Checkup } from '../domain/ledger';
 import type { CalEvent, CalendarOverride, CardBalance, ChecklistItem, Debt, DebtSnapshot, EventMark, Expense, FixedItem, IncomeTemplate, MemoryRule, PlanSeed, ReserveMove, Settings, StrategySection, WeekClosure, WeeklyOverride, WishItem } from '../domain/types';
 
@@ -73,6 +73,7 @@ interface Data {
   work: PayrollProfile | null;
   /** последние импорты из чата со снимком данных до них — чтобы откатить неверный блок */
   imports: ImportRecord[];
+  exchangePatchIds: string[];
   settings: Settings;
 }
 
@@ -115,7 +116,7 @@ interface Actions {
   updateExpense: (id: string, patch: Partial<Expense>) => void;
   removeExpense: (id: string) => void;
   /** отметить событие календаря; для платежа по долгу остаток уменьшается на оценку погашения */
-  markEvent: (e: CalEvent, done: boolean, amount?: number, paidFrom?: EventMark['paidFrom'], details?: { accountId?: string; partialId?: string; principal?: number; interest?: number; fee?: number; paidDate?: string; payrollActual?: { gross?: number; tax?: number; otherWithheld?: number } }) => void;
+  markEvent: (e: CalEvent, done: boolean, amount?: number, paidFrom?: EventMark['paidFrom'], details?: { accountId?: string; bankVerified?: boolean; partialId?: string; principal?: number; interest?: number; fee?: number; paidDate?: string; payrollActual?: { gross?: number; tax?: number; otherWithheld?: number } }) => void;
   updateDebt: (id: string, patch: Partial<Debt>) => void;
   /** точная сумма/дата платежа из банка */
   setOverride: (key: string, o: Pick<CalendarOverride, 'amount' | 'date' | 'prepareOn'>) => void;
@@ -146,6 +147,8 @@ export interface ImportRecord {
   id: string;
   at: string;
   summary: string;
+  revision?: string;
+  afterRevision?: string;
   snapshot: Omit<Data, 'imports' | 'settings' | 'planCode' | 'ready'>;
 }
 
@@ -182,7 +185,7 @@ const EMPTY: Data = {
   ready: false, asOf: today(), debts: [], incomes: [], fixed: [], oneOff: [], templateFrom: monthKey(today()),
   weeklyOverrides: [], planTrajectory: [], baselineTrajectory: [], reserve: 0, reserveLog: [], expenses: [], marks: {}, wishes: [], snapshots: [], overrides: {}, plan: null,
   planRev: 0, planCode: '', checklist: [], strategy: [], rules: [], checks: {}, savings: 0, savingsLog: [], closures: {}, cardBalance: null, bridge: null, checkups: [], merchantMemory: {}, imports: [],
-  settings: DEFAULT_SETTINGS, accountBook: EMPTY_BOOK, work: null,
+  settings: DEFAULT_SETTINGS, accountBook: EMPTY_BOOK, work: null, exchangePatchIds: [],
 };
 
 /** Снимок общего долга за текущий месяц — для графика «план против факта» */
@@ -257,18 +260,19 @@ export const useStore = create<State>()(
       applySync: (patch, summary) => set(s => {
         const next: Partial<Data> = { ...patch };
         if (patch.cardBalance) next.cardBalance = captureCardBalance(patch.cardBalance, patch.expenses ?? s.expenses, patch.accountBook ?? s.accountBook);
-        if (summary != null) {
-          const { imports, settings, planCode, ready, ...snapshot } = pickData(s);
-          void settings; void planCode; void ready;
-          next.imports = [...imports, { id: uid(), at: nowIso(), summary, snapshot }].slice(-5);
-        }
         if (patch.reserve != null && patch.reserve !== s.reserve) {
           next.reserveLog = [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), abs: true, operationIds: operationIdsAt(patch.accountBook ?? s.accountBook, today()), amount: patch.reserve - s.reserve, note: 'Сверка из чата «Финансы»' }];
         }
         if (patch.savings != null && patch.savings !== s.savings) {
           next.savingsLog = [...s.savingsLog, { id: uid(), date: today(), amount: patch.savings - s.savings, note: 'Сверка из чата «Финансы»' }];
         }
-        return patch.debts ? { ...next, ...withSnapshot(patch.debts, s.snapshots) } : next;
+        if (patch.debts) Object.assign(next, withSnapshot(patch.debts, s.snapshots));
+        if (summary != null) {
+          const { imports, settings, planCode, ready, ...snapshot } = pickData(s);
+          void settings; void planCode; void ready;
+          next.imports = [...imports, { id: uid(), at: nowIso(), summary, revision: exchangeRevision(s), afterRevision: exchangeRevision({ ...s, ...next }), snapshot }].slice(-5);
+        }
+        return next;
       }),
       saveCashAccount: (id, name, amount) => set(s => {
         if (!id || [LIFE_ACCOUNT, RESERVE_ACCOUNT].includes(id) || !name.trim() || (amount != null && !validAmount(amount))) return {};
@@ -372,7 +376,7 @@ export const useStore = create<State>()(
       beginImport: summary => set(s => {
         const { imports, settings, planCode, ready, ...snapshot } = pickData(s);
         void settings; void planCode; void ready;
-        return { imports: [...imports, { id: uid(), at: nowIso(), summary, snapshot }].slice(-5) };
+        return { imports: [...imports, { id: uid(), at: nowIso(), summary, revision: exchangeRevision(s), snapshot }].slice(-5) };
       }),
       remember: (key, rule) => set(s => {
         const merchantMemory = { ...s.merchantMemory };
@@ -382,9 +386,11 @@ export const useStore = create<State>()(
       rollbackImport: id => set(s => {
         const i = s.imports.findIndex(r => r.id === id);
         if (i < 0) return {};
+        const last = s.imports.at(-1);
+        if (last?.afterRevision && last.afterRevision !== exchangeRevision(s)) return {};
         const snapshot = s.imports[i].snapshot;
         const imports = s.imports.slice(0, i);
-        return { ...snapshot, imports, accountBook: snapshot.accountBook ?? EMPTY_BOOK, work: snapshot.work ?? null, cardBalance: restoreCardTime(snapshot.cardBalance, imports) };
+        return { ...snapshot, imports, exchangePatchIds: snapshot.exchangePatchIds ?? [], accountBook: snapshot.accountBook ?? EMPTY_BOOK, work: snapshot.work ?? null, cardBalance: restoreCardTime(snapshot.cardBalance, imports) };
       }),
       toggleCheck: id => set(s => {
         const base = s.checklist.find(c => c.id === id)?.done ?? false;
@@ -482,7 +488,7 @@ export const useStore = create<State>()(
         const prev = s.marks[e.key];
         const linked = s.accountBook.operations.find(op => op.eventKey === e.key);
         if (linked?.type === 'loan_disbursement' || (linked?.type === 'transfer' && linked.purpose === 'weekly') || s.accountBook.historicalLoans?.some(loan => loan.eventKey === e.key) ||
-            (done && (e.payroll?.documented || e.projection === 'internal_transfer'))) return {};
+            (done && (e.payroll?.documented && !details?.bankVerified || e.projection === 'internal_transfer'))) return {};
         const marks = { ...s.marks };
         let debts = s.debts;
         let accountBook = s.accountBook;
@@ -616,18 +622,19 @@ export const useStore = create<State>()(
     }),
     {
       name: 'kurs',
-      version: 6,
+      version: 7,
       partialize: s => pickData(s),
       // версия 1: обязательные платежи без id — добавляем, остальное новые поля берут значения по умолчанию;
       // версия 2: файл из чата задваивал траты, уже внесённые под другим названием, — убираем копии один раз;
       // версия 3: подпись банка «Транспорт» записывалась в «кафе и досуг» — поправляем категорию
       migrate: (persisted, version) => {
         const p = persisted as Partial<Data>;
-        if (version < 6) {
+        if (version < 7) {
           try {
-            const backup = 'kurs:before-0.6.0';
+            const backup = 'kurs:before-0.7.0';
             const raw = window.localStorage.getItem('kurs');
             if (raw && !window.localStorage.getItem(backup)) window.localStorage.setItem(backup, raw);
+            if (version < 6 && raw && !window.localStorage.getItem('kurs:before-0.6.0')) window.localStorage.setItem('kurs:before-0.6.0', raw);
           } catch { /* The additive change also works if the browser lacks room for a second copy. */ }
         }
         let expenses = p.expenses;

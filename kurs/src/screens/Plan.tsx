@@ -60,7 +60,7 @@ function useDebtForecast(): Forecast {
   const now = useToday();
   const cal = useCal();
   const { debts, incomes, oneOff, templateFrom } = cal;
-  const reserve = useStore(s => s.reserve);
+  const reserve = useLedger().reserve;
   return useMemo(() => {
     const from = `${addMonths(monthKey(now), 1)}-01`;
     const key = [cal, reserve, from];
@@ -353,7 +353,8 @@ function DebtActivityPanel() {
   return <div className="card mx-4 space-y-2 p-4 text-[13px]">
     <h3 className="font-medium">Чистое изменение долга за месяц</h3>
     {start && <div className="flex justify-between"><span>Предыдущий снимок</span><Money value={start.total} /></div>}
-    <div className="flex justify-between"><span>Новые заимствования</span><Money value={activity.borrowed} sign /></div>
+    <div className="flex justify-between"><span>Заёмные зачисления</span><Money value={activity.loanDisbursements} kopecks /></div>
+    <div className="flex justify-between"><span>Покупки с кредиток</span><Money value={activity.creditPurchases} kopecks /></div>
     <div className="flex justify-between"><span>Подтверждённые проценты и комиссии</span><Money value={activity.interestAndFees} sign /></div>
     <div className="flex justify-between"><span>Подтверждённое тело платежей</span><Money value={-activity.principal} sign /></div>
     <div className="flex justify-between"><span>Долг {confirmed ? 'по банку' : 'по учёту'}</span><Money value={end} approx={!confirmed} /></div>

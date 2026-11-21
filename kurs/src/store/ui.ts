@@ -58,6 +58,8 @@ interface Ui {
   /** пункт, к которому перейти и подсветить (чек-лист) */
   focus: string | null;
   /** раздел настроек, к которому прокрутить */
+  paymentRoutes: boolean;
+  paymentQueue: boolean;
   settingsFocus: 'reminders' | 'backup' | null;
   /** файл обмена, доставленный с сайта: открыть в окне обмена */
   inbox: { id: string; text: string } | null;
@@ -86,7 +88,7 @@ interface Ui {
 
 export const useUi = create<Ui>()(set => ({
   tab: 'week', add: null, scan: false, settings: false, event: null, bonus: null, debt: null, reserve: false,
-  week: null, savings: false, sync: false, fixed: false, card: false, loan: false, transfer: null, unlock: false, planView: 'debts', focus: null, settingsFocus: null, inbox: null, checkup: null, hub: false, finance: false, workSheet: false, tour: false, payView: 'list', scenario: 'base', today: false, stackOpen: null, pwaUpdateReady: false, toast: null, undo: null,
+  paymentRoutes: false, paymentQueue: false, week: null, savings: false, sync: false, fixed: false, card: false, loan: false, transfer: null, unlock: false, planView: 'debts', focus: null, settingsFocus: null, inbox: null, checkup: null, hub: false, finance: false, workSheet: false, tour: false, payView: 'list', scenario: 'base', today: false, stackOpen: null, pwaUpdateReady: false, toast: null, undo: null,
   // прокрутку каждой вкладки помнит App (useTabScroll)
   setTab: tab => set({ tab }),
   set: p => set(p),

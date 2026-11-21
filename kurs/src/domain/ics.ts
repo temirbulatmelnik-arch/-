@@ -31,6 +31,7 @@ export interface IcsOptions {
   /** ЧЧ:ММ */
   time: string;
   now?: Date;
+  baseUrl?: string;
   preparation?: { time: string; groups: PaymentPreparation[] };
 }
 
@@ -70,30 +71,36 @@ export function buildIcs(events: CalEvent[], o: IcsOptions): string {
   }
   if (o.preparation) {
     const after = stamp;
-    const addReminder = (uid: string, date: string, title: string, desc: string) => {
+    const addReminder = (uid: string, date: string, title: string, desc: string, key: string) => {
       const time = utc(preparationInstant(date, o.preparation!.time));
-      if (time > after) lines.push(...timedReminder(uid, stamp, time, title, desc));
+      if (time > after) {
+        const link = o.baseUrl ? new URL(o.baseUrl) : undefined;
+        if (link) link.hash = 'kurs-payment=' + encodeURIComponent(key);
+        lines.push(...timedReminder(uid, stamp, time, title, desc, link?.href));
+      }
     };
     for (const group of o.preparation.groups) {
       if (!needsPreparation(group)) continue;
       const when = addDays(group.remindDate, 1) === group.date ? 'Завтра обязательный платёж' : 'Подготовить обязательный платёж';
       const summary = `Курс · ${when}${o.hideAmounts ? '' : ' ' + amountText(group.total, group.events.some(e => e.approx))}`;
       const detail = o.hideAmounts ? '' : `${group.events.map(e => e.title).join(', ')}. `;
-      const route = group.accountId ? 'Проверьте остаток и перевод в «Курсе».' : 'Уточните счёт списания в банке.';
-      addReminder(`prepare-${group.date}-${encodeURIComponent(group.accountId ?? 'unassigned')}`, group.remindDate, summary, detail + route);
+      const route = group.accountId ? (!o.hideAmounts && group.toFund != null && group.toFund > 0
+        ? `Проверьте счёт списания. Из резерва требуется ${amountText(group.toFund, group.events.some(e => e.approx))}.`
+        : 'Проверьте остаток и перевод в «Курсе».') : 'Уточните счёт списания в банке.';
+      addReminder(`prepare-${group.date}-${encodeURIComponent(group.accountId ?? 'unassigned')}`, group.remindDate, summary, detail + route, group.events[0].key);
     }
     for (const e of events.filter(e => e.kind === 'weekly')) {
       addReminder(`weekly-${e.key.replace(/[^a-zA-Z0-9-]/g, '-')}`, e.date, 'Курс · Долить карту до недельного лимита',
-        'Откройте «Курс» и проверьте, сколько перевести из резерва на основную карту.');
+        'Откройте «Курс» и проверьте, сколько перевести из резерва на основную карту.', e.key);
     }
   }
   lines.push('END:VCALENDAR', '');
   return lines.join('\r\n');
 }
 
-function timedReminder(id: string, stamp: string, start: string, title: string, desc: string): string[] {
+function timedReminder(id: string, stamp: string, start: string, title: string, desc: string, url?: string): string[] {
   return ['BEGIN:VEVENT', fold(`UID:kurs-${id}@kurs.local`), `DTSTAMP:${stamp}`, `DTSTART:${start}`, 'DURATION:PT5M',
-    fold(`SUMMARY:${esc(title)}`), fold(`DESCRIPTION:${esc(desc)}`), 'TRANSP:TRANSPARENT',
+    fold(`SUMMARY:${esc(title)}`), fold(`DESCRIPTION:${esc(desc)}`), ...(url ? [fold(`URL:${url}`)] : []), 'TRANSP:TRANSPARENT',
     'BEGIN:VALARM', 'ACTION:DISPLAY', fold(`DESCRIPTION:${esc(title)}`), 'TRIGGER:PT0S', 'END:VALARM', 'END:VEVENT'];
 }
 

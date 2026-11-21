@@ -150,6 +150,10 @@ export function CoverageCard() {
           : riskName ? ' · остаток не подтверждён' : ' · сумма на этом счёте пока неизвестна'}</div>
         {hints[0] && <p className="mt-1 text-muted">{hints[0].text}</p>}
       </div>}
+      {cov.shortage && <p className="mt-3 px-1 text-[13px] text-warn">
+        Первый общий дефицит {dayMonth(cov.shortage.date)} · <Money value={cov.shortage.amount} kopecks />.
+        Максимум на горизонте <Money value={cov.maxShortfall} kopecks />.
+      </p>}
       {cov.bufferRisk && <p className="mt-3 px-1 text-[13px] text-muted">С {dayMonth(cov.bufferRisk.date)} запас ниже цели на <Money value={cov.bufferRisk.amount} />.</p>}
       {funding.length > 0 && <details className="card mt-3 p-4 text-[13px]">
         <summary className="font-medium text-sea">Счета и подготовка ближайших платежей</summary>

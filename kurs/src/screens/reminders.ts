@@ -23,7 +23,7 @@ export async function exportCalendar(months = 6) {
   const events = eventsBetween(s, from, to).filter(e => !s.marks[e.key]?.done && actionableEvent(e));
   const led = ledger({ ...s, now: from });
   const groups = paymentPreparations(events, s.marks, led.heldForPayments, led.reserve);
-  const ics = buildIcs(events, { hideAmounts: s.settings.hideAmounts, remindDays: s.settings.remindDays, time: s.settings.remindTime,
+  const ics = buildIcs(events, { baseUrl: new URL('./', location.href).href, hideAmounts: s.settings.hideAmounts, remindDays: s.settings.remindDays, time: s.settings.remindTime,
     preparation: { time: s.settings.preparationTime ?? DEFAULT_PREPARATION_TIME, groups } });
   if (!await shareCalendar('kurs-platezhi.ics', ics)) return;
   s.setSettings({ lastIcsAt: new Date().toISOString() });

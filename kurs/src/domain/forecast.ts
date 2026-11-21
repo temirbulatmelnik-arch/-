@@ -2,6 +2,7 @@
 // в месяц премии всё сверх резерва (20 000 + нехватка до следующей премии) — досрочно по порядку лавины.
 import { addMonths, dayIn, monthKey, monthsBetween } from './dates';
 import { annuity, estimatePayment, eventsBetween, type CalendarInput } from './calendar';
+import { projectedEvent } from './coverage';
 import { currentPhase, FIXED_MONTHLY, nextBonusMonth, planConfig, RESERVE_BUFFER, shortfallFor } from './plan';
 import type { CalEvent, Debt, IncomeTemplate } from './types';
 
@@ -31,21 +32,25 @@ export function forecast(opts: { debts: Debt[]; incomes: IncomeTemplate[]; reser
     // до начала шаблона берём поступления из календаря плана: там уже учтены отпуск, 13-я и т. п.
     const early = !!opts.templateFrom && m < opts.templateFrom;
     const earlyIncomes = early ? (opts.oneOff ?? []).filter(e => e.kind === 'income' && e.economicType !== 'loan_disbursement' && monthKey(e.date) === m) : [];
-    const enterprise = opts.cal?.work || opts.cal?.accountBook?.operations.some(op => op.type === 'loan_disbursement' && op.eventKey);
-    const income = enterprise && opts.cal
-      ? eventsBetween(opts.cal, `${m}-01`, dayIn(m, 'last')).filter(e => e.kind === 'income' && e.economicType !== 'loan_disbursement' && e.confidence !== 'tentative')
-        .reduce((sum, e) => sum + e.amount, 0)
+    const projected = opts.cal ? eventsBetween(opts.cal, `${m}-01`, dayIn(m, 'last'))
+      .filter(e => !opts.cal!.marks?.[e.key]?.done).flatMap(e => {
+        const row = projectedEvent(e, 'cautious');
+        return row && monthKey(row.date) === m ? [row] : [];
+      }) : null;
+    const income = projected
+      ? projected.filter(e => e.kind === 'income').reduce((sum, e) => sum + e.amount, 0)
       : early
-      ? earlyIncomes.reduce((s, e) => s + e.amount, 0)
-      : opts.incomes.filter(t => !t.months || t.months.includes(mon)).reduce((s, t) => s + t.amount, 0);
+        ? earlyIncomes.reduce((sum, e) => sum + e.amount, 0)
+        : opts.incomes.filter(t => !t.months || t.months.includes(mon)).reduce((sum, e) => sum + e.amount, 0);
     const phase = currentPhase(debts, `${m}-15`);
     const living = phase.monthly || phase.weekly * 4.33 + FIXED_MONTHLY;
     cash += income - living;
 
     for (const d of debts) {
       if (d.closed || d.balance <= 0.5) continue;
-      const pay = estimatePayment(d, m);
+      const entered = projected?.filter(e => e.kind === 'payment' && e.debtId === d.id).reduce((sum, e) => sum + e.amount, 0);
       const interest = d.rule.type === 'schedule' ? 0 : (d.balance * d.rate) / 12;
+      const pay = Math.min(d.balance + interest, entered ?? estimatePayment(d, m));
       interestSum += interest;
       d.balance = Math.max(0, d.balance + interest - pay);
       cash -= pay;
@@ -56,7 +61,7 @@ export function forecast(opts: { debts: Debt[]; incomes: IncomeTemplate[]; reser
     // (с учётом решений плана по месяцам: например, премия месяца — только в один долг)
     const bonusMonth = early ? earlyIncomes.some(e => e.incomeKind && BONUS_KINDS.includes(e.incomeKind)) : opts.incomes.some(t => t.months?.includes(mon));
     const rule = planConfig().bonusRules?.[m];
-    if (bonusMonth || rule) {
+    if (!opts.cal && (bonusMonth || rule)) {
       const keepMonths = rule?.months ?? Math.max(0, monthsBetween(m, nextBonusMonth(m)) - 1);
       let keep = RESERVE_BUFFER;
       for (let k = 1; k <= keepMonths; k++) keep += shortfallFor(addMonths(m, k), debts);

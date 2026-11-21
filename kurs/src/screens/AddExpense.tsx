@@ -13,7 +13,7 @@ import { activeBridge, bridgeState } from '../domain/bridge';
 import { dayMonth, today, weekday } from '../domain/dates';
 import { parseAmount, rub } from '../domain/money';
 import { BIG_PURCHASE, CATEGORIES, CATEGORY } from '../domain/plan';
-import { SOURCE_LABEL, SOURCES, spendEffect, suggestSource, type SpendEffect } from '../domain/sources';
+import { DEFAULT_SPEND_SOURCE, SOURCE_LABEL, SOURCES, spendEffect, type SpendEffect } from '../domain/sources';
 import { guessCategory, parseSpoken } from '../domain/spoken';
 import type { CategoryId, Expense, Source } from '../domain/types';
 import { useStore } from '../store/store';
@@ -51,9 +51,7 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   const [category, setCategory] = useState<CategoryId | null>(edit?.category ?? p.category ?? null);
   const [note, setNote] = useState(edit?.note ?? p.note ?? '');
   const [date, setDate] = useState(edit?.date ?? p.date ?? today());
-  // откуда деньги: приложение само предлагает — карта, пока на ней есть недельные деньги; карта пуста и на неделе
-  // есть мост — кредитка моста. Выбор можно сменить одним нажатием
-  const suggested = useMemo(() => suggestSource(store, date), []);
+  const suggested = DEFAULT_SPEND_SOURCE;
   const [source, setSource] = useState<Source>(edit?.source ?? p.source ?? suggested);
   const [picked, setPicked] = useState(!!(edit || p.source));
   const [card, setCard] = useState(edit?.creditCard ?? p.creditCard ?? '');
@@ -215,7 +213,7 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
               <span className="flex items-center gap-1.5 text-[13.5px] font-medium"><Icon size={15} strokeWidth={1.8} />{SOURCE_LABEL[id]}</span>
               <span className={`text-[11px] leading-tight ${on ? 'opacity-85' : 'opacity-80'}`}>
                 {id === 'life' ? (led.lifeAvailable != null ? <>свободно <Money value={led.lifeAvailable} /></> : 'с карты')
-                  : id === 'credit' ? (loan ? <>мост: ещё <Money value={Math.max(0, loan.left)} /></> : 'с кредитки')
+                  : id === 'credit' ? (loan ? <>мост: использовано <Money value={loan.used} kopecks /></> : 'с кредитки')
                     : <Money value={led.reserve} />}
               </span>
             </button>

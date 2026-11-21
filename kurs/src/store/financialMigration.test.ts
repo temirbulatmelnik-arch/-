@@ -89,7 +89,7 @@ describe('обратная совместимость и подтвержден�
     expect(state.prepay(debt.id, 500, RESERVE_ACCOUNT, { principal: 500 })).toBe(false);
     expect(store.getState().accountBook).toBe(state.accountBook);
     const file = buildExchange(store.getState(), date, { short: true });
-    expect(file.protocolVersion).toBe('2.7');
+    expect(file.protocolVersion).toBe('2.8');
     expect(file.status?.coverage).toMatchObject({ scenario: 'base' });
   });
 });
@@ -175,7 +175,7 @@ it('exports the exact debt delta and separates post-anchor charges from amounts 
     rows: [{ id: credit.id, basisKind: 'bank', added: { purchases: 60, fees: 12.35 },
       alreadyCovered: { purchases: 34 }, missingTime: { purchases: 25 }, estimatedInterest: 100 }],
   });
-  expect(out.status?.totalDebt).toBe(100173);
+  expect(out.status?.totalDebt).toBe(100172.6);
 });
 
 it('links a review payment idempotently, edits only notes, and waits for booked income before raising a task', async () => {

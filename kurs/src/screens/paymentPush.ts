@@ -10,7 +10,7 @@ const endpoint = import.meta.env.VITE_KURS_PUSH_ENDPOINT?.replace(/\/$/, '');
 const key = import.meta.env.VITE_KURS_PUSH_VAPID_PUBLIC_KEY;
 export const pushConfigured = Boolean(endpoint?.startsWith('https://') && key);
 const STORAGE = 'kurs:push';
-type PushState = { installation: string; token: string; ids: Record<string, string>; sent?: string; remove?: boolean };
+type PushState = { installation: string; token: string; ids: Record<string, string>; sent?: string; latestSync?: string; scheduled?: number; remove?: boolean };
 
 const read = (): PushState | null => {
   try { return JSON.parse(localStorage.getItem(STORAGE) ?? 'null'); } catch { return null; }
@@ -18,11 +18,30 @@ const read = (): PushState | null => {
 const write = (state: PushState) => localStorage.setItem(STORAGE, JSON.stringify(state));
 export const pushEnabled = () => !!read() && !read()?.remove;
 
+export async function paymentPushDiagnostics() {
+  const state = read();
+  const subscription = navigator.serviceWorker?.controller
+    ? await (await navigator.serviceWorker.ready).pushManager?.getSubscription() : null;
+  const fallback = { subscribed: Boolean(subscription), latestSync: state?.latestSync, scheduled: state?.scheduled, backend: 'unknown' };
+  if (!state || state.remove || !pushConfigured || !navigator.onLine) return fallback;
+  try {
+    const response = await fetch(`${endpoint}/${state.installation}/schedule`, {
+      headers: { Authorization: `Bearer ${state.token}` }, credentials: 'omit', cache: 'no-store',
+      referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(6000),
+    });
+    if (!response.ok) return { ...fallback, backend: 'unavailable' };
+    const data = await response.json();
+    return { ...fallback, backend: 'online',
+      latestSync: typeof data.latestSync === 'string' ? data.latestSync : state.latestSync,
+      scheduled: typeof data.scheduled === 'number' ? data.scheduled : state.scheduled };
+  } catch { return { ...fallback, backend: 'unavailable' }; }
+}
+
 function request(name: string, state: PushState, body?: object) {
   return fetch(`${endpoint}/${state.installation}/${name}`, {
     method: body ? 'PUT' : 'DELETE', headers: { Authorization: `Bearer ${state.token}`,
       ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined,
-    cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer',
+    cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(8000),
   }).then(response => { if (!response.ok) throw new Error('Push endpoint unavailable'); });
 }
 
@@ -60,8 +79,10 @@ export async function disablePaymentPush() {
 }
 
 let syncing = false;
+let syncAgain = false;
 export async function syncPaymentPush() {
-  if (!pushConfigured || !navigator.onLine || syncing) return;
+  if (!pushConfigured || !navigator.onLine) return;
+  if (syncing) { syncAgain = true; return; }
   const state = read();
   if (!state) return;
   syncing = true;
@@ -96,9 +117,10 @@ export async function syncPaymentPush() {
     if (serialized === state.sent) return;
     if (read()?.token !== state.token || read()?.remove) return;
     await request('schedule', state, body);
-    if (read()?.token === state.token && !read()?.remove) write({ ...state, ids, sent: serialized });
+    if (read()?.token === state.token && !read()?.remove) write({ ...state, ids, sent: serialized, latestSync: new Date().toISOString(), scheduled: scheduled.length });
   } finally {
     syncing = false;
+    if (syncAgain) { syncAgain = false; void syncPaymentPush().catch(() => {}); }
   }
 }
 
@@ -112,10 +134,11 @@ export async function testPaymentPush() {
 export function openPaymentReminder() {
   const url = new URL(location.href);
   const id = url.searchParams.get('reminder');
-  if (!id || !useStore.getState().ready) return;
+  const calendarKey = new URLSearchParams(url.hash.slice(1)).get('kurs-payment');
+  if ((!id && !calendarKey) || !useStore.getState().ready) return;
   history.replaceState(null, '', url.pathname);
   const entry = Object.entries(read()?.ids ?? {}).find(([, opaqueId]) => opaqueId === id);
-  const keys: string[] = entry ? JSON.parse(entry[0]) : [];
+  const keys: string[] = calendarKey ? [calendarKey] : entry ? JSON.parse(entry[0]) : [];
   const today = moscowClock().date;
   const ui = useUi.getState();
   const s = useStore.getState();
