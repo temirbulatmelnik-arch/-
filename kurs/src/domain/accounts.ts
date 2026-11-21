@@ -29,7 +29,7 @@ interface OperationBase {
   externalId?: string;
   note?: string;
   origin: 'manual' | 'bank' | 'exchange';
-  status: 'confirmed' | 'planned';
+  status: 'confirmed' | 'planned' | 'voided';
   fundingSource: 'own' | 'borrowed' | 'unknown';
 }
 
@@ -37,7 +37,8 @@ export interface PaymentShare { key: string; amount: number }
 
 export type AccountOperation = OperationBase & (
   { type: 'transfer'; toAccountId: string; purpose?: 'weekly' | 'sweep' | 'prepare' | 'return'; shares?: PaymentShare[]; weeklyExcess?: number }
-  | { type: 'allocation'; shares: PaymentShare[]; existingCash?: boolean }
+  | { type: 'allocation'; shares: PaymentShare[]; existingCash?: boolean; toWeekly?: never }
+  | { type: 'allocation'; toWeekly: true; shares?: never; existingCash?: never }
   | { type: 'loan_disbursement'; debtId: string; splitPlanId?: string; debtBooked?: boolean; auditId?: string }
   | { type: 'debt_payment'; debtId?: string; principal?: number; interest?: number; fee?: number; debtBooked?: boolean }
   | { type: 'interest' | 'fee'; debtId?: string }
@@ -81,6 +82,7 @@ export interface HistoricalLoan {
 }
 
 export interface AccountBook {
+  paymentRouting?: 'life';
   accounts: CashAccount[];
   operations: AccountOperation[];
   paymentAccounts: Record<string, string>;
@@ -114,7 +116,7 @@ export function validOperation(op: AccountOperation): boolean {
       (op.note != null && typeof op.note !== 'string') ||
       typeof op.id !== 'string' || !op.id || !validDate(op.date) ||
       !validAmount(op.amount) || op.amount <= 0 || typeof op.accountId !== 'string' || !op.accountId ||
-      !['confirmed', 'planned'].includes(op.status) ||
+      !['confirmed', 'planned', 'voided'].includes(op.status) || (op.status === 'voided' && !reversibleOperation(op)) ||
       !['manual', 'bank', 'exchange'].includes(op.origin) ||
       !['own', 'borrowed', 'unknown'].includes(op.fundingSource) ||
       (op.at != null && (typeof op.at !== 'string' || !Number.isFinite(Date.parse(op.at))))) return false;
@@ -133,7 +135,8 @@ export function validOperation(op: AccountOperation): boolean {
         (validAmount(op.weeklyExcess) && op.weeklyExcess >= 0 && cents(op.weeklyExcess) <= cents(op.amount)));
       return op.purpose == null;
     case 'allocation': return !op.eventKey && op.accountId !== RESERVE_ACCOUNT &&
-      (!op.existingCash || op.accountId !== LIFE_ACCOUNT) && validShares(op.shares);
+      (op.toWeekly === true ? op.accountId === LIFE_ACCOUNT && op.shares == null && !op.existingCash :
+        (!op.existingCash || op.accountId !== LIFE_ACCOUNT) && validShares(op.shares));
     case 'loan_disbursement': return typeof op.debtId === 'string' && !!op.debtId && op.fundingSource === 'borrowed'
       && (op.auditId == null || (typeof op.auditId === 'string' && !!op.auditId && typeof op.debtBooked === 'boolean'));
     case 'refund': return typeof op.expenseId === 'string' && !!op.expenseId;
@@ -148,9 +151,14 @@ export function validOperation(op: AccountOperation): boolean {
   }
 }
 
+export function reversibleOperation(op: AccountOperation) {
+  return op.type === 'allocation' || (op.type === 'transfer' && !!op.purpose) ||
+    ((op.type === 'expense' || op.type === 'debt_payment') && !!(op.eventKey || op.partialFor));
+}
+
 export function appendOperations(existing: AccountOperation[], incoming: AccountOperation[]): AccountOperation[] {
   const ids = new Set(existing.map(op => op.id));
-  const eventKeys = new Set(existing.flatMap(op => op.eventKey ? [op.eventKey] : []));
+  const eventKeys = new Set(existing.flatMap(op => op.eventKey && op.status !== 'voided' ? [op.eventKey] : []));
   const externalKey = (op: AccountOperation) => op.externalId ? JSON.stringify([op.accountId, op.externalId]) : null;
   const external = new Set(existing.map(externalKey).filter(k => k != null));
   const reviewed = new Set(existing.flatMap(op => op.type === 'loan_disbursement' && op.auditId ? [op.auditId] : []));
@@ -160,6 +168,11 @@ export function appendOperations(existing: AccountOperation[], incoming: Account
     if (!validOperation(op)) continue;
     const key = externalKey(op);
     const previous = existing.find(entry => entry.id === op.id);
+    if (op.status === 'voided' && previous?.status === 'confirmed') {
+      if (Object.keys({ ...op, ...previous }).every(k => k === 'status' ||
+          JSON.stringify(op[k as keyof AccountOperation]) === JSON.stringify(previous[k as keyof AccountOperation]))) confirmed.set(op.id, op);
+      continue;
+    }
     if (previous?.type === 'transfer' && previous.status === 'planned' && op.type === 'transfer' && op.status === 'confirmed' &&
         op.accountId === previous.accountId && op.toAccountId === previous.toAccountId &&
         cents(op.amount) === cents(previous.amount) && op.externalId === previous.externalId && op.eventKey === previous.eventKey) {
@@ -167,10 +180,10 @@ export function appendOperations(existing: AccountOperation[], incoming: Account
       continue;
     }
     if (op.type === 'loan_disbursement' && op.auditId && reviewed.has(op.auditId)) continue;
-    if (ids.has(op.id) || (key && external.has(key)) || (op.eventKey && eventKeys.has(op.eventKey))) continue;
+    if (ids.has(op.id) || (key && external.has(key)) || (op.status !== 'voided' && op.eventKey && eventKeys.has(op.eventKey))) continue;
     ids.add(op.id);
     if (op.type === 'loan_disbursement' && op.auditId) reviewed.add(op.auditId);
-    if (op.eventKey) eventKeys.add(op.eventKey);
+    if (op.eventKey && op.status !== 'voided') eventKeys.add(op.eventKey);
     if (key) external.add(key);
     added.push(op);
   }

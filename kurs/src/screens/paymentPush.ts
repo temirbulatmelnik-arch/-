@@ -1,6 +1,7 @@
+import { LIFE_ACCOUNT, validDate } from '../domain/accounts';
 import { eventsBetween } from '../domain/calendar';
 import { addDays, weekStart } from '../domain/dates';
-import { DEFAULT_PREPARATION_TIME, moscowClock, needsPreparation, paymentPreparations, preparationInstant } from '../domain/funds';
+import { DEFAULT_PREPARATION_TIME, moscowClock, nextSweepReminder, needsPreparation, paymentPreparations, preparationInstant } from '../domain/funds';
 import { ledger } from '../domain/ledger';
 import { useStore } from '../store/store';
 import { useUi } from '../store/ui';
@@ -93,20 +94,23 @@ export async function syncPaymentPush() {
     if (!subscription) { await disablePaymentPush(); return; }
     const s = useStore.getState();
     if (!s.ready) return;
-    const now = moscowClock().date;
-    const time = s.settings.preparationTime ?? DEFAULT_PREPARATION_TIME;
+    const clock = moscowClock();
+    const now = clock.date;
     const events = eventsBetween(s, now, addDays(now, 46));
     const led = ledger({ ...s, now });
     const groups = paymentPreparations(events, s.marks, led.heldForPayments, led.reserve)
       .filter(needsPreparation);
     const dates = [
-      ...groups.map(g => ({ localKey: JSON.stringify(g.events.map(event => event.key)), date: g.remindDate })),
+      ...groups.map(g => ({ localKey: JSON.stringify([`prepare:${g.date}`]), date: g.remindDate })),
+      ...(led.pendingSweepToReserve[LIFE_ACCOUNT] > 0 ? [{
+        localKey: JSON.stringify([`sweep:${LIFE_ACCOUNT}`]), date: nextSweepReminder(clock),
+      }] : []),
       ...events.filter(event => event.kind === 'weekly' && !s.marks[event.key]?.done)
         .map(event => ({ localKey: JSON.stringify([event.key]), date: event.date })),
     ];
     const ids: Record<string, string> = {};
     const scheduled = dates.flatMap(({ localKey, date }) => {
-      const instant = preparationInstant(date, time);
+      const instant = preparationInstant(date, DEFAULT_PREPARATION_TIME);
       if (Date.parse(instant) <= Date.now()) return [];
       const id = state.ids[localKey] ?? crypto.randomUUID();
       ids[localKey] = id;
@@ -142,11 +146,24 @@ export function openPaymentReminder() {
   const today = moscowClock().date;
   const ui = useUi.getState();
   const s = useStore.getState();
+  const led = ledger({ ...s, now: today });
+  if (keys[0] === `sweep:${LIFE_ACCOUNT}`) {
+    const amount = led.pendingSweepToReserve[LIFE_ACCOUNT];
+    if (amount > 0) ui.set({ transfer: { kind: 'sweep', accountId: LIFE_ACCOUNT, amount } });
+    return;
+  }
+  if (keys[0]?.startsWith('prepare:')) {
+    const date = keys[0].slice('prepare:'.length);
+    if (!validDate(date)) return;
+    const groups = paymentPreparations(eventsBetween(s, date, date), s.marks, led.heldForPayments, led.reserve);
+    if (groups.length === 1 && needsPreparation(groups[0])) ui.set({ transfer: { kind: 'payment', plan: groups[0] } });
+    else ui.set({ paymentQueue: true });
+    return;
+  }
   const events = eventsBetween(s, addDays(today, -10), addDays(today, 14)).filter(e => keys.includes(e.key) && !s.marks[e.key]?.done);
   const first = events[0];
   if (!first) return;
   if (first.kind === 'weekly') { ui.set({ week: weekStart(first.date) }); return; }
-  const led = ledger({ ...s, now: today });
   const groups = paymentPreparations(events, s.marks, led.heldForPayments, led.reserve);
   if (groups.length === 1 && events.length > 1) ui.set({ transfer: { kind: 'payment', plan: groups[0] } });
   else ui.set({ event: first });

@@ -6,7 +6,7 @@ import { TABS, TabBar } from './components/TabBar';
 import { Toast } from './components/ui';
 import { CardSheet, SavingsSheet } from './screens/Accounts';
 import { LoanSheet } from './screens/LoanSheet';
-import { PaymentQueueSheet, PaymentRoutesSheet } from './screens/PaymentQueue';
+import { PaymentQueueSheet } from './screens/PaymentQueue';
 import { TransferSheet } from './screens/TransferSheet';
 import { AddExpenseSheet } from './screens/AddExpense';
 import { BonusSheet } from './screens/BonusSheet';
@@ -77,7 +77,6 @@ const SHEETS = (
     <CardSheet />
     <LoanSheet />
     <TransferSheet />
-    <PaymentRoutesSheet />
     <PaymentQueueSheet />
     <FixedSheet />
     <SyncSheet />

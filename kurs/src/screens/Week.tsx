@@ -1,4 +1,3 @@
-import { accountOptions, RESERVE_ACCOUNT } from '../domain/accounts';
 // «Сегодня»: сцена с мостом, остаток недели и кольцо дня. Под сценой — быстрые траты, один следующий шаг, строка
 // «Неделя», три сосуда «Где деньги» и плитки-входы «Траты» и «Долги». Плашка о перерасходе появляется при входе.
 import { ChevronRight, MessagesSquare, Scale, ScanText, Settings as Cog } from 'lucide-react';
@@ -17,7 +16,6 @@ import { cashIncomeEvent, eventsBetween } from '../domain/calendar';
 import { activeBridge, bridgeState } from '../domain/bridge';
 import { addDays, dayMonth, ddmm, fromKey, monthKey, plural, weekdayFull, weekRange } from '../domain/dates';
 import { DEFAULT_PREPARATION_TIME, paymentPreparations, preparationDue, weeklyTopUp } from '../domain/funds';
-import { fundingBalanceKnown } from '../domain/ledger';
 import { rub } from '../domain/money';
 import { quickSpends, yesterdaySet, type QuickSpend } from '../domain/quick';
 import { DEFAULT_SPEND_SOURCE, spendEffect } from '../domain/sources';
@@ -32,8 +30,8 @@ import { useLedger } from './Checkup';
 export function Week() {
   const now = useToday();
   const cal = useCal();
-  const [debts, marks, settings, overrides, startTotal, closures, bridge, checkups, accountBook] = useStore(useShallow(s => [
-    s.debts, s.marks, s.settings, s.weeklyOverrides, s.planTrajectory[0]?.[1] ?? 0, s.closures, s.bridge, s.checkups, s.accountBook,
+  const [debts, marks, overrides, startTotal, closures, bridge, checkups] = useStore(useShallow(s => [
+    s.debts, s.marks, s.weeklyOverrides, s.planTrajectory[0]?.[1] ?? 0, s.closures, s.bridge, s.checkups,
   ] as const));
   const expenses = useBudgetExpenses();
   // только нужное из состояния интерфейса: иначе весь экран перерисовывался бы при каждом переключении вкладки и листе
@@ -113,41 +111,21 @@ export function Week() {
 
   const [later, setLater] = useState<ReadonlySet<string>>(() => new Set());
   const clock = useMoscowClock();
-  const preparationTime = settings.preparationTime ?? DEFAULT_PREPARATION_TIME;
+  const preparationTime = DEFAULT_PREPARATION_TIME;
   const planned = useMemo(() => eventsBetween(cal, addDays(clock.date, -14), addDays(clock.date, 45)), [cal, clock.date]);
   const groups = paymentPreparations(planned, marks, led.heldForPayments, led.reserve);
-  const nextIncome = planned.find(e => e.date >= clock.date && cashIncomeEvent(e) && e.payroll && !marks[e.key]?.done &&
-    !e.payroll.documented && !e.payroll.bankConfirmed && ['advance', 'salary', 'bonusMonthly'].includes(e.incomeKind ?? ''));
+  const nextIncome = planned.find(e => e.date >= clock.date && cashIncomeEvent(e) && !e.projection && !marks[e.key]?.done && !e.payroll?.bankConfirmed);
   const steps: Step[] = [];
-  for (const plan of groups.filter(g => g.date <= clock.date || preparationDue(g, clock, preparationTime))) {
-    const first = plan.events[0];
-    const name = accountOptions(accountBook).find(a => a.id === plan.accountId)?.name;
-    const title = plan.events.length > 1 ? `${plan.events.length} платежа с одного счёта` :
-      debts.find(debt => debt.id === first.debtId)?.short ?? first.title;
-    const unknownBalance = !!plan.accountId && (!fundingBalanceKnown(led, plan.accountId) ||
-      plan.accountId !== RESERVE_ACCOUNT && !led.reserveVerified);
-    const preparation = plan.date > clock.date || Boolean(plan.toFund || plan.inTransit) || !name;
-    steps.push({ id: `move:${plan.id}`, tone: plan.reserveShortfall ? 'out' : 'rsv',
-      kicker: plan.date < clock.date ? `Проверьте списание · ${ddmm(plan.date)}` : `Следующее действие · ${ddmm(plan.date)}`,
-      title: !name ? `Указать счёт · ${title}` : title,
-      amount: <Money value={plan.total} approx={plan.events.some(e => e.approx)} kopecks />,
-      text: !name ? 'Уточните карту или счёт в банке.' : unknownBalance ? 'Сверьте остатки счетов перед расчётом перевода.' : <>{name}. {plan.toFund ? <>Из резерва <Money value={plan.toFund} kopecks />. </> : null}
-        {plan.inTransit > 0 && <>На промежуточной карте <Money value={plan.inTransit} kopecks />. </>}
-        {plan.reserveShortfall > 0 && <span className="text-warn">Не хватает <Money value={plan.reserveShortfall} kopecks />.</span>}</>,
-      primary: !name ? { label: 'Счета списания', run: () => ui.set({ paymentRoutes: true }) } :
-        unknownBalance ? { label: 'Сверить счета', run: () => ui.set({ finance: true }) } :
-        preparation ? { label: 'Подготовить', run: () => ui.set({ transfer: { kind: 'payment', plan } }) } :
-          { label: 'Проверить списание', run: () => ui.set({ event: first }) },
-    });
-  }
+  const nearest = groups.find(group => group.date >= clock.date) ?? groups.at(-1);
+  const nearestDue = nearest && preparationDue(nearest, clock, preparationTime);
   const incomeToSweep = Object.entries(led.pendingSweepToReserve).find(([, value]) => value > 0);
   if (incomeToSweep) {
     const [accountId, amount] = incomeToSweep;
-    steps.push({ id: `sweep:${accountId}`, tone: 'rsv', kicker: 'Получено на карту', title: 'Отложить в резерв',
+    steps.push({ id: `sweep:${accountId}`, tone: 'rsv', kicker: 'На карте', title: 'Перевести в резерв',
       amount: <Money value={amount} kopecks />,
       primary: { label: 'Открыть перевод', run: () => ui.set({ transfer: { kind: 'sweep', accountId, amount } }) } });
   }
-  if (closing) {
+  if (closing && clock.date === addDays(closeMonday, 6) && clock.time >= preparationTime && !marks[`wk:${addDays(closeMonday, 7)}`]?.done) {
     const topUp = led.lifeAvailable == null ? null : weeklyTopUp(closing.nextLimit, led.lifeAvailable);
     steps.push({ id: `weekly:${closeMonday}`, tone: 'rsv', kicker: `${ddmm(addDays(closeMonday, 6))} · Воскресенье вечером`,
       title: 'Пополнить новую неделю', amount: topUp != null ? <Money value={topUp} kopecks /> : undefined,
@@ -240,12 +218,20 @@ export function Week() {
         <button className="flex min-h-11 w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-surface px-3 py-2 text-left text-[13px]" type="button" onClick={() => ui.set({ week: week.monday })}>
           <span>Лимит <Money value={week.limit} /></span><span>Потрачено <Money value={week.spent} /></span>
         </button>
+        {nearest && <button type="button" className="card flex min-h-11 w-full items-center justify-between gap-2 p-3 text-left"
+          onClick={() => nearest.toFund && nearestDue ? ui.set({ transfer: { kind: 'payment', plan: nearest } }) :
+            nearest.events.length === 1 ? ui.set({ event: nearest.events[0] }) : ui.set({ paymentQueue: true })}>
+          <span className="min-w-0"><span className="block text-[12px] text-muted">Ближайший платёж · {ddmm(nearest.date)}</span>
+            <span className="block font-medium">{nearest.events.length === 1 ? nearest.events[0].title : `Платежей ${nearest.events.length}`}</span>
+            {nearestDue && !!nearest.toFund && <span className="block text-[12px] text-sea">Подготовить из резерва <Money value={nearest.toFund} kopecks /></span>}
+          </span><Money value={nearest.total} approx={nearest.events.some(e => e.approx)} kopecks className="shrink-0" />
+        </button>}
         {visibleSteps.length > 0 && <section aria-label="Следующее действие">
-          <NextStep steps={visibleSteps.slice(0, 1)} onLater={id => setLater(prev => new Set([...prev, id]))} />
+          <NextStep steps={visibleSteps} onLater={id => setLater(prev => new Set([...prev, id]))} />
         </section>}
-        {nextIncome && <button type="button" className="card flex min-h-11 w-full items-center justify-between gap-2 p-3 text-left"
+        {nextIncome && !incomeToSweep && <button type="button" className="card flex min-h-11 w-full items-center justify-between gap-2 p-3 text-left"
           onClick={() => ui.set({ workSheet: true })}>
-          <span className="min-w-0"><span className="block text-[12px] text-muted">Следующее поступление</span>
+          <span className="min-w-0"><span className="block text-[12px] text-muted">Ожидается поступление</span>
             <span className="block font-medium">{ddmm(nextIncome.date)} · {nextIncome.title}</span></span>
           <Money value={nextIncome.amount} approx className="shrink-0" />
         </button>}

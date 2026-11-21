@@ -1,7 +1,8 @@
-import { actionableEvent, eventsBetween } from '../domain/calendar';
+import { actionableEvent, cashIncomeEvent, eventsBetween } from '../domain/calendar';
 import { addDays, addMonths, monthKey } from '../domain/dates';
-import { DEFAULT_PREPARATION_TIME, moscowClock, paymentPreparations, preparationDue } from '../domain/funds';
+import { DEFAULT_PREPARATION_TIME, moscowClock, nextSweepReminder, paymentPreparations, preparationDue } from '../domain/funds';
 import { buildIcs, calendarTest, downloadFile } from '../domain/ics';
+import { LIFE_ACCOUNT } from '../domain/accounts';
 import { ledger } from '../domain/ledger';
 import { useStore } from '../store/store';
 import { toast } from '../store/ui';
@@ -18,13 +19,14 @@ async function shareCalendar(name: string, ics: string) {
 
 export async function exportCalendar(months = 6) {
   const s = useStore.getState();
-  const from = moscowClock().date;
+  const clock = moscowClock();
+  const from = clock.date;
   const to = `${addMonths(monthKey(from), months)}-01`;
-  const events = eventsBetween(s, from, to).filter(e => !s.marks[e.key]?.done && actionableEvent(e));
+  const events = eventsBetween(s, from, to).filter(e => !s.marks[e.key]?.done && actionableEvent(e) && (e.kind !== 'income' || cashIncomeEvent(e)));
   const led = ledger({ ...s, now: from });
   const groups = paymentPreparations(events, s.marks, led.heldForPayments, led.reserve);
   const ics = buildIcs(events, { baseUrl: new URL('./', location.href).href, hideAmounts: s.settings.hideAmounts, remindDays: s.settings.remindDays, time: s.settings.remindTime,
-    preparation: { time: s.settings.preparationTime ?? DEFAULT_PREPARATION_TIME, groups } });
+    preparation: { time: DEFAULT_PREPARATION_TIME, groups, sweepOn: led.pendingSweepToReserve[LIFE_ACCOUNT] > 0 ? nextSweepReminder(clock) : undefined } });
   if (!await shareCalendar('kurs-platezhi.ics', ics)) return;
   s.setSettings({ lastIcsAt: new Date().toISOString() });
   toast('Импортируйте файл в отдельный календарь «Курс»');
@@ -42,7 +44,7 @@ export function updateBadge() {
   const clock = moscowClock();
   const led = ledger({ ...s, now: clock.date });
   const n = paymentPreparations(eventsBetween(s, addDays(clock.date, -45), addDays(clock.date, 1)),
-    s.marks, led.heldForPayments, led.reserve).filter(g => g.date <= clock.date || preparationDue(g, clock, s.settings.preparationTime ?? DEFAULT_PREPARATION_TIME)).length;
+    s.marks, led.heldForPayments, led.reserve).filter(g => g.date <= clock.date || preparationDue(g, clock, DEFAULT_PREPARATION_TIME)).length + Number(led.pendingSweepToReserve[LIFE_ACCOUNT] > 0);
   (n ? nav.setAppBadge(n) : nav.clearAppBadge?.())?.catch(() => {});
 }
 

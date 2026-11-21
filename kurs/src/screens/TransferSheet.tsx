@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { Field, Money, PrimaryButton, Sheet } from '../components/ui';
 import { accountOptions, LIFE_ACCOUNT, RESERVE_ACCOUNT } from '../domain/accounts';
 import { eventsBetween } from '../domain/calendar';
-import { ddmm } from '../domain/dates';
-import { moscowClock, paymentPreparations, type FundingMode } from '../domain/funds';
+import { ddmm, weekStart } from '../domain/dates';
+import { moscowClock, paymentPreparations, weeklyTopUp, type FundingMode } from '../domain/funds';
 import { fundingBalanceKnown } from '../domain/ledger';
+import { weeklyLimit } from '../domain/plan';
 import { parseAmount } from '../domain/money';
 import { uid, useStore } from '../store/store';
 import { toast, useCal, useUi } from '../store/ui';
@@ -25,6 +26,7 @@ function Body({ action, close }: { action: Action; close: () => void }) {
   const book = useStore(s => s.accountBook);
   const marks = useStore(s => s.marks);
   const dateNow = moscowClock().date;
+  const [keepForWeek, setKeepForWeek] = useState(false);
   const [date, setDate] = useState(dateNow);
   const [id] = useState(uid);
   const name = (id: string | undefined) => accountOptions(book).find(a => a.id === id)?.name ?? 'Счёт не назначен';
@@ -43,9 +45,12 @@ function Body({ action, close }: { action: Action; close: () => void }) {
     if (mode === 'allocate') return Math.min(plan.toFund ?? 0, led.pendingSweepToReserve[plan.accountId] ?? 0);
     return plan.toFund ?? 0;
   };
-  const limit = action.kind === 'return' ? action.held.amount : action.kind === 'sweep' ? action.amount : maxFor(mode);
+  const sweep = action.kind === 'sweep' ? led.pendingSweepToReserve[action.accountId] ?? 0 : 0;
+  const currentLimit = weeklyLimit(cal.debts, weekStart(dateNow), cal.weeklyOverrides);
+  const keepLimit = led.lifeAvailable == null ? 0 : Math.min(sweep, weeklyTopUp(currentLimit, led.lifeAvailable));
+  const limit = action.kind === 'return' ? action.held.amount : action.kind === 'sweep' ? (keepForWeek ? keepLimit : sweep) : maxFor(mode);
   const existingAssignment = action.kind === 'payment' && (mode === 'allocate' || mode === 'existing');
-  const maxActual = action.kind === 'payment' && (mode === 'reserve' || mode === 'via') ? led.reserve : limit;
+  const maxActual = action.kind === 'payment' && (mode === 'reserve' || mode === 'via') ? Math.min(led.reserve, limit) : limit;
   const [amount, setAmount] = useState(String(limit).replace('.', ','));
   const value = parseAmount(amount);
   const source = action.kind === 'sweep' ? action.accountId : action.kind === 'return' ? action.held.accountId :
@@ -60,11 +65,11 @@ function Body({ action, close }: { action: Action; close: () => void }) {
   const submit = () => {
     if (!value) return;
     const s = useStore.getState();
-    const ok = action.kind === 'sweep' ? s.sweepIncome(id, action.accountId, value, date)
+    const ok = action.kind === 'sweep' ? (keepForWeek ? s.keepIncomeForWeek(id, value, date) : s.sweepIncome(id, action.accountId, value, date))
       : action.kind === 'return' ? s.returnEarmark(id, action.held.accountId, action.held.key, value, date)
         : plan?.accountId && s.fundPayment(id, mode, plan.events.map(e => e.key), plan.date, plan.accountId, value, date);
     if (!ok) { toast('Сумма или маршрут изменились. Сверьте остатки и выберите актуальный платёж.'); return; }
-    toast(existingAssignment ? 'Деньги выделены под платёж' : 'Перевод записан');
+    toast(keepForWeek ? 'Деньги оставлены на неделю' : existingAssignment ? 'Деньги выделены под платёж' : 'Перевод записан');
     close();
   };
   const eventLink = (key: string) => {
@@ -72,6 +77,12 @@ function Body({ action, close }: { action: Action; close: () => void }) {
     if (e) useUi.getState().set({ transfer: null, event: e });
   };
   return <div className="space-y-4 pt-1">
+    {action.kind === 'sweep' && action.accountId === LIFE_ACCOUNT && keepLimit > 0 && <label className="flex min-h-11 items-center gap-2 text-[14px]">
+      <input type="checkbox" checked={keepForWeek} onChange={e => {
+        setKeepForWeek(e.target.checked);
+        setAmount(String(e.target.checked ? keepLimit : sweep));
+      }} /> Оставить часть дохода на текущую неделю
+    </label>}
     {plan && <section className="card space-y-2 p-4 text-[14px]">
       <div className="font-medium">{ddmm(plan.date)} · {name(plan.accountId)}</div>
       {plan.events.map(e => <button key={e.key} type="button" className="flex w-full justify-between gap-3 text-left text-sea"
@@ -96,18 +107,17 @@ function Body({ action, close }: { action: Action; close: () => void }) {
       </select>
     </Field> : null}
     {limit > 0 && <section className="card space-y-3 p-4">
-      <p className="text-[14px] font-medium">{existingAssignment ? `${name(target)} · выделение без перевода` : `${name(source)} → ${name(target)}`}</p>
+      <p className="text-[14px] font-medium">{keepForWeek ? 'Оставить деньги на карте жизни' : existingAssignment ? `${name(target)} · выделение без перевода` : `${name(source)} → ${name(target)}`}</p>
       {mode === 'via' && <p className="text-[13px] text-muted">После зачисления подтвердите отдельно перевод с основной карты на счёт списания.</p>}
-      {!existingAssignment && <p className="text-[13px] text-muted">Сначала выполните операцию в банке, затем запишите фактический перевод.</p>}
-      <Field label={existingAssignment ? 'Сумма назначения' : 'Фактическая сумма'}>
+      {!existingAssignment && !keepForWeek && <p className="text-[13px] text-muted">Сначала выполните операцию в банке, затем запишите фактический перевод.</p>}
+      <Field label={existingAssignment || keepForWeek ? 'Сумма назначения' : 'Фактическая сумма'}>
         <input className="field" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} />
       </Field>
-      <Field label={existingAssignment ? 'Дата назначения' : 'Фактическая дата перевода'}>
+      <Field label={existingAssignment || keepForWeek ? 'Дата назначения' : 'Фактическая дата перевода'}>
         <input className="field" type="date" value={date} max={dateNow} onChange={e => setDate(e.target.value)} />
       </Field>
-      {value != null && value > limit && maxActual > limit && <p className="text-[13px] text-warn">Излишек останется под платежом до подтверждённого возврата в резерв.</p>}
       <PrimaryButton onClick={submit} disabled={!value || value <= 0 || value > maxActual || !date || date > dateNow}>
-        {existingAssignment ? 'Выделить под платёж' : 'Я перевёл'}
+        {keepForWeek ? 'Оставить на неделю' : existingAssignment ? 'Выделить под платёж' : target === RESERVE_ACCOUNT ? 'Перевёл в резерв' : 'Перевёл на карту'}
       </PrimaryButton>
     </section>}
   </div>;

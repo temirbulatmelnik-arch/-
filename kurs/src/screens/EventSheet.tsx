@@ -32,8 +32,8 @@ function Body({ e }: { e: CalEvent }) {
   const moscowDate = moscowClock().date;
   const mark = useStore(s => s.marks[e.key]);
   const led = useLedger();
-  const prepTime = useStore(s => s.settings.preparationTime) ?? DEFAULT_PREPARATION_TIME;
-  const assigned = useStore(s => s.accountBook.paymentAccounts[e.key]) ?? e.accountId;
+  const prepTime = DEFAULT_PREPARATION_TIME;
+  const assigned = mark?.done ? e.accountId : LIFE_ACCOUNT;
   const prepared = led.heldForPayments.find(row => row.key === e.key && row.accountId === assigned);
   const [partial, setPartial] = useState(false);
   const [partialId] = useState(uid);
@@ -59,8 +59,8 @@ function Body({ e }: { e: CalEvent }) {
   });
   const [editing, setEditing] = useState(false);
   const book = useStore(s => s.accountBook);
-  const [account, setAccount] = useState(assigned ?? (e.kind === 'payment' ? '' : LIFE_ACCOUNT));
-  const prep = paymentPreparations([{ ...e, accountId: assigned, prepareOn: override?.prepareOn ?? e.prepareOn }], mark ? { [e.key]: mark } : {}, led.heldForPayments, led.reserve)[0];
+  const account = assigned ?? LIFE_ACCOUNT;
+  const prep = paymentPreparations([{ ...e, accountId: assigned, prepareOn: addDays(e.date, -1) }], mark ? { [e.key]: mark } : {}, led.heldForPayments, led.reserve)[0];
   const from = account === LIFE_ACCOUNT ? 'card' : 'reserve';
   const [paidDate, setPaidDate] = useState(() => pay?.documented && pay.actualPayDate ? pay.actualPayDate : moscowClock().date);
   const [principal, setPrincipal] = useState('');
@@ -218,14 +218,7 @@ function Body({ e }: { e: CalEvent }) {
           {e.kind === 'payment' && (
             <div>
               <div className="mb-1.5 text-[12.5px] font-medium text-muted">Откуда оплачено</div>
-              <select className="field" value={account} onChange={x => setAccount(x.target.value)}>
-                <option value="">Выберите счёт по выписке</option>
-                {accountOptions(book).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </select>
-              {account && account !== assigned && <button type="button" className="mt-2 text-[13px] text-sea" onClick={() => {
-                useStore.getState().setPaymentAccount(e.key, account);
-                toast('Счёт списания назначен');
-              }}>Назначить счёт для этого платежа</button>}
+              <p className="text-[14px]">Карта жизни</p>
               {debt && <p className="mt-1.5 text-[12px] leading-snug text-muted">Платёж по долгу — только реальными деньгами: с кредитки его не гасим.</p>}
             </div>
           )}
@@ -243,13 +236,13 @@ function Body({ e }: { e: CalEvent }) {
               {part.label}<input className="field mt-1" inputMode="decimal" value={part.value} onChange={x => part.set(x.target.value)} />
             </label>)}
           </details>}
-          {isBonus(e) && <p className="text-[12.5px] leading-snug text-muted">Распределение начинается после сверки зачисления. Досрочка доступна в пределах безопасного лимита.</p>}
+          {isBonus(e) && <p className="text-[12.5px] leading-snug text-muted">После подтверждения «Курс» предложит перевести поступление в резерв.</p>}
           {e.kind === 'payment' && value > 0 && value < e.amount && <label className="flex items-start gap-2 text-[13px]">
             <input type="checkbox" checked={partial} onChange={x => setPartial(x.target.checked)} /> Банк списал только часть. Остальное ещё к оплате.
           </label>}
           {e.kind === 'weekly' && value > led.reserve && <p className="text-[13px] text-warn">В резерве недостаточно денег.</p>}
           <PrimaryButton onClick={done} disabled={value <= 0 || !paidDate || paidDate > moscowDate || (e.kind === 'payment' && !account) || (e.kind === 'weekly' && (led.lifeAvailable == null || value > led.reserve))}>
-            {e.kind === 'income' ? (isBonus(e) ? 'Пришла — распределить' : 'Пришло') : e.kind === 'weekly' ? 'Долил' : partial ? 'Записать частичное списание' : 'Платёж списан'}
+            {e.kind === 'income' ? (isBonus(e) ? 'Подтвердить зачисление' : 'Поступление зачислено') : e.kind === 'weekly' ? 'Долил' : partial ? 'Записать частичное списание' : 'Платёж списан'}
           </PrimaryButton>
           {e.kind === 'weekly' ? (
             <>

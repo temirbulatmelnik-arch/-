@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EMPTY_BOOK, LIFE_ACCOUNT, RESERVE_ACCOUNT, type AccountOperation } from '../domain/accounts';
 import { eventsBetween } from '../domain/calendar';
 import { coverage, coverageInput, safePrepayment } from '../domain/coverage';
-import { applyExchange, previewExchange, type ExchangeFile } from '../domain/exchange';
-import { moscowClock, paymentPreparations, weeklyTopUp } from '../domain/funds';
+import { applyExchange, buildExchange, exchangeRevision, prepareExchange, previewExchange, type ExchangeFile } from '../domain/exchange';
+import { moscowClock, paymentPreparations, preparationDue, weeklyTopUp } from '../domain/funds';
 import { buildIcs, calendarTest } from '../domain/ics';
 import { ledger } from '../domain/ledger';
 import type { CalEvent } from '../domain/types';
@@ -120,24 +120,82 @@ describe('подготовка обязательств и движение ме
     expect(s().accountBook.operations.map(op => op.type)).toEqual(['income', 'transfer']);
   });
 
-  it('выделяет часть полученного дохода и проводит отдельный маршрут до другого банка', async () => {
+  it('оставляет прежние назначения в данных, а новые операции ведёт через карту жизни', async () => {
     const other = { ...split, accountId: 'known' };
     const store = await open({ oneOff: [other, salary], accountBook: { ...EMPTY_BOOK,
-      accounts: [{ id: 'known', name: 'Счёт списания', balance: { amount: 0, date: day, at } }] } });
+      paymentAccounts: { [other.key]: 'known' },
+      accounts: [{ id: 'known', name: 'Прежний счёт', balance: { amount: 0, date: day, at } }] } });
     const s = store.getState;
+    expect(s().accountBook.paymentAccounts[other.key]).toBe('known');
+    expect(eventsBetween(s(), next, next).find(e => e.key === split.key)?.accountId).toBe(LIFE_ACCOUNT);
     s().markEvent(salary, true, salary.amount);
-    expect(s().fundPayment('a', 'allocate', [other.key], next, 'known', 5000, day)).toBe(false);
-    expect(s().fundPayment('direct', 'via', [other.key], next, 'known', 5000, day)).toBe(true);
-    let led = ledger(s());
-    expect(led).toMatchObject({ card: 60273, lifeAvailable: 1760, heldOnCard: 5000 });
-    expect(paymentPreparations([other], s().marks, led.heldForPayments, led.reserve)[0]).toMatchObject({ inTransit: 5000, toFund: 20184 });
-    expect(s().fundPayment('leg-two', 'forward', [other.key], next, 'known', 5000, day)).toBe(true);
-    led = ledger(s());
-    expect(led.cashAccounts[0].expected).toBe(5000);
-    expect(led).toMatchObject({ card: 55273, lifeAvailable: 1760, heldOnCard: 0, reserve: 55000.66 });
-    s().setPaymentAccount(other.key, LIFE_ACCOUNT);
+    expect(s().fundPayment('old', 'via', [other.key], next, 'known', 5000, day)).toBe(false);
     expect(s().fundPayment('a', 'allocate', [other.key], next, LIFE_ACCOUNT, 3500, day)).toBe(true);
     expect(ledger(s())).toMatchObject({ card: 55273, lifeAvailable: 1760, heldOnCard: 3500, incomeOnCard: 50013 });
+    expect(s().keepIncomeForWeek('week-part', 1000, day)).toBe(true);
+    expect(s().keepIncomeForWeek('week-part', 1000, day)).toBe(false);
+    expect(ledger(s())).toMatchObject({ card: 55273, reserve: 60000.66, lifeAvailable: 2760, heldOnCard: 3500, incomeOnCard: 49013 });
+    expect(s().voidOperation('week-part')).toBe(true);
+    expect(ledger(s())).toMatchObject({ lifeAvailable: 1760, incomeOnCard: 50013 });
+  });
+
+  it('проводит аванс, перевод в резерв, напоминание, подготовку и списание Сплита ровно по одному разу', async () => {
+    const advance = { ...salary, key: 'inc:advance:2026-11', date: day, amount: 43783, incomeKind: 'advance' as const };
+    const canonical = { ...split, key: 'pay:yandex-split:2026-12', debtId: 'yandex-split' };
+    const debt = { id: 'yandex-split', balance: 100000, rate: 0, rule: { type: 'fixed', amount: 25184 }, name: 'Сплит', short: 'Сплит',
+      kind: 'split', dueDay: 1, order: 1, closed: false };
+    const store = await open({ oneOff: [canonical, advance], debts: [debt] });
+    const s = store.getState;
+    vi.setSystemTime(new Date(day + 'T16:30:00Z'));
+    s().markEvent(advance, true);
+    s().markEvent(advance, true);
+    expect(ledger(s())).toMatchObject({ card: 45543, lifeAvailable: 1760, reserve: 60000.66, incomeOnCard: 43783 });
+    const waiting = buildExchange(s(), day).status as { proposedTransfers: { kind: string; amount: number }[] };
+    expect(waiting.proposedTransfers).toContainEqual(expect.objectContaining({ kind: 'sweep', amount: 43783 }));
+    expect(s().sweepIncome('move-to-reserve', LIFE_ACCOUNT, 43783, day)).toBe(true);
+    expect(s().sweepIncome('move-to-reserve', LIFE_ACCOUNT, 43783, day)).toBe(false);
+    expect(ledger(s())).toMatchObject({ card: 1760, lifeAvailable: 1760, reserve: 103783.66, incomeOnCard: 0 });
+    const event = eventsBetween(s(), next, next).find(e => e.key === canonical.key)!;
+    const [group] = paymentPreparations([event], s().marks, [], 103783.66);
+    expect(group).toMatchObject({ remindDate: day, toFund: 25184, accountId: LIFE_ACCOUNT });
+    expect(preparationDue(group, moscowClock(), '20:00')).toBe(false);
+    vi.setSystemTime(new Date(day + 'T17:00:00Z'));
+    expect(preparationDue(group, moscowClock(), '20:00')).toBe(true);
+    expect(s().fundPayment('set-aside', 'reserve', [event.key], next, LIFE_ACCOUNT, 25184, day)).toBe(true);
+    expect(s().fundPayment('duplicate', 'reserve', [event.key], next, LIFE_ACCOUNT, 25184, day)).toBe(false);
+    expect(ledger(s())).toMatchObject({ card: 26944, lifeAvailable: 1760, reserve: 78599.66, heldOnCard: 25184 });
+    vi.setSystemTime(new Date(next + 'T07:00:00Z'));
+    s().markEvent(event, true);
+    s().markEvent(event, true);
+    expect(ledger(s())).toMatchObject({ card: 1760, lifeAvailable: 1760, reserve: 78599.66, heldOnCard: 0 });
+    expect(s().accountBook.operations.map(op => op.type)).toEqual(['income', 'transfer', 'transfer', 'debt_payment']);
+    expect(coverage(coverageInput(s(), ledger(s())), next, 'base', '2026-12-02').steps.some(step => step.key === event.key)).toBe(false);
+    vi.resetModules();
+    const restored = (await import('./store')).useStore.getState();
+    expect(ledger(restored)).toMatchObject({ card: 1760, lifeAvailable: 1760, reserve: 78599.66, heldOnCard: 0 });
+    const exportFile = buildExchange(restored, next);
+    expect(exportFile.accountBook?.operations).toEqual(restored.accountBook.operations);
+    expect(exportFile.calendar?.find(row => row.key === event.key)).toMatchObject({ done: true, paid: 25184, accountId: LIFE_ACCOUNT });
+  });
+
+  it('исправляет подтверждение и выдерживает повторный импорт файла без возрождения списания', async () => {
+    const store = await open();
+    const s = store.getState;
+    expect(s().fundPayment('prep', 'reserve', [split.key], next, LIFE_ACCOUNT, split.amount, day)).toBe(true);
+    vi.setSystemTime(new Date(next + 'T07:00:00Z'));
+    s().markEvent(split, true);
+    const oldOp = s().accountBook.operations.find(op => op.eventKey === split.key)!;
+    expect(s().voidOperation('prep')).toBe(false);
+    expect(s().voidOperation(oldOp.id)).toBe(true);
+    expect(ledger(s())).toMatchObject({ card: 26944, lifeAvailable: 1760, reserve: 34816.66, heldOnCard: 25184 });
+    const old: ExchangeFile = { app: 'kurs-exchange', version: 2, protocolVersion: '2.8', from: 'chat',
+      baseRevision: exchangeRevision(s()), patchId: 'old-payment', accountBook: { operations: [oldOp] } };
+    expect(prepareExchange(old, s(), next)).toMatchObject({ errors: [], patch: {} });
+    expect(prepareExchange(old, s(), next)).toMatchObject({ errors: [], patch: {} });
+    expect(s().marks[split.key]).toBeUndefined();
+    s().markEvent(split, true);
+    expect(ledger(s())).toMatchObject({ card: 1760, lifeAvailable: 1760, reserve: 34816.66, heldOnCard: 0 });
+    expect(s().accountBook.operations.filter(op => op.eventKey === split.key).map(op => op.status)).toEqual(['voided', 'confirmed']);
   });
 
   it('сохраняет 0.5.2, хранит локальную копию, переносит назначения через JSON 2.7 один раз', async () => {
@@ -169,7 +227,7 @@ describe('подготовка обязательств и движение ме
     const input = coverageInput(s, led);
     const result = coverage(input, day, 'base', '2026-12-02');
     expect(result.paymentFunding?.find(p => p.key === split.key)).toMatchObject({ fromReserve: 25184, held: 0, prepareBy: day });
-    expect(result.paymentFunding?.find(p => p.key === unknown.key)).toMatchObject({ fromReserve: null, shortfall: null });
+    expect(result.paymentFunding?.find(p => p.key === unknown.key)).toMatchObject({ accountId: LIFE_ACCOUNT, fromReserve: 18926.71, shortfall: 18926.71 });
     expect(result.steps.filter(step => step.key === split.key).map(step => step.delta)).toEqual([-25184]);
     expect(safePrepayment(input, day, RESERVE_ACCOUNT)).toBe(0);
   });
@@ -190,6 +248,14 @@ describe('уведомление Календаря iPhone', () => {
     expect(out).not.toContain('25184');
     expect(moscowClock(new Date('2026-11-30T21:00:00Z'))).toEqual({ date: next, time: '00:00' });
     expect(calendarTest(new Date('2026-11-30T16:57:00Z'))).toContain('DTSTART:20261130T170000Z');
+  });
+
+  it('экспортирует системный вечерний сигнал о подтверждённом доходе', () => {
+    const out = buildIcs([], { hideAmounts: true, remindDays: [], time: '10:00', baseUrl: 'https://example.com/kurs/',
+      now: new Date('2026-11-30T10:00:00Z'), preparation: { time: '20:00', groups: [], sweepOn: day } });
+    expect(out).toContain('DTSTART:20261130T170000Z');
+    expect(out).toContain('kurs-payment=sweep%3Alife');
+    expect(out).toContain('TRIGGER:PT0S');
   });
 
   it('не создаёт повторные напоминания о закрытом и уже подготовленном платеже', () => {

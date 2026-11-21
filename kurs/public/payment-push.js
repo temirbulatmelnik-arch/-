@@ -4,7 +4,7 @@ self.addEventListener('push', event => {
   try { data = event.data?.json(); } catch { return; }
   if (!data || typeof data.id !== 'string' || !/^[a-f0-9-]{36}$/i.test(data.id)) return;
   const title = data.test ? 'Курс · Проверка Web Push' : 'Курс · Напоминание';
-  const body = data.test ? 'Получено фоновое уведомление.' : 'Откройте «Курс» и проверьте ближайшие обязательства.';
+  const body = data.test ? 'Получено фоновое уведомление.' : 'Откройте «Курс» и проверьте платежи и переводы.';
   event.waitUntil(self.registration.showNotification(title, { body, tag: data.id, data: { id: data.id } }));
 });
 

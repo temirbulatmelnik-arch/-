@@ -7,14 +7,15 @@ import { annualIncome } from './annualIncome';
 // но только с изменениями. Списки с id/key — «добавить или изменить», удаление — только явное "delete": true.
 // Перед применением приложение показывает разницу по разделам; присланное без изменений ничего не трогает.
 import { bridgeState, weekMoney, type Bridge } from './bridge';
-import { cardOn, ledger, type Checkup, type LedgerInput } from './ledger';
+import { canVoidOperation, cardOn, ledger, type Checkup, type LedgerInput } from './ledger';
 import { compare2027Coverage, compareCoverage, coverage, coverageInput, HORIZON_DAYS, safePrepayment } from './coverage';
 import { PROTOCOL_VERSION } from './sync';
 import { eventsBetween, incomeStatus, paidOn, type CalendarInput, type IncomeStatus } from './calendar';
 import { categorize } from './categorize';
+import { DEFAULT_PREPARATION_TIME, partialPayments, paymentPreparations, preparationInstant, weeklyTopUp } from './funds';
 import { addDays, daysBetween, ddmm, plural } from './dates';
 import { rub } from './money';
-import { CATEGORIES, CATEGORY, currentPhase, DEFAULT_PLAN, reserveNeed, type BonusRule, type PlanConfig } from './plan';
+import { CATEGORIES, CATEGORY, currentPhase, DEFAULT_PLAN, reserveNeed, weeklyLimit, type BonusRule, type PlanConfig } from './plan';
 import { dayBudget, weekSummary } from './summary';
 import type {
   CalEvent, CalendarOverride, CardBalance, CategoryId, ChecklistItem, Debt, DebtKind, EventMark, Expense, FixedItem, IncomeTemplate, Phase, ReserveMove, Source,
@@ -201,6 +202,23 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
     ? eventsBetween(s, addDays(now, -14), addDays(now, 45))
     : eventsBetween(s, addDays(now, -45), addDays(now, 400))
       .filter(e => (e.kind === 'weekly' ? e.date <= addDays(now, 7) : e.date <= addDays(now, 75) || s.overrides[e.key] || s.marks[e.key]));
+  const nextWeek = recent.find(e => e.kind === 'weekly' && e.date >= now && !s.marks[e.key]?.done);
+  const preparations = paymentPreparations(recent.filter(e => e.date >= now), s.marks, led.heldForPayments, led.reserve);
+  const proposedTransfers = [
+    ...Object.entries(led.pendingSweepToReserve).filter(([, amount]) => amount > 0).map(([accountId, amount]) => ({
+      kind: 'sweep', date: now, fromAccountId: accountId, toAccountId: RESERVE_ACCOUNT, amount,
+    })),
+    ...(nextWeek && led.lifeAvailable != null ? [{
+      kind: 'weekly', date: nextWeek.date, fromAccountId: RESERVE_ACCOUNT, toAccountId: LIFE_ACCOUNT,
+      amount: weeklyTopUp(weeklyLimit(s.debts, nextWeek.key.slice(3), s.weeklyOverrides), led.lifeAvailable),
+      remindAt: preparationInstant(nextWeek.date, DEFAULT_PREPARATION_TIME), eventKeys: [nextWeek.key],
+    }] : []),
+    ...preparations.filter(group => group.toFund && group.accountId && group.date <= addDays(now, 45)).map(group => ({
+      kind: 'prepare', date: group.remindDate, fromAccountId: RESERVE_ACCOUNT, toAccountId: group.accountId, amount: group.toFund,
+      paymentDate: group.date, remindAt: preparationInstant(group.remindDate, DEFAULT_PREPARATION_TIME),
+      eventKeys: group.events.map(e => e.key),
+    })),
+  ].filter(transfer => transfer.amount != null && transfer.amount > 0);
   const year = Number(now.slice(0, 4));
   const lastYear = year + (s.work?.from.startsWith(String(year - 1)) ? 0 : 1);
   const firstYear = Math.max(year - 1, Number(s.work?.from.slice(0, 4) ?? year));
@@ -227,6 +245,7 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
       totalCash: led.card == null || (led.cashAccounts.some(a => a.expected == null)) ? null
         : rubles(cents(led.card) + cents(led.reserve) + led.cashAccounts.reduce((n, a) => n + cents(a.expected ?? 0), 0)),
       lifeFree: led.lifeAvailable,
+      proposedTransfers,
       ...(!short ? { debtReconciliation: { asOf: now, basis: rubles(basis), estimated: rubles(estimated), delta: rubles(estimated - basis), rows: debtRows } } : {}),
       phase: { id: phase.id, title: phase.title, weekly: phase.weekly, monthly: phase.monthly },
       week: { from: week.monday, to: week.sunday, ...weekFields(s, week.monday, led.card) },
@@ -722,8 +741,17 @@ const stepCalendar: Step = (f, s, ctx) => {
       lines.push(`${name}: даты и суммы подтверждённой операции меняются в журнале`);
       continue;
     }
-    if (p.done === true && !mark?.done && (e.payroll?.documented || e.projection === 'internal_transfer')) {
+    const incomingOperation = f.accountBook?.operations?.find(op => op.status === 'confirmed' && op.eventKey === e.key && op.date === p.paidDate);
+    if (incomingOperation && s.accountBook?.operations.some(op => op.id === incomingOperation.id && op.status === 'voided')) continue;
+    const linkedAmount = (incomingOperation ? cents(incomingOperation.amount) : 0) + (e.kind === 'payment'
+      ? (partialPayments(appendOperations(s.accountBook?.operations ?? [], f.accountBook?.operations ?? [])).get(e.key) ?? 0) : 0);
+    if (p.done === true && !mark?.done && e.projection === 'internal_transfer') {
       lines.push(`${name}: эта строка не создаёт движения денег`);
+      continue;
+    }
+    if (p.done === true && !mark?.done && (!incomingOperation || linkedAmount !== cents(p.paid ?? -1)) &&
+        (e.payroll?.documented || s.accountBook?.paymentRouting === 'life' && f.protocolVersion === '2.8')) {
+      lines.push(`${name}: эта строка не создаёт движения денег без связанной операции журнала`);
       continue;
     }
     if (p.done === true) {
@@ -1018,16 +1046,25 @@ const stepAccountBook: Step = (f, s, ctx) => {
   const marks = { ...s.marks };
   if (Array.isArray(incoming.operations)) for (const op of incoming.operations) {
     if (!bookOperationAllowed(op, book, s.debts, s.expenses) || (op.status === 'confirmed' && op.date > ctx.now) || (op.eventKey && op.type === 'loan_disbursement' && !marks[op.eventKey]?.done)) { if (strict) errors.push('accountBook.operations: неверный маршрут, дата или отметка займа'); continue; }
+    const previous = book.operations.find(row => row.id === op.id);
+    if (op.status === 'voided' && previous?.status === 'confirmed' && !canVoidOperation({
+      ...s, accountBook: book, marks, reserveLog: s.reserveLog ?? [], checkups: s.checkups ?? [], bridge: s.bridge ?? null,
+    }, previous, ctx.now)) {
+      if (strict) errors.push(`accountBook.operations.${op.id}: операция уже сверена или связана с последующим движением`);
+      continue;
+    }
     const operations = appendOperations(book.operations, [op]);
     if (operations === book.operations) {
-      if (strict && !book.operations.some(existing => canonical(existing) === canonical(op))) {
+      if (strict && !book.operations.some(existing => canonical(existing) === canonical(op) ||
+          existing.id === op.id && existing.status === 'voided' && canonical({ ...existing, status: op.status }) === canonical(op))) {
         errors.push(`accountBook.operations.${op.id}: операция уже связана с другой записью`);
       }
       continue;
     }
     book = { ...book, operations };
+    if (op.status === 'voided' && op.eventKey && !operations.some(row => row.status === 'confirmed' && row.eventKey === op.eventKey)) delete marks[op.eventKey];
     if (op.eventKey && op.status === 'confirmed' && !marks[op.eventKey]) marks[op.eventKey] = {
-      done: true, paidDate: op.date, at: op.at ?? new Date(op.date + 'T00:00:00Z').toISOString(), amount: op.amount,
+      done: true, paidDate: op.date, at: op.at ?? new Date(op.date + 'T00:00:00Z').toISOString(), amount: rubles(cents(op.amount) + (partialPayments(operations).get(op.eventKey) ?? 0)),
       ...((op.type === 'debt_payment' || op.type === 'expense') ? {
         paidFrom: op.accountId === LIFE_ACCOUNT ? 'card' as const : 'reserve' as const,
       } : {}),
@@ -1052,7 +1089,7 @@ const stepAccountBook: Step = (f, s, ctx) => {
     } else if (item.section === 'operations') {
       const op = book.operations.find(o => o.id === key);
       if (!op) continue;
-      if (op.status === 'confirmed') { errors.push(`accountBook.operations.${key}: подтверждённая операция защищена`); continue; }
+      if (op.status !== 'planned') { errors.push(`accountBook.operations.${key}: запись журнала защищена`); continue; }
       book = { ...book, operations: book.operations.filter(o => o.id !== key) };
     } else if (item.section === 'historicalLoans') {
       if (!book.historicalLoans?.some(o => o.eventKey === key)) continue;

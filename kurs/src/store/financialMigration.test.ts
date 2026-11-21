@@ -37,7 +37,7 @@ describe('обратная совместимость и подтвержден�
   it('открывает прежнее хранилище и полный JSON с отметками, журналом и сверкой', async () => {
     const store = await reopen(4, old);
     expect(store.getState()).toMatchObject(old);
-    expect(store.getState().accountBook).toEqual(EMPTY_BOOK);
+    expect(store.getState().accountBook).toEqual({ ...EMPTY_BOOK, paymentRouting: 'life' });
     expect(ledger(store.getState()).card).toBe(3000);
     const copy = JSON.parse(store.getState().exportData());
     store.getState().startEmpty();

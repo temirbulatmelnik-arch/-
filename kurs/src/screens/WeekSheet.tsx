@@ -1,13 +1,12 @@
 import { useLedger } from './Checkup';
 // Итог недели: траты по категориям против лимита, воскресное пополнение карты жизни из резерва до лимита и все траты недели.
 import { FileUp, Undo2 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { ExpenseRow } from '../components/rows';
-import { AmountInput, Bar, CatIcon, Money, PrimaryButton, SecondaryButton, Sheet } from '../components/ui';
+import { Bar, CatIcon, Money, PrimaryButton, SecondaryButton, Sheet } from '../components/ui';
 import { weeklyTopUp } from '../domain/funds';
 import { addDays, ddmm } from '../domain/dates';
-import { parseAmount } from '../domain/money';
 import { CATEGORY } from '../domain/plan';
 import { bridgeWeek } from '../domain/bridge';
 import { weekReport } from '../domain/weekly';
@@ -32,8 +31,6 @@ function Body({ monday }: { monday: string }) {
   const led = useLedger();
   const available = led.card == null ? null : led.lifeAvailable;
   const topUp = available == null ? 0 : weeklyTopUp(r.nextLimit, available);
-  const [amount, setAmount] = useState(String(topUp));
-  const value = parseAmount(amount) ?? 0;
   const max = Math.max(...r.byCategory.map(c => c.spent), 1);
   const list = useMemo(() => expenses.filter(e => e.date >= monday && e.date <= r.sunday).sort((a, b) => b.date.localeCompare(a.date)), [expenses, monday, r.sunday]);
 
@@ -99,9 +96,7 @@ function Body({ monday }: { monday: string }) {
           <PrimaryButton onClick={() => set({ week: null, checkup: monday })}>Сверить с банком и закрыть</PrimaryButton>
           <p className="text-[12px] leading-snug text-muted">Впишете остатки на карте, в резерве и на кредитке — приложение найдёт невнесённые траты и посчитает перевод. Или без сверки:</p>
           {topUp > led.reserve && <p className="text-[13px] text-warn">В резерве не хватает <Money value={topUp - led.reserve} kopecks />.</p>}
-          <AmountInput value={amount} onChange={setAmount} size="md" />
-          <p className="text-[12px] leading-snug text-muted">Перевели другую сумму — поправьте. Резерв уменьшится на неё, а в календаре пополнение отметится сделанным.</p>
-          <SecondaryButton onClick={() => close(value)} disabled={value <= 0 || value > led.reserve || available == null} className="w-full">Долил из резерва без сверки</SecondaryButton>
+          <SecondaryButton onClick={() => close(topUp)} disabled={topUp <= 0 || topUp > led.reserve || available == null} className="w-full">Перевёл на карту <Money value={topUp} kopecks /></SecondaryButton>
           <button type="button" onClick={() => close(0)} className="w-full py-1 text-[13px] text-muted">Закрыть без пополнения</button>
         </div>
       )}

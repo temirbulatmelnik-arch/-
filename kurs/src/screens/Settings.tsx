@@ -87,11 +87,7 @@ function Body() {
 
       <Section title="Напоминания" id="reminders">
         <p className="text-[13.5px] leading-snug text-muted">На iPhone при закрытом «Курсе» напомнит приложение «Календарь». Сначала импортируйте файл и разрешите уведомления Календаря в настройках iOS.</p>
-        <Field label="Подготовка платежей и недели по Москве">
-          <input type="time" value={st.preparationTime ?? DEFAULT_PREPARATION_TIME}
-            onChange={e => s.setSettings({ preparationTime: e.target.value || DEFAULT_PREPARATION_TIME })} className="field" />
-        </Field>
-        <p className="text-[12.5px] text-muted">Подготовка назначается на вечер накануне списания. Недельное пополнение — на воскресенье. Ниже можно настроить дополнительные напоминания.</p>
+        <p className="text-[12.5px] text-muted">Подготовка платежей накануне и пополнение в воскресенье запланированы на {DEFAULT_PREPARATION_TIME} по Москве. Напоминания в Календаре отражают состояние при экспорте. После изменения дат или подготовки платежей обновите календарь.</p>
         <div className="grid grid-cols-2 gap-2">
           {[3, 0].map(d => {
             const on = st.remindDays.includes(d);

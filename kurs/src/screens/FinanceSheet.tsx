@@ -34,7 +34,7 @@ function Accounts() {
   const show = (p: { card?: true; reserve?: true }) => set({ finance: false, ...p });
   return <>
     <div className="card divide-y divide-line p-4">
-      <button type="button" className="min-h-11 w-full text-left text-sea" onClick={() => set({ finance: false, paymentRoutes: true })}>Счета списания</button>
+      <button type="button" className="min-h-11 w-full text-left text-sea" onClick={() => set({ finance: false, paymentQueue: true })}>Обязательные платежи и переводы</button>
       <AccountRow name="Карта жизни" value={led.card} onClick={() => show({ card: true })} />
       <AccountRow name="Резерв" value={led.reserveVerified ? led.reserve : null} onClick={() => show({ reserve: true })} />
       {led.cashAccounts.map(a => <AccountRow key={a.id} name={a.name} value={a.expected} onClick={() => setAccount(a)} />)}
@@ -293,7 +293,6 @@ function Split() {
   const [replaceParent, setReplaceParent] = useState(false);
   const [date, setDate] = useState(now);
   const [amount, setAmount] = useState('');
-  const [account, setAccount] = useState(LIFE_ACCOUNT);
   const [replaces, setReplaces] = useState<string[]>([]);
   const [debitId, setDebitId] = useState('');
   const splitDebts = cal.debts.filter(d => d.kind === 'split');
@@ -335,11 +334,11 @@ function Split() {
     <div className="card space-y-3 p-4">
       <h3 className="font-medium">Общее автосписание</h3>
       {book.splitDebits.map(entry => <button key={entry.id} type="button" className="block text-sea" onClick={() => {
-        setDebitId(entry.id); setDate(entry.date); setAmount(String(entry.amount)); setAccount(entry.accountId); setReplaces(entry.replacesKeys);
+        setDebitId(entry.id); setDate(entry.date); setAmount(String(entry.amount)); setReplaces(entry.replacesKeys);
       }}>{ddmmyyyy(entry.date)} · <Money value={entry.amount} /></button>)}
       <Field label="Дата списания"><input className="field" type="date" value={date} onChange={e => { setDate(e.target.value); setReplaces([]); }} /></Field>
       <Field label="Общая сумма из банка"><input className="field" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} /></Field>
-      <AccountSelect label="Карта автосписания" value={account} set={setAccount} />
+      <p className="text-[13px] text-muted">Автосписание с карты жизни.</p>
       <p className="text-[13px] text-muted">Отметьте только строки графика, которые уже входят в общую сумму.</p>
       {candidates.map(e => <label className="flex gap-2 text-[13px]" key={e.key}>
         <input type="checkbox" checked={replaces.includes(e.key)} onChange={() => setReplaces(replaces.includes(e.key) ? replaces.filter(x => x !== e.key) : [...replaces, e.key])} />
@@ -349,7 +348,7 @@ function Split() {
         const value = parseAmount(amount);
         if (!value || !validDate(date) || !replaces.length) { toast('Укажите сумму, дату и включённые строки'); return; }
         const ids = [...new Set(candidates.filter(e => replaces.includes(e.key)).flatMap(e => e.debtId ? [e.debtId] : []))];
-        useStore.getState().saveSplitDebit({ id: debitId || uid(), date, amount: value, accountId: account, debtIds: ids, replacesKeys: replaces });
+        useStore.getState().saveSplitDebit({ id: debitId || uid(), date, amount: value, accountId: LIFE_ACCOUNT, debtIds: ids, replacesKeys: replaces });
         setDebitId(''); setAmount(''); setReplaces([]); toast('Автосписание сохранено');
       }}>Сохранить автосписание</PrimaryButton>
     </div>

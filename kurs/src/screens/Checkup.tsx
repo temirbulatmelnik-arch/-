@@ -3,7 +3,7 @@
 // на сегодня), её и сравниваем с учётом; «Доступно» — баланс карты (бывает меньше нуля): по нему и лимиту видно, сколько
 // в долге процентов, ещё не списанных банком, и не устарел ли лимит. «Без изменений» — долг как по учёту, без ввода.
 // Расхождения — словами, с кнопкой «внести трату»; затем сколько перевести между картой и резервом и «Перевёл».
-// Показывается сама в воскресенье после 18:00 при входе в приложение, пока сверка недели не сохранена.
+// Показывается сама в воскресенье после 20:00 при входе в приложение, пока сверка недели не сохранена.
 import { Check } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useShallow } from 'zustand/react/shallow';
@@ -31,7 +31,7 @@ export function useLedger(): Ledger {
 
 let snoozed = 0;
 
-/** В воскресенье с 18:00 при входе в приложение — сверка недели, если её ещё не было */
+/** В воскресенье с 20:00 при входе в приложение — сверка недели, если её ещё не было */
 export function useSundayCheckup() {
   useEffect(() => {
     let timer = 0;
@@ -40,7 +40,7 @@ export function useSundayCheckup() {
       const clock = moscowClock();
       const s = useStore.getState();
       const monday = weekStart(clock.date);
-      if (clock.date !== addDays(monday, 6) || clock.time < (s.settings.preparationTime ?? DEFAULT_PREPARATION_TIME) || Date.now() - snoozed < 3_600_000) return;
+      if (clock.date !== addDays(monday, 6) || clock.time < DEFAULT_PREPARATION_TIME || Date.now() - snoozed < 3_600_000) return;
       if (!s.ready || s.checkups.some(c => c.monday === monday)) return;
       // файл обмена с сайта открывается первым — сверка после него
       window.clearTimeout(timer);
@@ -120,6 +120,8 @@ function Body({ monday }: { monday: string }) {
     if (topUp > reserveV!) { toast('В резерве недостаточно денег'); return; }
     const toReserve = 0; // Доход переводится отдельно и подтверждается своей банковской операцией.
     const r = weekReport(expenses, debts, overrides, monday, bridge);
+    if (topUp && round(topUp) !== plan.topUp) { toast('Укажите рассчитанное пополнение. Если фактическая сумма отличается, сначала сверяйте остатки без перевода.'); return; }
+    const previous = useStore.getState().checkups.at(-1)?.id;
     useStore.getState().checkup({
       monday,
       expected: { card: led.card, reserve: round(led.reserve), credit: bridgeCard ? bridgeCard.expected : null },
@@ -127,6 +129,7 @@ function Body({ monday }: { monday: string }) {
       topUp, toReserve, creditCard: bridgeCard?.debt.id,
       ...(otherCards.length ? { cards: otherCards.map(c => ({ id: c.debt.id, expected: c.expected, actual: debtOf(c, entryOf(c.debt.id))! })) } : {}),
     }, transfer ? { monday, limit: r.limit, spent: r.spent, left: r.left, transferred: 0 } : null);
+    if (useStore.getState().checkups.at(-1)?.id === previous) { toast('Проверьте суммы и остатки по выписке'); return; }
     toast(transfer ? (closures[monday] ? 'Сверка сохранена' : 'Сверка сохранена, неделя закрыта') : 'Остатки сохранены, перевод — позже');
     // неделя закрыта в плюс — маленький салют
     if (transfer && r.left >= 0) window.setTimeout(() => salute('small'), 300);

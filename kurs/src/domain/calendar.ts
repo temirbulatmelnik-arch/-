@@ -1,7 +1,7 @@
 import { partialPayments } from './funds';
 // Календарь платежей и поступлений: разовые события из плана + ежемесячный шаблон + воскресные пополнения карты жизни.
 import type { AccountBook } from './accounts';
-import { kopecks } from './accounts';
+import { kopecks, LIFE_ACCOUNT, RESERVE_ACCOUNT } from './accounts';
 import { addDays, dayIn, monthKey, weekStart } from './dates';
 import type { CalEvent, CalendarOverride, Debt, EventMark, FixedItem, IncomeKind, IncomeTemplate, WeeklyOverride } from './types';
 import { bridgeWeek, type Bridge } from './bridge';
@@ -198,6 +198,9 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
     title: 'Сплит · общее автосписание', amount: debit.amount, accountId: debit.accountId, economicType: 'debt_payment', confidence: 'confirmed',
   });
   const accounts = input.accountBook?.paymentAccounts;
+  const singleCard = input.accountBook?.paymentRouting === 'life';
+  const confirmedAccounts = new Map(input.accountBook?.operations.flatMap(op =>
+    op.status === 'confirmed' && op.eventKey ? [[op.eventKey, op.accountId] as const] : []));
   const rank = { payment: 0, weekly: 1, income: 2 } as const;
   const dated = out
     .filter(e => !replaced.has(e.key))
@@ -209,6 +212,13 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
       if (historical && e.kind === 'income') return { ...e, date: historical.date, amount: historical.amount,
         dateMode: 'exact' as const, economicType: 'loan_disbursement' as const, confidence: 'confirmed' as const };
       const fixedKey = e.key.startsWith('fix:') && !input.marks?.[e.key]?.done ? e.key.slice(0, e.key.lastIndexOf(':')) : undefined;
+      const mark = input.marks?.[e.key];
+      if (singleCard && (e.kind === 'payment' || cashIncomeEvent(e))) {
+        const historic = confirmedAccounts.get(e.key) ?? (mark?.paidFrom === 'card' ? LIFE_ACCOUNT
+          : mark?.paidFrom === 'reserve' ? RESERVE_ACCOUNT : e.accountId);
+        return { ...e, accountId: mark?.done ? historic : LIFE_ACCOUNT,
+          ...(e.kind === 'payment' && !mark?.done ? { prepareOn: undefined } : {}) };
+      }
       return e.kind === 'payment' ? { ...e,
         accountId: accounts?.[e.key] ?? (e.debtId ? accounts?.[e.debtId] : undefined) ?? (fixedKey ? accounts?.[fixedKey] : undefined) ?? e.accountId } : e;
     })
@@ -252,6 +262,7 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
   }
   const partial = partialPayments(input.accountBook?.operations ?? []);
   return dated.filter(e => !linkedReviews.has(e.key))
+    .map(e => singleCard && e.kind === 'payment' && !input.marks?.[e.key]?.done ? { ...e, prepareOn: addDays(e.date, -1) } : e)
     .map(e => possibleExtras.has(e.key) ? { ...e, possibleExtra: possibleExtras.get(e.key) } : e)
     .map(e => e.kind === 'payment' && !input.marks?.[e.key]?.done && partial.has(e.key)
       ? { ...e, originalAmount: e.amount, amount: Math.max(0, kopecks(e.amount - partial.get(e.key)! / 100)) } : e)

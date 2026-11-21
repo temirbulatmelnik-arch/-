@@ -10,6 +10,10 @@ export function moscowClock(at = new Date()) {
   return { date: local.slice(0, 10), time: local.slice(11, 16) };
 }
 
+export function nextSweepReminder(clock = moscowClock()) {
+  return clock.time < DEFAULT_PREPARATION_TIME ? clock.date : addDays(clock.date, 1);
+}
+
 export function preparationInstant(date: string, time: string) {
   return new Date(`${date}T${time}:00+03:00`).toISOString();
 }
@@ -65,7 +69,7 @@ export function earmarks(operations: AccountOperation[], log: ReserveMove[], mar
       if (op.purpose === 'sweep') draw(op.accountId, op.amount);
     } else if (op.type === 'allocation') {
       if (!op.existingCash) draw(op.accountId, op.amount);
-      change(op.accountId, op.shares, 1, op.date);
+      if (op.shares) change(op.accountId, op.shares, 1, op.date);
     } else if (op.type === 'income' && op.pendingSweep && op.accountId !== RESERVE_ACCOUNT && op.fundingSource !== 'borrowed') {
       pending[op.accountId] = (pending[op.accountId] ?? 0) + cents(op.amount);
     } else if ((op.type === 'debt_payment' || op.type === 'expense') && (op.eventKey || op.partialFor)) {

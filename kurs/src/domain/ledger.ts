@@ -1,10 +1,10 @@
 // Учёт по счетам банка: сколько должно быть на карте жизни (мастер-счёт), в резерве (накопительный) и долга на
 // кредитке моста — от последней сверки. В воскресенье вечером человек вводит, что видит в банке, приложение сравнивает
 // и считает, сколько перевести между картой и резервом.
-import { accountMovement, accountProjection, cents, kopecks, cashAccount, debtProjection, EMPTY_BOOK, LIFE_ACCOUNT, recordedAfter, RESERVE_ACCOUNT, rubles, type AccountBook, type BankBalance } from './accounts';
+import { accountMovement, accountProjection, cents, kopecks, cashAccount, debtProjection, EMPTY_BOOK, LIFE_ACCOUNT, recordedAfter, RESERVE_ACCOUNT, rubles, type AccountBook, type AccountOperation, type BankBalance } from './accounts';
 import { activeBridge, bridgeWeek, weekMoney, type Bridge } from './bridge';
 import { addDays, daysBetween, today } from './dates';
-import { earmarks, type HeldPayment } from './funds';
+import { earmarks, partialPayments, type HeldPayment } from './funds';
 import { eventsBetween, type CalendarInput } from './calendar';
 import { weeklyLimit } from './plan';
 import type { CalEvent, CardBalance, Debt, EventMark, Expense, ReserveMove, WeeklyOverride } from './types';
@@ -131,6 +131,35 @@ export const isAbsolute = (m: ReserveMove) => m.abs ?? /^Сверка/.test(m.no
 export function reserveAnchor(log: ReserveMove[]): { at: string; date: string; operationIds?: string[] } | null {
   for (let i = log.length - 1; i >= 0; i--) if (isAbsolute(log[i])) return { at: log[i].at ?? endOfDay(log[i].date), date: log[i].date, operationIds: log[i].operationIds };
   return null;
+}
+
+export function canVoidOperation(s: LedgerInput, op: AccountOperation, now: string): boolean {
+  if (op.cashBooked || op.origin === 'bank') return false;
+  const last = s.checkups.at(-1);
+  const accounts = op.type === 'transfer' ? [op.accountId, op.toAccountId] : [op.accountId];
+  if (op.type !== 'allocation' && accounts.some(account => {
+    const points = account === LIFE_ACCOUNT ? [s.cardBalance, last]
+      : account === RESERVE_ACCOUNT ? [reserveAnchor(s.reserveLog), last]
+        : [];
+    const refs = points.map(ref => ref && { amount: 0, date: ref.date, at: ref.at, includedIds: ref.operationIds });
+    const anchor = s.accountBook?.accounts.find(item => item.id === account)?.balance;
+    return [...refs, anchor].some(ref => ref && !recordedAfter(op, ref));
+  })) return false;
+  if (op.type === 'debt_payment' && (op.debtBooked || s.debts.some(d => d.id === op.debtId && d.bankBalance &&
+      !recordedAfter(op, d.bankBalance)))) return false;
+  if (op.partialFor && s.marks[op.partialFor]?.done) return false;
+  const book = s.accountBook ?? EMPTY_BOOK;
+  const index = book.operations.findIndex(row => row.id === op.id);
+  if ((op.type === 'allocation' || op.type === 'transfer' && op.purpose === 'prepare') && op.shares?.some(share =>
+    s.marks[share.key]?.done || partialPayments(book.operations).has(share.key) ||
+    book.operations.slice(index + 1).some(later => later.status === 'confirmed' &&
+      later.type === 'transfer' && later.shares?.some(row => row.key === share.key)))) return false;
+  const before = ledger({ ...s, now });
+  const marks = { ...s.marks };
+  if (op.eventKey) delete marks[op.eventKey];
+  const after = ledger({ ...s, now, marks, accountBook: { ...book, operations: book.operations.filter(row => row.id !== op.id) } });
+  return after.reserve >= Math.min(0, before.reserve) && after.allocationShortfall <= before.allocationShortfall &&
+    (after.card == null || after.card >= Math.min(0, before.card ?? 0));
 }
 
 type MarkKind = 'weekly' | 'payment' | 'income' | 'bonus' | null;

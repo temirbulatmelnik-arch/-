@@ -254,7 +254,7 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
   const byDate = new Map<string, CalEvent[]>();
   const { extra, minUp } = bridgeEvents(input, from, to);
   for (const event of eventsBetween(input.cal, addDays(from, -45), to)) {
-    const weeklyDone = event.kind === 'weekly' && input.cal.accountBook?.operations.some(op => op.type === 'transfer' &&
+    const weeklyDone = event.kind === 'weekly' && input.cal.accountBook?.operations.some(op => op.status === 'confirmed' && op.type === 'transfer' &&
       op.purpose === 'weekly' && op.eventKey === event.key);
     if ((input.marks[event.key]?.done && !weeklyDone) || (event.kind !== 'payment' && event.date < from)) continue;
     const e = projectedEvent(event, scenario);
@@ -265,14 +265,28 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
   }
   const book = input.cal.accountBook;
   const stress = scenario === 'stress' ? book?.stress : undefined;
-  const transfers = (book?.operations ?? []).filter(op => op.type === 'transfer' && op.status === 'planned' && op.date >= from && op.date <= to);
+  const singleCard = book?.paymentRouting === 'life';
+  const forecastSweep = (id: string, date: string, amount: number) => {
+    if (!singleCard || amount <= 0) return;
+    const available = balanceOn(LIFE_ACCOUNT);
+    const known = available != null && balanceOn(RESERVE_ACCOUNT) != null;
+    const status = !known ? 'unverified' : available < amount ? 'insufficient' : 'projected';
+    transferFunding.push({ id: `sweep:${id}`, date, fromAccountId: LIFE_ACCOUNT, toAccountId: RESERVE_ACCOUNT, amount: rubles(amount),
+      available: available == null ? null : rubles(available), status });
+    if (status === 'projected') {
+      move(LIFE_ACCOUNT, -amount);
+      move(RESERVE_ACCOUNT, amount);
+    }
+  };
+  const transfers = (book?.operations ?? []).filter(op => op.type === 'transfer' && op.status === 'planned' && !(singleCard && op.purpose) && op.date >= from && op.date <= to);
   for (let date = from; date <= to; date = addDays(date, 1)) {
     const day = byDate.get(date) ?? [];
     const repayments = extra.filter(x => x.date === date);
     for (const step of repayments) {
-      const accountId = input.cal.accountBook?.paymentAccounts['bridge-repayment'];
-      requireMoney(accountId, cents(-step.delta), date, step.title);
-      move(accountId, cents(step.delta));
+      const accountId = singleCard ? LIFE_ACCOUNT : book?.paymentAccounts['bridge-repayment'];
+      const fundedFrom = singleCard ? RESERVE_ACCOUNT : accountId;
+      requireMoney(fundedFrom, cents(-step.delta), date, step.title);
+      move(fundedFrom, cents(step.delta));
       push({ date, title: step.title, kind: 'bridge', accountId }, cents(step.delta));
     }
     if (stress?.date === date) {
@@ -341,11 +355,13 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
       move(op.accountId, accountMovement(op, op.accountId));
       move(op.toAccountId, accountMovement(op, op.toAccountId));
     }
+    if (date === from) forecastSweep('pending', date, cents(input.pending?.[LIFE_ACCOUNT] ?? 0));
     for (const e of day.filter(x => x.kind === 'income')) {
       const accountId = e.accountId ?? LIFE_ACCOUNT;
       move(accountId, cents(e.amount));
       push({ date, title: e.title, kind: 'income', key: e.key, accountId, approx: e.approx, confidence: e.confidence,
         incomeStatus: incomeStatus(e) }, cents(e.amount));
+      if (accountId === LIFE_ACCOUNT) forecastSweep(e.key, date, cents(e.amount));
     }
     byDay[date] = rubles(total);
     daily[date] = Object.fromEntries([...balances].map(([id, value]) => [id, value === null ? null : rubles(value)]));

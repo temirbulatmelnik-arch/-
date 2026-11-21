@@ -32,7 +32,7 @@ export interface IcsOptions {
   time: string;
   now?: Date;
   baseUrl?: string;
-  preparation?: { time: string; groups: PaymentPreparation[] };
+  preparation?: { time: string; groups: PaymentPreparation[]; sweepOn?: string };
 }
 
 export function buildIcs(events: CalEvent[], o: IcsOptions): string {
@@ -48,7 +48,7 @@ export function buildIcs(events: CalEvent[], o: IcsOptions): string {
     const desc = e.kind === 'payment'
       ? `${e.dateMode === 'until' ? 'Внести до этой даты' : 'Дата платежа'}. Просрочка недопустима ни на день. Отметьте оплату в «Курсе».`
       : e.kind === 'weekly' ? 'Вечером долить карту жизни из резерва до недельного лимита: остаток недели остаётся на карте. Откройте «Курс» → «Закрыть неделю» — он посчитает сумму.'
-      : 'Если это премия — в тот же день распределите её в «Курсе»: резерв, остальное в долг.';
+      : 'Проверьте зачисление в банке. После подтверждения в «Курсе» приложение предложит перевести поступление в резерв.';
     lines.push(
       'BEGIN:VEVENT',
       `UID:kurs-${e.key.replace(/[^a-zA-Z0-9-]/g, '-')}@kurs.local`,
@@ -85,10 +85,12 @@ export function buildIcs(events: CalEvent[], o: IcsOptions): string {
       const summary = `Курс · ${when}${o.hideAmounts ? '' : ' ' + amountText(group.total, group.events.some(e => e.approx))}`;
       const detail = o.hideAmounts ? '' : `${group.events.map(e => e.title).join(', ')}. `;
       const route = group.accountId ? (!o.hideAmounts && group.toFund != null && group.toFund > 0
-        ? `Проверьте счёт списания. Из резерва требуется ${amountText(group.toFund, group.events.some(e => e.approx))}.`
+        ? `Из резерва на карту жизни требуется ${amountText(group.toFund, group.events.some(e => e.approx))}.`
         : 'Проверьте остаток и перевод в «Курсе».') : 'Уточните счёт списания в банке.';
-      addReminder(`prepare-${group.date}-${encodeURIComponent(group.accountId ?? 'unassigned')}`, group.remindDate, summary, detail + route, group.events[0].key);
+      addReminder(`prepare-${group.date}-${encodeURIComponent(group.accountId ?? 'unassigned')}`, group.remindDate, summary, detail + route, group.accountId ? `prepare:${group.date}` : group.events[0].key);
     }
+    if (o.preparation.sweepOn) addReminder(`income-reserve-${o.preparation.sweepOn}`, o.preparation.sweepOn,
+      'Курс · Перевести поступление в резерв', 'Проверьте сумму на карте жизни и подтвердите только выполненный перевод.', 'sweep:life');
     for (const e of events.filter(e => e.kind === 'weekly')) {
       addReminder(`weekly-${e.key.replace(/[^a-zA-Z0-9-]/g, '-')}`, e.date, 'Курс · Долить карту до недельного лимита',
         'Откройте «Курс» и проверьте, сколько перевести из резерва на основную карту.', e.key);

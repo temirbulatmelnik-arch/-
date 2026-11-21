@@ -2,19 +2,19 @@
 // Резервная копия — файл JSON (Настройки → Данные), календарь — файл .ics.
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { accountOptions, appendOperations, cents, kopecks, bookOperationAllowed, cashAccount, EMPTY_BOOK, LIFE_ACCOUNT, RESERVE_ACCOUNT, validAmount, validDate, validSplitDebit, validSplitPlan, type AccountBook, type AccountOperation, type BankBalance, type CashAccount, type SplitDebit, type SplitPlan } from '../domain/accounts';
+import { accountOptions, appendOperations, cents, kopecks, bookOperationAllowed, cashAccount, EMPTY_BOOK, LIFE_ACCOUNT, RESERVE_ACCOUNT, reversibleOperation, validAmount, validDate, validSplitDebit, validSplitPlan, type AccountBook, type AccountOperation, type BankBalance, type CashAccount, type SplitDebit, type SplitPlan } from '../domain/accounts';
 import { DEFAULT_MODEL } from '../domain/models';
 import { coverageInput, safePrepayment } from '../domain/coverage';
 import { DEFAULT_PREPARATION_TIME, moscowClock, paymentShares, partialPayments, weeklyTopUp, type FundingMode } from '../domain/funds';
-import { annuity, eventsBetween } from '../domain/calendar';
-import { addDays, monthKey, monthsBetween, toKey, today } from '../domain/dates';
+import { annuity, cashIncomeEvent, eventsBetween } from '../domain/calendar';
+import { addDays, monthKey, monthsBetween, toKey, today, weekStart } from '../domain/dates';
 import { setPlanSource, totalDebt, weeklyLimit, type PlanConfig } from '../domain/plan';
 import { validPayroll, type PayrollProfile } from '../domain/payroll';
 import { mergeSeed } from '../domain/planUpdate';
 import type { Bridge } from '../domain/bridge';
 import { fixDefaultCategories } from '../domain/categorize';
 import { dropChatTwins, exchangeRevision } from '../domain/exchange';
-import { freshReserve, heldKeys, ledger, reserveAnchor, type Checkup } from '../domain/ledger';
+import { canVoidOperation, freshReserve, heldKeys, ledger, reserveAnchor, type Checkup } from '../domain/ledger';
 import type { CalEvent, CalendarOverride, CardBalance, ChecklistItem, Debt, DebtSnapshot, EventMark, Expense, FixedItem, IncomeTemplate, MemoryRule, PlanSeed, ReserveMove, Settings, StrategySection, WeekClosure, WeeklyOverride, WishItem } from '../domain/types';
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -87,6 +87,8 @@ interface Actions {
   applySync: (patch: Partial<Data>, summary?: string) => void;
   saveCashAccount: (id: string, name: string, amount?: number) => void;
   fundPayment: (id: string, mode: FundingMode, keys: string[], eventDate: string, target: string, amount: number, date: string) => boolean;
+  keepIncomeForWeek: (id: string, amount: number, date: string) => boolean;
+  voidOperation: (id: string) => boolean;
   sweepIncome: (id: string, accountId: string, amount: number, date: string) => boolean;
   returnEarmark: (id: string, accountId: string, key: string, amount: number, date: string) => boolean;
   confirmWeeklyTransfer: (key: string, amount: number, date?: string) => boolean;
@@ -185,7 +187,7 @@ const EMPTY: Data = {
   ready: false, asOf: today(), debts: [], incomes: [], fixed: [], oneOff: [], templateFrom: monthKey(today()),
   weeklyOverrides: [], planTrajectory: [], baselineTrajectory: [], reserve: 0, reserveLog: [], expenses: [], marks: {}, wishes: [], snapshots: [], overrides: {}, plan: null,
   planRev: 0, planCode: '', checklist: [], strategy: [], rules: [], checks: {}, savings: 0, savingsLog: [], closures: {}, cardBalance: null, bridge: null, checkups: [], merchantMemory: {}, imports: [],
-  settings: DEFAULT_SETTINGS, accountBook: EMPTY_BOOK, work: null, exchangePatchIds: [],
+  settings: DEFAULT_SETTINGS, accountBook: { ...EMPTY_BOOK, paymentRouting: 'life' }, work: null, exchangePatchIds: [],
 };
 
 /** Снимок общего долга за текущий месяц — для графика «план против факта» */
@@ -302,6 +304,9 @@ export const useStore = create<State>()(
           : mode === 'existing' ? Math.max(0, (physical ?? 0) - held - pending)
             : mode === 'forward' ? Math.max(0, (physical ?? 0) - pending - (led.lifeAvailable ?? 0) - led.unassignedOnCard) : led.reserve;
         if (cents(amount) > cents(available)) return false;
+        if (s.accountBook.paymentRouting === 'life' && mode === 'reserve' &&
+            cents(amount) > events.reduce((total, event) => total + Math.max(0, cents(event.amount) -
+              cents(led.heldForPayments.find(row => row.key === event.key && row.accountId === target)?.amount ?? 0)), 0)) return false;
         const shares = paymentShares(events, led.heldForPayments, amount, target, mode);
         if (!shares?.length) return false;
         const base = { id, amount: kopecks(amount), accountId: source, ...confirmation(date) };
@@ -317,6 +322,27 @@ export const useStore = create<State>()(
             cents(amount) > cents(Math.min(led.pendingSweepToReserve[accountId] ?? 0, (physical ?? 0) - held))) return false;
         return s.saveOperation({ id, accountId, toAccountId: RESERVE_ACCOUNT, type: 'transfer', purpose: 'sweep',
           amount: kopecks(amount), ...confirmation(date) });
+      },
+      keepIncomeForWeek: (id, amount, date) => {
+        const s = get();
+        const now = moscowClock().date;
+        const led = ledger({ ...s, now });
+        const limit = weeklyLimit(s.debts, weekStart(now), s.weeklyOverrides);
+        if (!validDate(date) || date > now || !validAmount(amount) || cents(amount) <= 0 || led.lifeAvailable == null ||
+            cents(amount) > cents(Math.min(weeklyTopUp(limit, led.lifeAvailable), led.pendingSweepToReserve[LIFE_ACCOUNT] ?? 0)) ||
+            led.allocationShortfall > 0) return false;
+        return s.saveOperation({ id, accountId: LIFE_ACCOUNT, amount: kopecks(amount), type: 'allocation', toWeekly: true,
+          ...confirmation(date) });
+      },
+      voidOperation: id => {
+        const s = get();
+        const op = s.accountBook.operations.find(row => row.id === id);
+        if (!op || op.status !== 'confirmed' || !reversibleOperation(op) || !canVoidOperation(s, op, moscowClock().date)) return false;
+        const marks = { ...s.marks };
+        if (op.eventKey) delete marks[op.eventKey];
+        const operations = appendOperations(s.accountBook.operations, [{ ...op, status: 'voided' }]);
+        set({ accountBook: { ...s.accountBook, operations }, marks });
+        return true;
       },
       returnEarmark: (id, accountId, key, amount, date) => {
         const s = get();
@@ -336,9 +362,12 @@ export const useStore = create<State>()(
         const led = ledger({ ...s, now });
         if (led.lifeAvailable == null || cents(amount) > cents(led.reserve)) return false;
         const limit = weeklyLimit(s.debts, monday, s.weeklyOverrides);
-        const op: AccountOperation = { id: key, type: 'transfer', purpose: 'weekly', eventKey: key,
+        const topUp = weeklyTopUp(limit, led.lifeAvailable);
+        if (s.accountBook.paymentRouting === 'life' && cents(amount) !== cents(topUp)) return false;
+        const id = s.accountBook.operations.some(op => op.id === key) ? uid() : key;
+        const op: AccountOperation = { id, type: 'transfer', purpose: 'weekly', eventKey: key,
           accountId: RESERVE_ACCOUNT, toAccountId: LIFE_ACCOUNT, amount: kopecks(amount), ...confirmation(date),
-          weeklyExcess: Math.max(0, kopecks(amount - weeklyTopUp(limit, led.lifeAvailable))) };
+          weeklyExcess: Math.max(0, kopecks(amount - topUp)) };
         const operations = appendOperations(s.accountBook.operations, [op]);
         if (operations === s.accountBook.operations) return false;
         set({ accountBook: { ...s.accountBook, operations },
@@ -390,7 +419,7 @@ export const useStore = create<State>()(
         if (last?.afterRevision && last.afterRevision !== exchangeRevision(s)) return {};
         const snapshot = s.imports[i].snapshot;
         const imports = s.imports.slice(0, i);
-        return { ...snapshot, imports, exchangePatchIds: snapshot.exchangePatchIds ?? [], accountBook: snapshot.accountBook ?? EMPTY_BOOK, work: snapshot.work ?? null, cardBalance: restoreCardTime(snapshot.cardBalance, imports) };
+        return { ...snapshot, imports, exchangePatchIds: snapshot.exchangePatchIds ?? [], accountBook: { ...(snapshot.accountBook ?? EMPTY_BOOK), paymentRouting: 'life' }, work: snapshot.work ?? null, cardBalance: restoreCardTime(snapshot.cardBalance, imports) };
       }),
       toggleCheck: id => set(s => {
         const base = s.checklist.find(c => c.id === id)?.done ?? false;
@@ -411,7 +440,7 @@ export const useStore = create<State>()(
       }),
       checkup: (c, closure) => set(s => {
         const at = nowIso();
-        const date = today();
+        const date = moscowClock().date;
         const key = `wk:${addDays(c.monday, 7)}`;
         const topUp = s.marks[key]?.done ? 0 : c.topUp;
         if (topUp > c.actual.reserve || topUp < 0 || c.toReserve < 0 || c.toReserve > c.actual.card) return {};
@@ -422,7 +451,9 @@ export const useStore = create<State>()(
         const unmatchedOnCard = kopecks(led.unmatchedOnCard + discrepancy);
         const available = Math.max(0, kopecks(c.actual.card - led.heldOnCard - led.incomeOnCard - led.unassignedOnCard - discrepancy));
         const entries: AccountOperation[] = [];
-        if (topUp > 0) entries.push({ ...confirmation(date), id: key, eventKey: key, amount: topUp, accountId: RESERVE_ACCOUNT,
+        if (s.accountBook.paymentRouting === 'life' && topUp > 0 && cents(topUp) !== cents(weeklyTopUp(nextLimit, available))) return {};
+        const weeklyId = s.accountBook.operations.some(op => op.id === key) ? uid() : key;
+        if (topUp > 0) entries.push({ ...confirmation(date), id: weeklyId, eventKey: key, amount: topUp, accountId: RESERVE_ACCOUNT,
           toAccountId: LIFE_ACCOUNT, type: 'transfer', purpose: 'weekly', weeklyExcess: Math.max(0, kopecks(topUp - weeklyTopUp(nextLimit, available))) });
         if (c.toReserve > 0) entries.push({ ...confirmation(date), id: uid(), amount: c.toReserve, accountId: LIFE_ACCOUNT,
           toAccountId: RESERVE_ACCOUNT, type: 'transfer', purpose: 'sweep' });
@@ -484,83 +515,90 @@ export const useStore = create<State>()(
       updateExpense: (id, patch) => set(s => ({ expenses: s.expenses.map(e => (e.id === id ? { ...e, ...patch } : e)) })),
       removeExpense: id => set(s => ({ expenses: s.expenses.filter(e => e.id !== id) })),
 
-      markEvent: (e, done, amount, paidFrom, details) => set(s => {
-        const prev = s.marks[e.key];
-        const linked = s.accountBook.operations.find(op => op.eventKey === e.key);
-        if (linked?.type === 'loan_disbursement' || (linked?.type === 'transfer' && linked.purpose === 'weekly') || s.accountBook.historicalLoans?.some(loan => loan.eventKey === e.key) ||
-            (done && (e.payroll?.documented && !details?.bankVerified || e.projection === 'internal_transfer'))) return {};
-        const marks = { ...s.marks };
-        let debts = s.debts;
-        let accountBook = s.accountBook;
-        let work = s.work;
-        const debt = e.debtId ? s.debts.find(d => d.id === e.debtId) : undefined;
-        if (done) {
-          if (prev?.done && e.kind !== 'weekly') return {};
-          const paid = amount ?? e.amount;
-          if (!validAmount(paid) || paid < 0) return {};
-          const at = nowIso();
-          const date = details?.paidDate ?? moscowClock().date;
-          if (!validDate(date) || date > moscowClock().date) return {};
-          const from = paidFrom ?? (heldKeys(s.reserveLog, s.marks).has(e.key) ? 'card' : 'reserve');
-          marks[e.key] = { done: true, amount: paid, at, paidDate: date, ...(e.kind === 'payment' ? { paidFrom: from } : {}) };
-          if (e.kind === 'weekly') return { marks, ...topUpMove(s, e.key, paid) };
-          const accountId = details?.accountId ?? e.accountId ?? (from === 'card' ? LIFE_ACCOUNT : RESERVE_ACCOUNT);
-          const bookedAt = date === moscowClock().date ? at : undefined;
-          const partialId = e.kind === 'payment' ? details?.partialId : undefined;
-          const previouslyPaid = partialPayments(accountBook.operations).get(e.key) ?? 0;
-          if (partialId && (cents(paid) <= 0 || cents(paid) >= cents(e.amount))) return {};
-          const link = partialId ? { id: partialId, partialFor: e.key } : { id: uid(), eventKey: e.key };
-          if (e.kind === 'payment') {
-            if (partialId) delete marks[e.key];
-            else if (previouslyPaid) marks[e.key].amount = kopecks(paid + previouslyPaid / 100);
-          }
-          if (e.kind === 'payment' && (debt || e.key.startsWith('split-debit:'))) {
-            const op: AccountOperation = {
-              ...link, type: 'debt_payment', debtId: debt?.id, accountId, amount: paid,
-              date, at: bookedAt, origin: 'manual', status: 'confirmed', fundingSource: 'unknown',
-              principal: details?.principal, interest: details?.interest, fee: details?.fee,
-            };
-            if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
-            accountBook = { ...accountBook, operations: appendOperations(accountBook.operations, [op]) };
-          }
-          if (e.kind === 'payment' && !debt && !e.key.startsWith('split-debit:') && details?.accountId) {
-            const op: AccountOperation = { ...link, type: 'expense', amount: paid,
-              accountId, date, at: bookedAt, origin: 'manual', status: 'confirmed', fundingSource: 'unknown' };
-            if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
-            accountBook = { ...accountBook, operations: appendOperations(accountBook.operations, [op]) };
-          }
-          if (e.kind === 'income' && (e.accountId || e.nominalDate || e.incomeKind) && e.economicType !== 'non_income') {
-            const op: AccountOperation = { id: uid(), eventKey: e.key, type: 'income', amount: paid,
-              accountId: e.accountId ?? LIFE_ACCOUNT, date, at: bookedAt, origin: 'manual', status: 'confirmed', fundingSource: 'own', pendingSweep: true };
-            if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
-            accountBook = { ...accountBook, operations: appendOperations(accountBook.operations, [op]) };
-            if (work && e.nominalDate) {
-              const key = e.incomeKind === 'salary' || e.incomeKind === 'advance' || e.incomeKind === 'bonusMonthly'
-                ? `inc:${e.incomeKind}:${monthKey(e.nominalDate)}` : e.key;
-              const updated = { ...work, actual: { ...work.actual, [key]: { ...work.actual?.[key], ...details?.payrollActual, expectedNet: e.amount, asOf: date,
-                verifiedBy: details?.payrollActual ? 'Расчётный листок' : undefined } } };
-              if (!validPayroll(updated)) return {};
-              work = updated;
+      markEvent: (e, done, amount, paidFrom, details) => {
+        const state = get();
+        const payment = state.accountBook.operations.find(op => op.eventKey === e.key && op.status === 'confirmed');
+        if (!done && payment && reversibleOperation(payment)) { state.voidOperation(payment.id); return; }
+        set(s => {
+          const prev = s.marks[e.key];
+          const linked = s.accountBook.operations.find(op => op.eventKey === e.key && op.status === 'confirmed');
+          if (linked?.type === 'loan_disbursement' || (linked?.type === 'transfer' && linked.purpose === 'weekly') || s.accountBook.historicalLoans?.some(loan => loan.eventKey === e.key) ||
+              (done && (e.payroll?.documented && !details?.bankVerified || e.projection === 'internal_transfer'))) return {};
+          const singleCard = s.accountBook.paymentRouting === 'life';
+          if (done && e.economicType === 'loan_disbursement') return {};
+          const marks = { ...s.marks };
+          let debts = s.debts;
+          let accountBook = s.accountBook;
+          let work = s.work;
+          const debt = e.debtId ? s.debts.find(d => d.id === e.debtId) : undefined;
+          if (done) {
+            if (prev?.done && e.kind !== 'weekly') return {};
+            const paid = amount ?? e.amount;
+            if (!validAmount(paid) || paid < 0) return {};
+            const at = nowIso();
+            const date = details?.paidDate ?? moscowClock().date;
+            if (!validDate(date) || date > moscowClock().date) return {};
+            const from = singleCard ? 'card' : paidFrom ?? (heldKeys(s.reserveLog, s.marks).has(e.key) ? 'card' : 'reserve');
+            marks[e.key] = { done: true, amount: paid, at, paidDate: date, ...(e.kind === 'payment' ? { paidFrom: from } : {}) };
+            if (e.kind === 'weekly') return { marks, ...topUpMove(s, e.key, paid) };
+            const accountId = singleCard ? LIFE_ACCOUNT : details?.accountId ?? e.accountId ?? (from === 'card' ? LIFE_ACCOUNT : RESERVE_ACCOUNT);
+            const bookedAt = date === moscowClock().date ? at : undefined;
+            const partialId = e.kind === 'payment' ? details?.partialId : undefined;
+            const previouslyPaid = partialPayments(accountBook.operations).get(e.key) ?? 0;
+            if (partialId && (cents(paid) <= 0 || cents(paid) >= cents(e.amount))) return {};
+            const link = partialId ? { id: partialId, partialFor: e.key } : { id: uid(), eventKey: e.key };
+            if (e.kind === 'payment') {
+              if (partialId) delete marks[e.key];
+              else if (previouslyPaid) marks[e.key].amount = kopecks(paid + previouslyPaid / 100);
+            }
+            if (e.kind === 'payment' && (debt || e.key.startsWith('split-debit:'))) {
+              const op: AccountOperation = {
+                ...link, type: 'debt_payment', debtId: debt?.id, accountId, amount: paid,
+                date, at: bookedAt, origin: 'manual', status: 'confirmed', fundingSource: 'unknown',
+                principal: details?.principal, interest: details?.interest, fee: details?.fee,
+              };
+              if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
+              accountBook = { ...accountBook, operations: appendOperations(accountBook.operations, [op]) };
+            }
+            if (e.kind === 'payment' && !debt && !e.key.startsWith('split-debit:') && (singleCard || details?.accountId)) {
+              const op: AccountOperation = { ...link, type: 'expense', amount: paid,
+                accountId, date, at: bookedAt, origin: 'manual', status: 'confirmed', fundingSource: 'unknown' };
+              if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
+              accountBook = { ...accountBook, operations: appendOperations(accountBook.operations, [op]) };
+            }
+            if (cashIncomeEvent(e) && (singleCard || e.accountId || e.nominalDate || e.incomeKind)) {
+              const op: AccountOperation = { id: uid(), eventKey: e.key, type: 'income', amount: paid,
+                accountId: singleCard ? LIFE_ACCOUNT : e.accountId ?? LIFE_ACCOUNT, date, at: bookedAt, origin: 'manual', status: 'confirmed', fundingSource: 'own', pendingSweep: true };
+              if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
+              accountBook = { ...accountBook, operations: appendOperations(accountBook.operations, [op]) };
+              if (work && e.nominalDate) {
+                const key = e.incomeKind === 'salary' || e.incomeKind === 'advance' || e.incomeKind === 'bonusMonthly'
+                  ? `inc:${e.incomeKind}:${monthKey(e.nominalDate)}` : e.key;
+                const updated = { ...work, actual: { ...work.actual, [key]: { ...work.actual?.[key], ...details?.payrollActual, expectedNet: e.amount, asOf: date,
+                  ...(details?.payrollActual ? { verifiedBy: 'Расчётный листок' } : {}) } } };
+                if (!validPayroll(updated)) return {};
+                work = updated;
+              }
+            }
+          } else {
+            delete marks[e.key];
+            if (e.kind === 'weekly') return { marks, ...topUpMove(s, e.key, 0, 'Пополнение карты отменено') };
+            if (linked) {
+              const led = ledger(s);
+              const ref = linked.accountId === LIFE_ACCOUNT ? led.cardFrom?.at :
+                linked.accountId === RESERVE_ACCOUNT ? reserveAnchor(s.reserveLog)?.at :
+                s.accountBook.accounts.find(a => a.id === linked.accountId)?.balance?.at;
+              if (ref && linked.date <= ref.slice(0, 10) && (!linked.at || Date.parse(ref) > Date.parse(linked.at))) return {};
+              if (linked.type === 'income' && linked.pendingSweep && (led.pendingSweepToReserve[linked.accountId] ?? 0) < linked.amount) return {};
+              if (debt?.bankBalance?.at && Date.parse(debt.bankBalance.at) >= Date.parse(linked.at ?? '')) return {};
+              accountBook = { ...accountBook, operations: accountBook.operations.filter(op => op.id !== linked.id) };
+            } else if (debt && prev?.prevBalance != null && (!debt.updatedAt || !debt.bankBalance)) {
+              debts = s.debts.map(d => (d.id === debt.id ? { ...patchDebt(d, prev.prevBalance!), closedOn: undefined } : d));
             }
           }
-        } else {
-          delete marks[e.key];
-          if (e.kind === 'weekly') return { marks, ...topUpMove(s, e.key, 0, 'Пополнение карты отменено') };
-          if (linked) {
-            const led = ledger(s);
-            const ref = linked.accountId === LIFE_ACCOUNT ? led.cardFrom?.at :
-              linked.accountId === RESERVE_ACCOUNT ? reserveAnchor(s.reserveLog)?.at :
-              s.accountBook.accounts.find(a => a.id === linked.accountId)?.balance?.at;
-            if (ref && linked.date <= ref.slice(0, 10) && (!linked.at || Date.parse(ref) > Date.parse(linked.at))) return {};
-            if (linked.type === 'income' && linked.pendingSweep && (led.pendingSweepToReserve[linked.accountId] ?? 0) < linked.amount) return {};
-            if (debt?.bankBalance?.at && Date.parse(debt.bankBalance.at) >= Date.parse(linked.at ?? '')) return {};
-            accountBook = { ...accountBook, operations: accountBook.operations.filter(op => op.id !== linked.id) };
-          } else if (debt && prev?.prevBalance != null && (!debt.updatedAt || !debt.bankBalance)) {
-            debts = s.debts.map(d => (d.id === debt.id ? { ...patchDebt(d, prev.prevBalance!), closedOn: undefined } : d));
-          }
-        }
-        return { marks, accountBook, work, ...withSnapshot(debts, s.snapshots) };
-      }),
+          return { marks, accountBook, work, ...withSnapshot(debts, s.snapshots) };
+        });
+      },
 
       updateDebt: (id, patch) => set(s => {
         const debts = s.debts.map(d => {
@@ -587,9 +625,11 @@ export const useStore = create<State>()(
 
       applyBonus: ({ id, amount, accountId, title, eventKey, date = moscowClock().date }) => {
         const s = get();
-        if (date > moscowClock().date || (eventKey && s.marks[eventKey]?.done)) return false;
+        if (date > moscowClock().date || (eventKey && s.marks[eventKey]?.done) ||
+            (!eventKey && s.accountBook.operations.some(op => op.type === 'income' && op.status === 'confirmed' &&
+              !op.eventKey && op.date === date && op.note === title && cents(op.amount) === cents(amount)))) return false;
         const at = nowIso();
-        const op: AccountOperation = { id, amount, accountId, eventKey, date, at, type: 'income',
+        const op: AccountOperation = { id, amount, accountId: s.accountBook.paymentRouting === 'life' ? LIFE_ACCOUNT : accountId, eventKey, date, at, type: 'income',
           origin: 'manual', status: 'confirmed', fundingSource: 'own', pendingSweep: true, note: title };
         if (!bookOperationAllowed(op, s.accountBook, s.debts, s.expenses)) return false;
         const operations = appendOperations(s.accountBook.operations, [op]);
@@ -615,23 +655,23 @@ export const useStore = create<State>()(
       importData: raw => {
         const d = raw as Partial<Data> & { app?: string };
         if (!d || d.app !== 'kurs' || !Array.isArray(d.debts) || !Array.isArray(d.expenses)) return false;
-        set(s => ({ ...EMPTY, ...pickData({ ...EMPTY, ...d } as Data), fixed: withIds(d.fixed ?? []), cardBalance: restoreCardTime(d.cardBalance ?? null, d.imports ?? []), ready: true, planCode: s.planCode, settings: { ...DEFAULT_SETTINGS, ...d.settings, apiKey: s.settings.apiKey } }));
+        set(s => ({ ...EMPTY, ...pickData({ ...EMPTY, ...d } as Data), fixed: withIds(d.fixed ?? []), accountBook: { ...(d.accountBook ?? EMPTY_BOOK), paymentRouting: 'life' }, cardBalance: restoreCardTime(d.cardBalance ?? null, d.imports ?? []), ready: true, planCode: s.planCode, settings: { ...DEFAULT_SETTINGS, ...d.settings, apiKey: s.settings.apiKey } }));
         return true;
       },
       reset: () => set({ ...EMPTY }),
     }),
     {
       name: 'kurs',
-      version: 7,
+      version: 8,
       partialize: s => pickData(s),
       // версия 1: обязательные платежи без id — добавляем, остальное новые поля берут значения по умолчанию;
       // версия 2: файл из чата задваивал траты, уже внесённые под другим названием, — убираем копии один раз;
       // версия 3: подпись банка «Транспорт» записывалась в «кафе и досуг» — поправляем категорию
       migrate: (persisted, version) => {
         const p = persisted as Partial<Data>;
-        if (version < 7) {
+        if (version < 8) {
           try {
-            const backup = 'kurs:before-0.7.0';
+            const backup = 'kurs:before-0.7.1';
             const raw = window.localStorage.getItem('kurs');
             if (raw && !window.localStorage.getItem(backup)) window.localStorage.setItem(backup, raw);
             if (version < 6 && raw && !window.localStorage.getItem('kurs:before-0.6.0')) window.localStorage.setItem('kurs:before-0.6.0', raw);
@@ -644,7 +684,7 @@ export const useStore = create<State>()(
           cleanedTwins = r.removed.length;
         }
         if (version < 4 && expenses) expenses = fixDefaultCategories(expenses);
-        return { ...p, expenses: expenses ?? [], accountBook: p.accountBook ?? EMPTY_BOOK, fixed: withIds(p.fixed ?? []) } as State;
+        return { ...p, expenses: expenses ?? [], accountBook: { ...(p.accountBook ?? EMPTY_BOOK), paymentRouting: 'life' }, fixed: withIds(p.fixed ?? []) } as State;
       },
       merge: (persisted, current) => {
         const p = persisted as Partial<Data> | undefined;

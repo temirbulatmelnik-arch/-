@@ -91,10 +91,7 @@ function Body({ d }: { d: Debt }) {
           {!!projected.classifiedLoanHistory && <p className="text-muted">Исторические выдачи без повторной проводки <Money value={projected.classifiedLoanHistory} kopecks /></p>}
         </details>
         <Field label="Счёт списания по графику">
-          <select className="field" value={book.paymentAccounts[d.id] ?? ''} onChange={e => useStore.getState().setPaymentAccount(d.id, e.target.value)}>
-            <option value="">Не указан</option>
-            {accountOptions(book).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
+          <p className="text-[13px]">Карта жизни</p>
         </Field>
         {d.updatedAt && <p className="mt-2 text-[12px] text-faint">Остаток обновлён {relDays(now, d.updatedAt.slice(0, 10))}</p>}
       </div>
