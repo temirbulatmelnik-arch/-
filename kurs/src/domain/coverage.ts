@@ -7,6 +7,7 @@ import { cashIncomeEvent, eventsBetween, incomeStatus, type CalendarInput, type 
 import { addDays, daysBetween, ddmm, lastDay, monthKey } from './dates';
 import { RESERVE_BUFFER, weeklyLimit } from './plan';
 import { UNIT_2027, with2027Unit } from './payroll';
+import { paymentPreparations, type HeldPayment } from './funds';
 import type { Ledger } from './ledger';
 import type { CalEvent, Debt, EventMark, Expense } from './types';
 
@@ -70,6 +71,9 @@ export interface CoverageInput {
   expenses: Expense[];
   bridge?: Bridge | null;
   cash?: Record<string, number | null>;
+  lifeAvailable?: number | null;
+  held?: HeldPayment[];
+  pending?: Record<string, number>;
 }
 
 /**
@@ -79,8 +83,9 @@ export interface CoverageInput {
  * потраченными до нуля: из резерва уходит только воскресное пополнение карты (в неделю моста — fromReserve), траты с
  * кредитки моста резерв не уменьшают — они растят долг по кредитке.
  */
-export function coverageInput(s: CalendarInput & { marks: Record<string, EventMark>; expenses: Expense[] }, led: Pick<Ledger, 'reserve' | 'incomeOnCard' | 'heldOnCard'> & Partial<Pick<Ledger, 'card' | 'reserveVerified' | 'cashAccounts'>>): CoverageInput {
+export function coverageInput(s: CalendarInput & { marks: Record<string, EventMark>; expenses: Expense[] }, led: Pick<Ledger, 'reserve' | 'incomeOnCard' | 'heldOnCard'> & Partial<Pick<Ledger, 'card' | 'reserveVerified' | 'cashAccounts' | 'lifeAvailable' | 'heldForPayments' | 'pendingSweepToReserve'>>): CoverageInput {
   return { cal: s, marks: s.marks, reserve: led.reserve + led.incomeOnCard + led.heldOnCard, debts: s.debts, expenses: s.expenses, bridge: s.bridge ?? null,
+    lifeAvailable: led.lifeAvailable, held: led.heldForPayments, pending: led.pendingSweepToReserve,
     cash: s.accountBook ? { [LIFE_ACCOUNT]: led.card ?? null, [RESERVE_ACCOUNT]: led.reserveVerified ? led.reserve : null,
       ...Object.fromEntries((led.cashAccounts ?? []).map(a => [a.id, a.expected])) } : undefined };
 }
@@ -160,6 +165,10 @@ export interface PaymentFunding {
   available: number | null;
   shortfall: number | null;
   prepareBy: string;
+  held?: number;
+  fromReserve?: number | null;
+  inTransit?: number;
+  reserveShortfall?: number;
 }
 
 export interface TransferFunding {
@@ -203,6 +212,9 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
   let total = [...balances.values()].reduce<number>((sum, value) => sum + (value ?? 0), 0);
   const balanceOn = (id?: string) => id ? balances.get(id) ?? null : null;
   const start = rubles(total);
+  let weeklyCash = input.lifeAvailable == null ? input.lifeAvailable : cents(input.lifeAvailable);
+  const preparing = input.held !== undefined;
+  const earmarks = [...(input.held ?? [])];
   const daily: NonNullable<Coverage['accountByDay']> = {};
   const steps: CoverageStep[] = [];
   const paymentFunding: PaymentFunding[] = [];
@@ -237,7 +249,9 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
   const byDate = new Map<string, CalEvent[]>();
   const { extra, minUp } = bridgeEvents(input, from, to);
   for (const event of eventsBetween(input.cal, addDays(from, -45), to)) {
-    if (input.marks[event.key]?.done || (event.kind !== 'payment' && event.date < from)) continue;
+    const weeklyDone = event.kind === 'weekly' && input.cal.accountBook?.operations.some(op => op.type === 'transfer' &&
+      op.purpose === 'weekly' && op.eventKey === event.key);
+    if ((input.marks[event.key]?.done && !weeklyDone) || (event.kind !== 'payment' && event.date < from)) continue;
     const e = projectedEvent(event, scenario);
     if (!e || e.date > to) continue;
     const date = e.date < from ? from : e.date;
@@ -265,7 +279,8 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
     for (const e of day.filter(x => x.kind !== 'income')) {
       if (e.kind === 'weekly') {
         const target = cents(weeklyLimit(input.debts, addDays(date, 1), input.cal.weeklyOverrides));
-        const existing = Math.min(target, Math.max(0, balanceOn(LIFE_ACCOUNT) ?? 0));
+        const existing = Math.min(target, Math.max(0, weeklyCash === undefined ? balanceOn(LIFE_ACCOUNT) ?? 0 : weeklyCash ?? 0));
+        if (weeklyCash != null) weeklyCash -= existing;
         const topUp = target - existing;
         if (topUp > 0) requireMoney(RESERVE_ACCOUNT, topUp, date, e.title);
         move(RESERVE_ACCOUNT, -topUp);
@@ -275,11 +290,39 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
       }
       const amount = cents(e.amount + (minUp[e.key] ?? 0));
       if (amount <= 0) continue;
-      const available = requireMoney(e.accountId, amount, date, e.title);
+      const group = preparing ? paymentPreparations([{ ...e, projection: undefined, amount: rubles(amount) }], {}, earmarks,
+        rubles(balanceOn(RESERVE_ACCOUNT) ?? 0))[0] : undefined;
+      const physical = balanceOn(e.accountId);
+      const prepared = group && e.accountId !== RESERVE_ACCOUNT && physical != null
+        ? Math.min(Math.max(0, physical), cents(group.prepared)) : physical;
+      const available = group && e.accountId !== RESERVE_ACCOUNT ? prepared : requireMoney(e.accountId, amount, date, e.title);
+      const routeUnverified = physical == null;
+      const urgentShortfall = date <= from && available != null && available < amount;
+      const reserveShortfall = group?.reserveShortfall ?? 0;
+      if (group && !accountRisk && (routeUnverified || urgentShortfall || reserveShortfall > 0)) {
+        accountRisk = { accountId: e.accountId, date, title: e.title,
+          amount: routeUnverified ? null : reserveShortfall > 0 ? reserveShortfall : rubles(amount - (available ?? 0)),
+          reason: !e.accountId ? 'unassigned' : routeUnverified ? 'unverified' : 'insufficient' };
+      }
+      if (group?.accountId && (group.toFund || group.inTransit)) {
+        if (group.toFund) transferFunding.push({ id: `prepare:${e.key}`, date: group.remindDate,
+          fromAccountId: RESERVE_ACCOUNT, toAccountId: group.accountId, amount: group.toFund,
+          available: balanceOn(RESERVE_ACCOUNT) == null ? null : rubles(balanceOn(RESERVE_ACCOUNT)!),
+          status: routeUnverified || balanceOn(RESERVE_ACCOUNT) == null ? 'unverified' : reserveShortfall > 0 ? 'insufficient' : 'projected' });
+        if (group.inTransit) transferFunding.push({ id: `forward:${e.key}`, date: group.remindDate,
+          fromAccountId: LIFE_ACCOUNT, toAccountId: group.accountId, amount: group.inTransit,
+          available: rubles(Math.min(cents(group.inTransit), Math.max(0, balanceOn(LIFE_ACCOUNT) ?? 0))),
+          status: routeUnverified ? 'unverified' : 'projected' });
+      }
       paymentFunding.push({ key: e.key, date, title: e.title, accountId: e.accountId, amount: rubles(amount),
         available: available == null ? null : rubles(available),
-        shortfall: available == null ? null : rubles(Math.max(0, amount - available)), prepareBy: addDays(date, -1) });
-      move(e.accountId, -amount);
+        shortfall: !e.accountId || available == null ? null : rubles(Math.max(0, amount - available)), prepareBy: group?.remindDate ?? addDays(e.date, -1),
+        ...(group ? { held: group.prepared, fromReserve: group.toFund, inTransit: group.inTransit, reserveShortfall: group.reserveShortfall } : {}) });
+      if (group?.accountId && group.accountId !== RESERVE_ACCOUNT) {
+        move(group.accountId, -(available ?? 0));
+        move(LIFE_ACCOUNT, -cents(group.inTransit));
+        move(RESERVE_ACCOUNT, -cents(group.toFund ?? 0));
+      } else move(e.accountId, -amount);
       push({ date, title: e.title, kind: e.kind, key: e.key, accountId: e.accountId, approx: e.approx, confidence: e.confidence }, -amount);
     }
     for (const op of transfers.filter(op => op.date === date)) {
@@ -323,7 +366,12 @@ function scenarioInput(input: CoverageInput, scenario: Scenario): CoverageInput 
 }
 
 export function safePrepayment(input: CoverageInput, from: string, accountId: string): number {
-  const available = input.cash?.[accountId];
+  if (input.held !== undefined && accountId === LIFE_ACCOUNT) return 0;
+  const bank = input.cash?.[accountId];
+  const available = input.held !== undefined && accountId !== RESERVE_ACCOUNT
+    ? Math.max(0, (bank ?? 0) - (accountId === LIFE_ACCOUNT ? input.lifeAvailable ?? 0 : 0) -
+      (input.pending?.[accountId] ?? 0) - (input.held ?? []).filter(row => row.accountId === accountId).reduce((sum, row) => sum + row.amount, 0))
+    : bank;
   if (available == null || available <= 0) return 0;
   const baseline = coverage(input, from, 'cautious');
   if (baseline.accountRisk || baseline.shortage || baseline.bufferRisk) return 0;

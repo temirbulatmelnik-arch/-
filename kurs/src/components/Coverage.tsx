@@ -160,6 +160,10 @@ export function CoverageCard() {
               {p.shortfall == null ? (p.accountId ? ' · остаток нужно сверить' : '')
                 : p.shortfall > 0 ? <> · подготовить к {ddmm(p.prepareBy)} ещё <Money value={p.shortfall} kopecks /></>
                   : ' · хватает по прогнозу'}</p>
+            {!!p.held && <p className="text-muted">Выделено <Money value={p.held} kopecks /></p>}
+            {!!p.fromReserve && <p className="text-muted">Из резерва <Money value={p.fromReserve} kopecks /></p>}
+            {!!p.inTransit && <p className="text-muted">На промежуточной карте <Money value={p.inTransit} kopecks /></p>}
+            {!!p.reserveShortfall && <p className="text-warn">В резерве не хватает <Money value={p.reserveShortfall} kopecks /></p>}
           </div>)}
         </div>
         <p className="mt-2 text-muted">Сначала подтвердите счёт списания. Затем сверьте доступные деньги на счёте-источнике и срок перевода. Если перевод нужен, подготовьте разницу на счёте списания к указанной дате.</p>

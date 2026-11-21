@@ -6,7 +6,7 @@ import { useShallow } from 'zustand/react/shallow';
 import type { CalendarInput } from '../domain/calendar';
 import type { Scenario } from '../domain/coverage';
 import { today } from '../domain/dates';
-import type { TransferPlan } from '../domain/ledger';
+import { moscowClock, type HeldPayment, type PaymentPreparation } from '../domain/funds';
 import type { CalEvent, CategoryId, Expense, Source } from '../domain/types';
 import { useStore } from './store';
 
@@ -49,7 +49,8 @@ interface Ui {
   /** «В долг»: заёмные деньги — мост на кредитке */
   loan: boolean;
   /** перевод из резерва на карту под платежи: окно «другая сумма» */
-  transfer: TransferPlan | null;
+  transfer: { kind: 'payment'; plan: PaymentPreparation } | { kind: 'sweep'; accountId: string; amount: number }
+    | { kind: 'return'; held: HeldPayment } | null;
   /** код для новой редакции плана */
   unlock: boolean;
   /** раздел «Плана»: долги, чек-лист, стратегия */
@@ -111,6 +112,17 @@ export function useToday(): string {
     return () => { document.removeEventListener('visibilitychange', upd); clearInterval(t); };
   }, []);
   return d;
+}
+
+export function useMoscowClock() {
+  const [value, setValue] = useState(() => moscowClock());
+  useEffect(() => {
+    const refresh = () => setValue(moscowClock());
+    const timer = setInterval(refresh, 30_000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', refresh); };
+  }, []);
+  return value;
 }
 
 export function useCal(): CalendarInput {

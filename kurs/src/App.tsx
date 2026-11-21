@@ -20,6 +20,7 @@ import { Onboarding } from './screens/Onboarding';
 import { Payments } from './screens/Payments';
 import { Plan } from './screens/Plan';
 import { updateBadge } from './screens/reminders';
+import { openPaymentReminder, pushConfigured, syncPaymentPush } from './screens/paymentPush';
 import { ReserveSheet } from './screens/ReserveSheet';
 import { SettingsSheet } from './screens/Settings';
 import { SyncSheet, UnlockSheet, useInbox, usePlanUpdates } from './screens/Sync';
@@ -157,6 +158,28 @@ export default function App() {
     const unsub = useStore.subscribe(() => updateBadge());
     return () => { document.removeEventListener('visibilitychange', onVis); unsub(); };
   }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    openPaymentReminder();
+    if (!pushConfigured) return;
+    let timer: number | undefined;
+    const sync = () => {
+      if (document.visibilityState !== 'visible') return;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void syncPaymentPush().catch(() => {}), 600);
+    };
+    sync();
+    const unsubscribe = useStore.subscribe(sync);
+    document.addEventListener('visibilitychange', sync);
+    window.addEventListener('online', sync);
+    return () => {
+      window.clearTimeout(timer);
+      unsubscribe();
+      document.removeEventListener('visibilitychange', sync);
+      window.removeEventListener('online', sync);
+    };
+  }, [ready]);
 
   // знакомство с новым видом — один раз, после того как мост развёлся
   useEffect(() => {

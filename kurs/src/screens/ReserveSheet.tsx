@@ -5,6 +5,8 @@ import { Field, Money, PrimaryButton, SecondaryButton, Segmented, Sheet } from '
 import { addMonths, ddmm, monthIn, monthKey, monthsBetween } from '../domain/dates';
 import { parseAmount, rub } from '../domain/money';
 import { nextBonusMonth, RESERVE_BUFFER, shortfallFor } from '../domain/plan';
+import { useLedger } from './Checkup';
+import { accountMovement, RESERVE_ACCOUNT, rubles } from '../domain/accounts';
 import { useStore } from '../store/store';
 import { toast, useToday, useUi } from '../store/ui';
 
@@ -22,7 +24,14 @@ type Mode = 'out' | 'in' | 'set';
 
 function Body() {
   const now = useToday();
-  const [reserve, log, debts, moveReserve, setReserve] = useStore(useShallow(s => [s.reserve, s.reserveLog, s.debts, s.moveReserve, s.setReserve]));
+  const [log, debts, moveReserve, setReserve, operations] = useStore(useShallow(s => [s.reserveLog, s.debts, s.moveReserve, s.setReserve, s.accountBook.operations]));
+  const { reserve } = useLedger();
+  const recent = [...log, ...operations.filter(op => op.status === 'confirmed' && op.date <= now &&
+    op.type === 'transfer' && op.purpose && accountMovement(op, RESERVE_ACCOUNT) !== 0).map(op => ({
+      id: `bank:${op.id}`, date: op.date, at: op.at, amount: rubles(accountMovement(op, RESERVE_ACCOUNT)),
+      note: op.type === 'transfer' && op.purpose === 'weekly' ? 'Пополнение недели' : op.type === 'transfer' && op.purpose === 'sweep'
+        ? 'Перевод полученного дохода' : op.type === 'transfer' && op.purpose === 'return' ? 'Возврат остатка' : 'Подготовка платежа',
+    }))].sort((a, b) => (b.at ?? b.date).localeCompare(a.at ?? a.date)).slice(0, 30);
   const [mode, setMode] = useState<Mode>('out');
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
@@ -45,7 +54,7 @@ function Body() {
     <div className="space-y-4 pt-1">
       <div className="card p-5">
         <div className="text-[13px] font-medium text-muted">Сейчас</div>
-        <Money value={reserve} className="figure mt-1 block text-[40px] leading-none" />
+        <Money value={reserve} kopecks className="figure mt-1 block text-[40px] leading-none" />
         <p className={`mt-2 text-[13.5px] leading-snug ${reserve < need ? 'text-warn' : 'text-muted'}`}>
           До премии {monthIn(next)} резерв должен держать ≈ {rub(need)}: {rub(RESERVE_BUFFER)} на непредвиденное и нехватку зарплаты за {[month, ...months].length} мес.
           {reserve < need ? ' Сейчас меньше — трать строго по недельному лимиту.' : ''}
@@ -64,7 +73,7 @@ function Body() {
       <div>
         <div className="mb-2 px-1 text-[13px] font-medium text-muted">История</div>
         <div className="card divide-y divide-line overflow-hidden">
-          {[...log].reverse().slice(0, 30).map(m => (
+          {recent.map(m => (
             <div key={m.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
               <span className="min-w-0"><span className="block truncate text-[14px] font-medium">{m.note}</span><span className="text-[12px] text-faint">{ddmm(m.date)}</span></span>
               <span className={`shrink-0 text-[14px] font-medium ${m.amount >= 0 ? 'text-sea' : ''}`}>{rub(m.amount, { sign: true })}</span>

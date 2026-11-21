@@ -1,9 +1,12 @@
 // Напоминания через календарь iPhone: файл .ics с событиями и будильниками.
-// Веб-приложение не может само будить телефон по расписанию без сервера, а календарь напомнит надёжно.
-// Повторная загрузка обновляет события с теми же UID, а не дублирует их.
+// Calendar alerts are separate from Web Push. Imported entries are snapshots.
+import { needsPreparation, type PaymentPreparation, preparationInstant } from './funds';
 import { addDays } from './dates';
 import { rub } from './money';
 import type { CalEvent } from './types';
+
+const amountText = (amount: number, approx: boolean) =>
+  `${approx ? '≈' : ''}${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(amount)} ₽`;
 
 const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
 
@@ -28,13 +31,16 @@ export interface IcsOptions {
   /** ЧЧ:ММ */
   time: string;
   now?: Date;
+  preparation?: { time: string; groups: PaymentPreparation[] };
 }
 
 export function buildIcs(events: CalEvent[], o: IcsOptions): string {
   const stamp = (o.now ?? new Date()).toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
   const [hh, mm] = o.time.split(':').map(Number);
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Kurs//RU', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'X-WR-CALNAME:Курс'];
+  const utc = (date: string) => date.replace(/[-:]/g, '').replace(/\.\d+/, '');
   for (const e of events) {
+    if (o.preparation && e.kind === 'weekly') continue;
     const money = o.hideAmounts ? '' : ` ${rub(e.amount, { approx: e.approx })}`;
     const title = e.kind === 'payment' ? `Курс: ${e.title}${money}` : e.kind === 'weekly' ? `Курс: долить карту жизни` : `Курс: ожидается ${e.title.toLowerCase()}${money}`;
     const start = e.date.replace(/-/g, '');
@@ -53,7 +59,7 @@ export function buildIcs(events: CalEvent[], o: IcsOptions): string {
       'TRANSP:TRANSPARENT',
     );
     // будильник для события на весь день: смещение от полуночи дня события
-    const days = e.kind === 'payment' ? o.remindDays : [0];
+    const days = e.kind === 'payment' ? o.remindDays.filter(d => d !== 1 || !o.preparation) : [0];
     for (const d of [...new Set(days)].sort((a, b) => b - a)) {
       const minutes = hh * 60 + mm - d * 24 * 60;
       const sign = minutes < 0 ? '-' : '';
@@ -62,8 +68,42 @@ export function buildIcs(events: CalEvent[], o: IcsOptions): string {
     }
     lines.push('END:VEVENT');
   }
+  if (o.preparation) {
+    const after = stamp;
+    const addReminder = (uid: string, date: string, title: string, desc: string) => {
+      const time = utc(preparationInstant(date, o.preparation!.time));
+      if (time > after) lines.push(...timedReminder(uid, stamp, time, title, desc));
+    };
+    for (const group of o.preparation.groups) {
+      if (!needsPreparation(group)) continue;
+      const when = addDays(group.remindDate, 1) === group.date ? 'Завтра обязательный платёж' : 'Подготовить обязательный платёж';
+      const summary = `Курс · ${when}${o.hideAmounts ? '' : ' ' + amountText(group.total, group.events.some(e => e.approx))}`;
+      const detail = o.hideAmounts ? '' : `${group.events.map(e => e.title).join(', ')}. `;
+      const route = group.accountId ? 'Проверьте остаток и перевод в «Курсе».' : 'Уточните счёт списания в банке.';
+      addReminder(`prepare-${group.date}-${encodeURIComponent(group.accountId ?? 'unassigned')}`, group.remindDate, summary, detail + route);
+    }
+    for (const e of events.filter(e => e.kind === 'weekly')) {
+      addReminder(`weekly-${e.key.replace(/[^a-zA-Z0-9-]/g, '-')}`, e.date, 'Курс · Долить карту до недельного лимита',
+        'Откройте «Курс» и проверьте, сколько перевести из резерва на основную карту.');
+    }
+  }
   lines.push('END:VCALENDAR', '');
   return lines.join('\r\n');
+}
+
+function timedReminder(id: string, stamp: string, start: string, title: string, desc: string): string[] {
+  return ['BEGIN:VEVENT', fold(`UID:kurs-${id}@kurs.local`), `DTSTAMP:${stamp}`, `DTSTART:${start}`, 'DURATION:PT5M',
+    fold(`SUMMARY:${esc(title)}`), fold(`DESCRIPTION:${esc(desc)}`), 'TRANSP:TRANSPARENT',
+    'BEGIN:VALARM', 'ACTION:DISPLAY', fold(`DESCRIPTION:${esc(title)}`), 'TRIGGER:PT0S', 'END:VALARM', 'END:VEVENT'];
+}
+
+export function calendarTest(now = new Date()): string {
+  const utc = (date: Date) => date.toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+  const stamp = utc(now);
+  const start = utc(new Date(now.getTime() + 180_000));
+  return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Kurs//RU', 'METHOD:PUBLISH',
+    ...timedReminder(`test-${stamp}`, stamp, start, 'Курс · Проверка уведомления Календаря', 'Это тест системного уведомления Календаря.'),
+    'END:VCALENDAR', ''].join('\r\n');
 }
 
 export function downloadFile(name: string, content: string | Blob, type: string) {

@@ -93,6 +93,10 @@ export interface CalEvent {
   economicType?: 'income' | 'loan_disbursement' | 'debt_payment' | 'non_income';
   projection?: 'conditional' | 'internal_transfer' | 'review';
   possibleExtra?: number;
+  /** Более ранняя дата подготовки, подтверждённая пользователем по правилам банка. */
+  prepareOn?: string;
+  /** Полная сумма при наличии подтверждённых частичных списаний. */
+  originalAmount?: number;
   payroll?: import('./payroll').WorkPay;
   confidence?: 'confirmed' | 'regular' | 'estimate' | 'tentative';
   accrualPeriod?: string;
@@ -105,7 +109,7 @@ export interface CalEvent {
   planned?: string;
 }
 
-export type CalendarOverride = Pick<CalEvent, 'projection'> & { amount?: number; date?: string; economicType?: 'non_income'; reviewFor?: string };
+export type CalendarOverride = Pick<CalEvent, 'projection'> & { amount?: number; date?: string; prepareOn?: string; economicType?: 'non_income'; reviewFor?: string };
 
 export type IncomeKind = 'salary' | 'bonusMonthly' | 'advance' | 'bonusQuarter' | 'bonusYear' | 'vacation' | 'thirteenth' | 'other';
 
@@ -187,6 +191,7 @@ export interface Settings {
   remindDays: number[];
   /** время напоминаний */
   remindTime: string;
+  preparationTime?: string;
   lastBackupAt?: string;
   lastIcsAt?: string;
   lastReportAt?: string;
@@ -260,6 +265,8 @@ export interface CardBalance {
   at?: string;
   /** Записи по дату банковского остатка, существовавшие на момент сверки. */
   includedExpenseIds?: string[];
+  /** Сверенные деньги, назначение которых ещё требует выписки. */
+  unmatchedOnCard?: number;
   operationIds?: string[];
 }
 

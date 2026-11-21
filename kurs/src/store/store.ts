@@ -2,18 +2,19 @@
 // Резервная копия — файл JSON (Настройки → Данные), календарь — файл .ics.
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { accountOptions, appendOperations, bookOperationAllowed, cashAccount, EMPTY_BOOK, LIFE_ACCOUNT, RESERVE_ACCOUNT, validAmount, validDate, validSplitDebit, validSplitPlan, type AccountBook, type AccountOperation, type BankBalance, type CashAccount, type SplitDebit, type SplitPlan } from '../domain/accounts';
+import { accountOptions, appendOperations, cents, kopecks, bookOperationAllowed, cashAccount, EMPTY_BOOK, LIFE_ACCOUNT, RESERVE_ACCOUNT, validAmount, validDate, validSplitDebit, validSplitPlan, type AccountBook, type AccountOperation, type BankBalance, type CashAccount, type SplitDebit, type SplitPlan } from '../domain/accounts';
 import { DEFAULT_MODEL } from '../domain/models';
 import { coverageInput, safePrepayment } from '../domain/coverage';
-import { annuity } from '../domain/calendar';
+import { DEFAULT_PREPARATION_TIME, moscowClock, paymentShares, partialPayments, weeklyTopUp, type FundingMode } from '../domain/funds';
+import { annuity, eventsBetween } from '../domain/calendar';
 import { addDays, monthKey, monthsBetween, toKey, today } from '../domain/dates';
-import { setPlanSource, totalDebt, type PlanConfig } from '../domain/plan';
+import { setPlanSource, totalDebt, weeklyLimit, type PlanConfig } from '../domain/plan';
 import { validPayroll, type PayrollProfile } from '../domain/payroll';
 import { mergeSeed } from '../domain/planUpdate';
 import type { Bridge } from '../domain/bridge';
 import { fixDefaultCategories } from '../domain/categorize';
 import { dropChatTwins } from '../domain/exchange';
-import { freshReserve, heldKeys, ledger, type Checkup } from '../domain/ledger';
+import { freshReserve, heldKeys, ledger, reserveAnchor, type Checkup } from '../domain/ledger';
 import type { CalEvent, CalendarOverride, CardBalance, ChecklistItem, Debt, DebtSnapshot, EventMark, Expense, FixedItem, IncomeTemplate, MemoryRule, PlanSeed, ReserveMove, Settings, StrategySection, WeekClosure, WeeklyOverride, WishItem } from '../domain/types';
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -24,6 +25,7 @@ export const DEFAULT_SETTINGS: Settings = {
   remindDays: [3, 1, 0],
   remindTime: '10:00',
   badge: false,
+  preparationTime: DEFAULT_PREPARATION_TIME,
 };
 
 interface Data {
@@ -83,6 +85,10 @@ interface Actions {
   /** summary — запомнить импорт и снимок данных до него (хранятся последние 5) */
   applySync: (patch: Partial<Data>, summary?: string) => void;
   saveCashAccount: (id: string, name: string, amount?: number) => void;
+  fundPayment: (id: string, mode: FundingMode, keys: string[], eventDate: string, target: string, amount: number, date: string) => boolean;
+  sweepIncome: (id: string, accountId: string, amount: number, date: string) => boolean;
+  returnEarmark: (id: string, accountId: string, key: string, amount: number, date: string) => boolean;
+  confirmWeeklyTransfer: (key: string, amount: number, date?: string) => boolean;
   saveOperation: (op: AccountOperation) => boolean;
   setPaymentAccount: (key: string, accountId: string) => void;
   saveSplitPlan: (plan: SplitPlan) => void;
@@ -109,10 +115,10 @@ interface Actions {
   updateExpense: (id: string, patch: Partial<Expense>) => void;
   removeExpense: (id: string) => void;
   /** отметить событие календаря; для платежа по долгу остаток уменьшается на оценку погашения */
-  markEvent: (e: CalEvent, done: boolean, amount?: number, paidFrom?: EventMark['paidFrom'], details?: { accountId?: string; principal?: number; interest?: number; fee?: number; paidDate?: string; payrollActual?: { gross?: number; tax?: number; otherWithheld?: number } }) => void;
+  markEvent: (e: CalEvent, done: boolean, amount?: number, paidFrom?: EventMark['paidFrom'], details?: { accountId?: string; partialId?: string; principal?: number; interest?: number; fee?: number; paidDate?: string; payrollActual?: { gross?: number; tax?: number; otherWithheld?: number } }) => void;
   updateDebt: (id: string, patch: Partial<Debt>) => void;
   /** точная сумма/дата платежа из банка */
-  setOverride: (key: string, o: { amount?: number; date?: string }) => void;
+  setOverride: (key: string, o: Pick<CalendarOverride, 'amount' | 'date' | 'prepareOn'>) => void;
   addDebt: (d: Debt) => void;
   removeDebt: (id: string) => void;
   /** досрочное погашение; fromReserve — деньги взяты из резерва */
@@ -145,6 +151,11 @@ export interface ImportRecord {
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 const nowIso = () => new Date().toISOString();
+
+const confirmation = (date: string) => ({
+  date, at: date === moscowClock().date ? nowIso() : undefined,
+  origin: 'manual' as const, status: 'confirmed' as const, fundingSource: 'own' as const,
+});
 
 const includedAt = (expenses: Expense[], date: string) => expenses.filter(e => e.date <= date).map(e => e.id);
 
@@ -270,10 +281,70 @@ export const useStore = create<State>()(
         const account: CashAccount = { id, name: name.trim(), balance };
         return { accountBook: { ...s.accountBook, accounts: [...s.accountBook.accounts.filter(a => a.id !== id), account] } };
       }),
+      fundPayment: (id, mode, keys, eventDate, target, amount, date) => {
+        const s = get();
+        if (!validDate(eventDate) || !validDate(date) || date > moscowClock().date || !validAmount(amount) ||
+            cents(amount) <= 0 || target === RESERVE_ACCOUNT || (target === LIFE_ACCOUNT && ['via', 'forward', 'existing'].includes(mode))) return false;
+        const events = eventsBetween(s, eventDate, eventDate).filter(e => keys.includes(e.key) && e.kind === 'payment' &&
+          !e.projection && e.accountId === target && !s.marks[e.key]?.done);
+        if (!events.length || events.length !== keys.length) return false;
+        const led = ledger({ ...s, now: moscowClock().date });
+        const source = mode === 'allocate' || mode === 'existing' ? target : mode === 'forward' ? LIFE_ACCOUNT : RESERVE_ACCOUNT;
+        const destination = mode === 'via' ? LIFE_ACCOUNT : target;
+        const physical = source === LIFE_ACCOUNT ? led.card : led.cashAccounts.find(a => a.id === source)?.expected;
+        const held = led.heldForPayments.filter(row => row.accountId === source).reduce((sum, row) => sum + row.amount, 0);
+        const pending = led.pendingSweepToReserve[source] ?? 0;
+        const available = mode === 'allocate' ? Math.min(pending, (physical ?? 0) - held)
+          : mode === 'existing' ? Math.max(0, (physical ?? 0) - held - pending)
+            : mode === 'forward' ? Math.max(0, (physical ?? 0) - pending - (led.lifeAvailable ?? 0) - led.unassignedOnCard) : led.reserve;
+        if (cents(amount) > cents(available)) return false;
+        const shares = paymentShares(events, led.heldForPayments, amount, target, mode);
+        if (!shares?.length) return false;
+        const base = { id, amount: kopecks(amount), accountId: source, ...confirmation(date) };
+        return s.saveOperation(mode === 'allocate' || mode === 'existing' ? { ...base, type: 'allocation', shares, ...(mode === 'existing' ? { existingCash: true } : {}) } :
+          { ...base, type: 'transfer', purpose: 'prepare', toAccountId: destination, shares });
+      },
+      sweepIncome: (id, accountId, amount, date) => {
+        const s = get();
+        const led = ledger({ ...s, now: moscowClock().date });
+        const physical = accountId === LIFE_ACCOUNT ? led.card : led.cashAccounts.find(a => a.id === accountId)?.expected;
+        const held = led.heldForPayments.filter(row => row.accountId === accountId).reduce((sum, row) => sum + row.amount, 0);
+        if (!validDate(date) || date > moscowClock().date || !validAmount(amount) || cents(amount) <= 0 ||
+            cents(amount) > cents(Math.min(led.pendingSweepToReserve[accountId] ?? 0, (physical ?? 0) - held))) return false;
+        return s.saveOperation({ id, accountId, toAccountId: RESERVE_ACCOUNT, type: 'transfer', purpose: 'sweep',
+          amount: kopecks(amount), ...confirmation(date) });
+      },
+      returnEarmark: (id, accountId, key, amount, date) => {
+        const s = get();
+        const led = ledger({ ...s, now: moscowClock().date });
+        const held = led.heldForPayments.find(row => row.key === key && row.accountId === accountId);
+        if (!held || !validDate(date) || date > moscowClock().date || !validAmount(amount) ||
+            cents(amount) <= 0 || cents(amount) > cents(held.amount)) return false;
+        return s.saveOperation({ id, accountId, toAccountId: RESERVE_ACCOUNT, type: 'transfer', purpose: 'return',
+          amount: kopecks(amount), shares: [{ key, amount: kopecks(amount) }], ...confirmation(date) });
+      },
+      confirmWeeklyTransfer: (key, amount, date = moscowClock().date) => {
+        const s = get();
+        const monday = key.slice(3);
+        const now = moscowClock().date;
+        if (!key.startsWith('wk:') || !validDate(monday) || !validDate(date) || date > now ||
+            s.marks[key]?.done || !validAmount(amount) || cents(amount) <= 0) return false;
+        const led = ledger({ ...s, now });
+        if (led.lifeAvailable == null || cents(amount) > cents(led.reserve)) return false;
+        const limit = weeklyLimit(s.debts, monday, s.weeklyOverrides);
+        const op: AccountOperation = { id: key, type: 'transfer', purpose: 'weekly', eventKey: key,
+          accountId: RESERVE_ACCOUNT, toAccountId: LIFE_ACCOUNT, amount: kopecks(amount), ...confirmation(date),
+          weeklyExcess: Math.max(0, kopecks(amount - weeklyTopUp(limit, led.lifeAvailable))) };
+        const operations = appendOperations(s.accountBook.operations, [op]);
+        if (operations === s.accountBook.operations) return false;
+        set({ accountBook: { ...s.accountBook, operations },
+          marks: { ...s.marks, [key]: { done: true, amount: op.amount, paidDate: date, at: nowIso() } } });
+        return true;
+      },
       saveOperation: op => {
         const s = get();
         if (!bookOperationAllowed(op, s.accountBook, s.debts, s.expenses)) return false;
-        if (op.status === 'confirmed' && op.date > today()) return false;
+        if (op.status === 'confirmed' && op.date > moscowClock().date) return false;
         if (op.eventKey && op.type === 'loan_disbursement' && !s.marks[op.eventKey]?.done) return false;
         const operations = appendOperations(s.accountBook.operations, [op]);
         if (operations === s.accountBook.operations) return false;
@@ -322,8 +393,8 @@ export const useStore = create<State>()(
       }),
       closeWeek: c => set(s => {
         // воскресное пополнение: из резерва на карту жизни; в календаре отмечается пополнение следующей недели
-        const top = c.topUp ?? 0;
         const key = `wk:${addDays(c.monday, 7)}`;
+        const top = s.accountBook.operations.some(op => op.eventKey === key) ? 0 : c.topUp ?? 0;
         // резерв уже пришёл из банка в воскресенье или позже — пополнение в нём есть, второй раз не вычитаем
         const fresh = freshReserve(s.reserveLog, addDays(c.monday, 6)) && !s.marks[key]?.done;
         return {
@@ -336,11 +407,24 @@ export const useStore = create<State>()(
         const at = nowIso();
         const date = today();
         const key = `wk:${addDays(c.monday, 7)}`;
-        const after = { card: Math.round((c.actual.card + c.topUp - c.toReserve) * 100) / 100, reserve: Math.round((c.actual.reserve - c.topUp + c.toReserve) * 100) / 100 };
+        const topUp = s.marks[key]?.done ? 0 : c.topUp;
+        if (topUp > c.actual.reserve || topUp < 0 || c.toReserve < 0 || c.toReserve > c.actual.card) return {};
+        const after = { card: kopecks(c.actual.card + topUp - c.toReserve), reserve: kopecks(c.actual.reserve - topUp + c.toReserve) };
+        const led = ledger({ ...s, now: date });
+        const nextLimit = weeklyLimit(s.debts, addDays(c.monday, 7), s.weeklyOverrides);
+        const discrepancy = led.card == null ? 0 : Math.max(0, kopecks(c.actual.card - led.card));
+        const unmatchedOnCard = kopecks(led.unmatchedOnCard + discrepancy);
+        const available = Math.max(0, kopecks(c.actual.card - led.heldOnCard - led.incomeOnCard - led.unassignedOnCard - discrepancy));
+        const entries: AccountOperation[] = [];
+        if (topUp > 0) entries.push({ ...confirmation(date), id: key, eventKey: key, amount: topUp, accountId: RESERVE_ACCOUNT,
+          toAccountId: LIFE_ACCOUNT, type: 'transfer', purpose: 'weekly', weeklyExcess: Math.max(0, kopecks(topUp - weeklyTopUp(nextLimit, available))) });
+        if (c.toReserve > 0) entries.push({ ...confirmation(date), id: uid(), amount: c.toReserve, accountId: LIFE_ACCOUNT,
+          toAccountId: RESERVE_ACCOUNT, type: 'transfer', purpose: 'sweep' });
+        const accountBook = { ...s.accountBook, operations: appendOperations(s.accountBook.operations, entries) };
         const includedExpenseIds = includedAt(s.expenses, date);
-        const operationIds = operationIdsAt(s.accountBook, date);
-        const entry: Checkup = { ...c, id: uid(), at, date, after, operationIds };
-        const marks = c.topUp > 0 ? { ...s.marks, [key]: { done: true, amount: c.topUp, at } } : s.marks;
+        const operationIds = operationIdsAt(accountBook, date);
+        const entry: Checkup = { ...c, topUp, id: uid(), at, date, after, operationIds, ...(unmatchedOnCard > 0 ? { unmatchedOnCard } : {}) };
+        const marks = topUp > 0 ? { ...s.marks, [key]: { done: true, amount: topUp, at, paidDate: date } } : s.marks;
         const closures = closure && !s.closures[c.monday] ? { ...s.closures, [c.monday]: { ...closure, topUp: c.topUp, at } } : s.closures;
         const note = [c.topUp > 0 ? `на карту ${Math.round(c.topUp)}` : '', c.toReserve > 0 ? `с карты ${Math.round(c.toReserve)}` : ''].filter(Boolean).join(', ');
         // долги кредиток — из банка: кредитка моста и остальные, сверенные в тот же раз
@@ -349,12 +433,13 @@ export const useStore = create<State>()(
         if (c.creditCard && c.actual.credit != null) owe(c.creditCard, c.actual.credit);
         for (const k of c.cards ?? []) owe(k.id, k.actual);
         return {
+          accountBook,
           checkups: [...s.checkups, entry].slice(-26),
           marks,
           closures,
           reserve: after.reserve,
           reserveLog: [...s.reserveLog, { id: uid(), date, at, abs: true, operationIds, amount: after.reserve - s.reserve, note: `Сверка с банком${note ? `: ${note}` : ''}` }],
-          cardBalance: { amount: after.card, date, source: 'manual' as const, at, includedExpenseIds, operationIds },
+          cardBalance: { amount: after.card, date, source: 'manual' as const, at, includedExpenseIds, operationIds, ...(unmatchedOnCard > 0 ? { unmatchedOnCard } : {}) },
           ...(debts !== s.debts ? withSnapshot(debts, s.snapshots) : {}),
         };
       }),
@@ -369,11 +454,17 @@ export const useStore = create<State>()(
         return {
           closures,
           ...(c.transferred > 0 ? { savings: s.savings - c.transferred, savingsLog: [...s.savingsLog, { id: uid(), date: today(), amount: -c.transferred, note: 'Неделя открыта заново' }] } : {}),
-          ...(s.marks[key]?.done ? { marks, ...topUpMove(s, key, 0, 'Неделя открыта заново: пополнение отменено') } : {}),
+          ...(s.marks[key]?.done && !s.accountBook.operations.some(op => op.eventKey === key) ? { marks, ...topUpMove(s, key, 0, 'Неделя открыта заново: пополнение отменено') } : {}),
         };
       }),
       moveSavings: (amount, note) => set(s => ({ savings: s.savings + amount, savingsLog: [...s.savingsLog, { id: uid(), date: today(), amount, note }] })),
-      setCardBalance: b => set(s => ({ cardBalance: b && captureCardBalance(b, s.expenses, s.accountBook) })),
+      setCardBalance: b => set(s => {
+        if (!b) return { cardBalance: null };
+        const led = ledger(s);
+        const unmatched = b.date === moscowClock().date && led.card != null
+          ? kopecks(led.unmatchedOnCard + Math.max(0, b.amount - led.card)) : 0;
+        return { cardBalance: captureCardBalance({ ...b, ...(unmatched > 0 ? { unmatchedOnCard: unmatched } : {}) }, s.expenses, s.accountBook) };
+      }),
       setFixed: list => set({ fixed: list }),
       clearOverride: key => set(s => {
         const overrides = { ...s.overrides };
@@ -390,7 +481,7 @@ export const useStore = create<State>()(
       markEvent: (e, done, amount, paidFrom, details) => set(s => {
         const prev = s.marks[e.key];
         const linked = s.accountBook.operations.find(op => op.eventKey === e.key);
-        if (linked?.type === 'loan_disbursement' || s.accountBook.historicalLoans?.some(loan => loan.eventKey === e.key) ||
+        if (linked?.type === 'loan_disbursement' || (linked?.type === 'transfer' && linked.purpose === 'weekly') || s.accountBook.historicalLoans?.some(loan => loan.eventKey === e.key) ||
             (done && (e.payroll?.documented || e.projection === 'internal_transfer'))) return {};
         const marks = { ...s.marks };
         let debts = s.debts;
@@ -402,16 +493,24 @@ export const useStore = create<State>()(
           const paid = amount ?? e.amount;
           if (!validAmount(paid) || paid < 0) return {};
           const at = nowIso();
-          const date = details?.paidDate ?? today();
-          if (!validDate(date) || date > today()) return {};
+          const date = details?.paidDate ?? moscowClock().date;
+          if (!validDate(date) || date > moscowClock().date) return {};
           const from = paidFrom ?? (heldKeys(s.reserveLog, s.marks).has(e.key) ? 'card' : 'reserve');
           marks[e.key] = { done: true, amount: paid, at, paidDate: date, ...(e.kind === 'payment' ? { paidFrom: from } : {}) };
           if (e.kind === 'weekly') return { marks, ...topUpMove(s, e.key, paid) };
-          const accountId = details?.accountId ?? (from === 'card' ? LIFE_ACCOUNT : RESERVE_ACCOUNT);
-          const bookedAt = date === today() ? at : undefined;
+          const accountId = details?.accountId ?? e.accountId ?? (from === 'card' ? LIFE_ACCOUNT : RESERVE_ACCOUNT);
+          const bookedAt = date === moscowClock().date ? at : undefined;
+          const partialId = e.kind === 'payment' ? details?.partialId : undefined;
+          const previouslyPaid = partialPayments(accountBook.operations).get(e.key) ?? 0;
+          if (partialId && (cents(paid) <= 0 || cents(paid) >= cents(e.amount))) return {};
+          const link = partialId ? { id: partialId, partialFor: e.key } : { id: uid(), eventKey: e.key };
+          if (e.kind === 'payment') {
+            if (partialId) delete marks[e.key];
+            else if (previouslyPaid) marks[e.key].amount = kopecks(paid + previouslyPaid / 100);
+          }
           if (e.kind === 'payment' && (debt || e.key.startsWith('split-debit:'))) {
             const op: AccountOperation = {
-              id: uid(), eventKey: e.key, type: 'debt_payment', debtId: debt?.id, accountId, amount: paid,
+              ...link, type: 'debt_payment', debtId: debt?.id, accountId, amount: paid,
               date, at: bookedAt, origin: 'manual', status: 'confirmed', fundingSource: 'unknown',
               principal: details?.principal, interest: details?.interest, fee: details?.fee,
             };
@@ -419,14 +518,14 @@ export const useStore = create<State>()(
             accountBook = { ...accountBook, operations: appendOperations(accountBook.operations, [op]) };
           }
           if (e.kind === 'payment' && !debt && !e.key.startsWith('split-debit:') && details?.accountId) {
-            const op: AccountOperation = { id: uid(), eventKey: e.key, type: 'expense', amount: paid,
+            const op: AccountOperation = { ...link, type: 'expense', amount: paid,
               accountId, date, at: bookedAt, origin: 'manual', status: 'confirmed', fundingSource: 'unknown' };
             if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
             accountBook = { ...accountBook, operations: appendOperations(accountBook.operations, [op]) };
           }
-          if (e.kind === 'income' && (e.accountId || e.nominalDate)) {
+          if (e.kind === 'income' && (e.accountId || e.nominalDate || e.incomeKind) && e.economicType !== 'non_income') {
             const op: AccountOperation = { id: uid(), eventKey: e.key, type: 'income', amount: paid,
-              accountId: e.accountId ?? LIFE_ACCOUNT, date, at: bookedAt, origin: 'manual', status: 'confirmed', fundingSource: 'own' };
+              accountId: e.accountId ?? LIFE_ACCOUNT, date, at: bookedAt, origin: 'manual', status: 'confirmed', fundingSource: 'own', pendingSweep: true };
             if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
             accountBook = { ...accountBook, operations: appendOperations(accountBook.operations, [op]) };
             if (work && e.nominalDate) {
@@ -442,6 +541,12 @@ export const useStore = create<State>()(
           delete marks[e.key];
           if (e.kind === 'weekly') return { marks, ...topUpMove(s, e.key, 0, 'Пополнение карты отменено') };
           if (linked) {
+            const led = ledger(s);
+            const ref = linked.accountId === LIFE_ACCOUNT ? led.cardFrom?.at :
+              linked.accountId === RESERVE_ACCOUNT ? reserveAnchor(s.reserveLog)?.at :
+              s.accountBook.accounts.find(a => a.id === linked.accountId)?.balance?.at;
+            if (ref && linked.date <= ref.slice(0, 10) && (!linked.at || Date.parse(ref) > Date.parse(linked.at))) return {};
+            if (linked.type === 'income' && linked.pendingSweep && (led.pendingSweepToReserve[linked.accountId] ?? 0) < linked.amount) return {};
             if (debt?.bankBalance?.at && Date.parse(debt.bankBalance.at) >= Date.parse(linked.at ?? '')) return {};
             accountBook = { ...accountBook, operations: accountBook.operations.filter(op => op.id !== linked.id) };
           } else if (debt && prev?.prevBalance != null && (!debt.updatedAt || !debt.bankBalance)) {
@@ -474,12 +579,12 @@ export const useStore = create<State>()(
           date, at: nowIso(), origin: 'manual', status: 'confirmed', fundingSource: 'unknown', note: 'Досрочное погашение' });
       },
 
-      applyBonus: ({ id, amount, accountId, title, eventKey, date = today() }) => {
+      applyBonus: ({ id, amount, accountId, title, eventKey, date = moscowClock().date }) => {
         const s = get();
-        if (date > today() || (eventKey && s.marks[eventKey]?.done)) return false;
+        if (date > moscowClock().date || (eventKey && s.marks[eventKey]?.done)) return false;
         const at = nowIso();
         const op: AccountOperation = { id, amount, accountId, eventKey, date, at, type: 'income',
-          origin: 'manual', status: 'confirmed', fundingSource: 'own', note: title };
+          origin: 'manual', status: 'confirmed', fundingSource: 'own', pendingSweep: true, note: title };
         if (!bookOperationAllowed(op, s.accountBook, s.debts, s.expenses)) return false;
         const operations = appendOperations(s.accountBook.operations, [op]);
         if (operations === s.accountBook.operations) return false;
@@ -511,13 +616,20 @@ export const useStore = create<State>()(
     }),
     {
       name: 'kurs',
-      version: 5,
+      version: 6,
       partialize: s => pickData(s),
       // версия 1: обязательные платежи без id — добавляем, остальное новые поля берут значения по умолчанию;
       // версия 2: файл из чата задваивал траты, уже внесённые под другим названием, — убираем копии один раз;
       // версия 3: подпись банка «Транспорт» записывалась в «кафе и досуг» — поправляем категорию
       migrate: (persisted, version) => {
         const p = persisted as Partial<Data>;
+        if (version < 6) {
+          try {
+            const backup = 'kurs:before-0.6.0';
+            const raw = window.localStorage.getItem('kurs');
+            if (raw && !window.localStorage.getItem(backup)) window.localStorage.setItem(backup, raw);
+          } catch { /* The additive change also works if the browser lacks room for a second copy. */ }
+        }
         let expenses = p.expenses;
         if (version < 3 && expenses) {
           const r = dropChatTwins(expenses);

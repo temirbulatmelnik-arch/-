@@ -1,4 +1,4 @@
-import { accountOptions, LIFE_ACCOUNT } from '../domain/accounts';
+import { accountOptions, LIFE_ACCOUNT, RESERVE_ACCOUNT } from '../domain/accounts';
 // Платёж, поступление или воскресное пополнение карты: отметить, поправить сумму и дату (у кредиток они плавают), распределить премию.
 import { CalendarDays, Undo2 } from 'lucide-react';
 import { useState } from 'react';
@@ -6,10 +6,12 @@ import { AmountInput, Money, PrimaryButton, Row, SecondaryButton, Sheet } from '
 import { GROUP_LABEL, whenText } from '../components/rows';
 import { actionableEvent, cashIncomeEvent, eventGroup, incomeStatus, INCOME_STATUS_LABEL } from '../domain/calendar';
 import { addDays, dayMonth, ddmmyyyy, relDays, weekdayFull } from '../domain/dates';
-import { heldKeys, ledger } from '../domain/ledger';
+import { DEFAULT_PREPARATION_TIME, moscowClock, paymentPreparations, weeklyTopUp } from '../domain/funds';
+import { ledger } from '../domain/ledger';
 import { parseAmount, rub } from '../domain/money';
 import type { CalEvent } from '../domain/types';
-import { useStore } from '../store/store';
+import { useLedger } from './Checkup';
+import { uid, useStore } from '../store/store';
 import { toast, useToday, useUi } from '../store/ui';
 
 const BONUS_KINDS = ['bonusQuarter', 'bonusYear', 'vacation', 'thirteenth'];
@@ -27,7 +29,14 @@ export function EventSheet() {
 
 function Body({ e }: { e: CalEvent }) {
   const now = useToday();
+  const moscowDate = moscowClock().date;
   const mark = useStore(s => s.marks[e.key]);
+  const led = useLedger();
+  const prepTime = useStore(s => s.settings.preparationTime) ?? DEFAULT_PREPARATION_TIME;
+  const assigned = useStore(s => s.accountBook.paymentAccounts[e.key]) ?? e.accountId;
+  const prepared = led.heldForPayments.find(row => row.key === e.key && row.accountId === assigned);
+  const [partial, setPartial] = useState(false);
+  const [partialId] = useState(uid);
   const override = useStore(s => s.overrides[e.key]);
   const debt = useStore(s => (e.debtId ? s.debts.find(d => d.id === e.debtId) : undefined));
   const { markEvent, setOverride, clearOverride, updateDebt } = useStore.getState();
@@ -43,16 +52,16 @@ function Body({ e }: { e: CalEvent }) {
   const [amount, setAmount] = useState(() => {
     if (mark?.amount == null && e.kind === 'weekly') {
       const led = ledger(useStore.getState());
-      return led.card == null ? '' : String(Math.round(Math.max(0, e.amount - Math.max(0, led.card - led.heldOnCard - led.incomeOnCard))));
+      return led.lifeAvailable == null ? '' : String(weeklyTopUp(e.amount, led.lifeAvailable));
     }
     return String(Math.round((mark?.amount ?? e.amount) * 100) / 100);
   });
   const [editing, setEditing] = useState(false);
-  // деньги под платёж уже перевели на карту — по умолчанию «с карты»
-  const [from, setFrom] = useState<'reserve' | 'card'>(() => mark?.paidFrom ?? (heldKeys(useStore.getState().reserveLog, useStore.getState().marks).has(e.key) ? 'card' : 'reserve'));
   const book = useStore(s => s.accountBook);
-  const [account, setAccount] = useState(e.accountId ?? (e.kind === 'payment' ? '' : LIFE_ACCOUNT));
-  const [paidDate, setPaidDate] = useState(now);
+  const [account, setAccount] = useState(assigned ?? (e.kind === 'payment' ? '' : LIFE_ACCOUNT));
+  const prep = paymentPreparations([{ ...e, accountId: assigned, prepareOn: override?.prepareOn ?? e.prepareOn }], mark ? { [e.key]: mark } : {}, led.heldForPayments, led.reserve)[0];
+  const from = account === LIFE_ACCOUNT ? 'card' : 'reserve';
+  const [paidDate, setPaidDate] = useState(() => moscowClock().date);
   const [principal, setPrincipal] = useState('');
   const [interest, setInterest] = useState('');
   const [fee, setFee] = useState('');
@@ -65,14 +74,24 @@ function Body({ e }: { e: CalEvent }) {
   const close = () => set({ event: null });
 
   const done = () => {
+    if (e.kind === 'weekly') {
+      if (useStore.getState().confirmWeeklyTransfer(e.key, value, paidDate)) { toast('Пополнение записано'); close(); }
+      else toast('Пополнение уже отмечено или остатки требуют сверки');
+      return;
+    }
+    if (e.kind === 'payment' && partial && value >= e.amount) { toast('Для частичного платежа введите меньшую сумму'); return; }
     if (isBonus(e) && !e.nominalDate && e.economicType !== 'loan_disbursement') { set({ event: null, bonus: { event: { ...e, amount: value } } }); return; }
-    markEvent(e, true, value, from, { accountId: account, principal: parseAmount(principal) ?? undefined,
+    markEvent(e, true, value, from, { accountId: account || undefined, partialId: partial ? partialId : undefined, principal: parseAmount(principal) ?? undefined,
       interest: parseAmount(interest) ?? undefined, fee: parseAmount(fee) ?? undefined, paidDate,
       ...(gross || withheld || otherWithheld ? { payrollActual: { gross: parseAmount(gross) ?? undefined,
         tax: parseAmount(withheld) ?? undefined, otherWithheld: parseAmount(otherWithheld) ?? undefined } } : {}),
     });
-    if (!useStore.getState().marks[e.key]?.done) { toast('Проверьте счёт и разбивку платежа'); return; }
-    toast(e.kind === 'income' ? `Пришло на карту. В воскресной сверке приложение напомнит перевести ${rub(value)} в резерв` : e.kind === 'weekly' ? 'Отмечено: карта долита из резерва' : debt ? `Оплачено. В учёте отражена подтверждённая часть тела долга` : 'Отмечено: оплачено');
+    const state = useStore.getState();
+    if (!(partial ? state.accountBook.operations.some(op => op.id === partialId) : state.marks[e.key]?.done)) {
+      toast('Проверьте счёт и разбивку платежа');
+      return;
+    }
+    toast(e.kind === 'income' ? 'Поступление записано' : partial ? 'Частичное списание записано' : 'Банковское списание записано');
     close();
   };
 
@@ -92,8 +111,29 @@ function Body({ e }: { e: CalEvent }) {
           <Row label="Когда">{e.dateMode === 'month' ? 'в течение месяца' : `${whenText(e)}, ${weekdayFull(e.date)}`}</Row>
           {status && e.economicType !== 'loan_disbursement' && <Row label="Статус">{INCOME_STATUS_LABEL[status]}</Row>}
           {e.kind === 'payment' && !mark?.done && <Row label="Счёт списания">
-            {accountOptions(book).find(option => option.id === e.accountId)?.name ?? 'Требует уточнения'}
+            {accountOptions(book).find(option => option.id === assigned)?.name ?? 'Требует уточнения'}
           </Row>}
+          {e.kind === 'payment' && <>
+            <Row label="Подготовка">{mark?.done ? 'Платёж списан' : prepared?.amount && prepared.amount >= e.amount
+              ? 'Перевод сделан' : prepared?.amount ? 'Подготовлен частично' : 'Не подготовлен'}</Row>
+            {prep && <details className="py-2 text-[13px]">
+              <summary className="text-sea">Банк требует более ранний срок</summary>
+              <label className="mt-2 block text-muted">Укажите дату из правил банка
+                <input className="field mt-1" type="date" value={override?.prepareOn ?? e.prepareOn ?? ''}
+                  max={addDays(e.date, -1)} onChange={x => {
+                    const date = x.target.value;
+                    if (date && date >= e.date) return;
+                    setOverride(e.key, { prepareOn: date || undefined });
+                  }} />
+              </label>
+            </details>}
+            {prep && <Row label="Подготовить к">{ddmmyyyy(prep.remindDate)} · {prepTime} МСК</Row>}
+            {prepared && <Row label="Последнее выделение">{ddmmyyyy(prepared.date)} · <Money value={prepared.amount} kopecks /></Row>}
+            {mark?.done && mark.paidDate && <Row label="Фактическое списание">{ddmmyyyy(mark.paidDate)}</Row>}
+            {prep?.accountId && prep.accountId !== RESERVE_ACCOUNT && !prep.toFund && !prep.inTransit ? null :
+              prep && <Row label="Подготовить деньги"><button type="button" className="text-sea"
+                onClick={() => set({ event: null, transfer: { kind: 'payment', plan: prep } })}>Открыть маршрут</button></Row>}
+          </>}
           {!!e.possibleExtra && !mark?.done && <Row label="Диапазон до сверки">
             <Money value={e.amount} kopecks />–<Money value={e.amount + e.possibleExtra} kopecks />
           </Row>}
@@ -116,6 +156,11 @@ function Body({ e }: { e: CalEvent }) {
         {e.note && <p className="mt-3 rounded-xl bg-sea/10 px-3 py-2.5 text-[13px] leading-snug">{e.note}</p>}
       </div>
 
+      {led.heldForPayments.filter(row => row.key === e.key && (mark?.done || row.accountId !== assigned || row.amount > e.amount))
+        .map(row => <SecondaryButton key={row.accountId} className="w-full" onClick={() => set({ event: null,
+          transfer: { kind: 'return', held: { ...row, amount: mark?.done || row.accountId !== assigned ? row.amount : row.amount - e.amount } } })}>
+          Вернуть остаток в резерв <Money value={mark?.done || row.accountId !== assigned ? row.amount : row.amount - e.amount} kopecks />
+        </SecondaryButton>)}
       {locked ? (
         <p className="rounded-2xl bg-surface-2 px-4 py-3 text-[14px] text-muted">
           {e.economicType === 'loan_disbursement' ? 'Подтверждённое заёмное поступление. В доходы не входит.'
@@ -128,7 +173,7 @@ function Body({ e }: { e: CalEvent }) {
           <p className="rounded-2xl bg-pos/10 px-4 py-3 text-[14px] text-pos">
             {e.kind === 'income' ? 'Пришло' : e.kind === 'weekly' ? 'Долито' : 'Оплачено'}: {rub(mark.amount ?? e.amount)}
           </p>
-          <SecondaryButton onClick={() => { markEvent(e, false); toast('Отметка снята'); close(); }} className="w-full"><Undo2 size={16} strokeWidth={1.5} /> Снять отметку</SecondaryButton>
+          {(e.kind !== 'weekly' || !book.operations.some(op => op.type === 'transfer' && op.purpose === 'weekly' && op.eventKey === e.key)) && <SecondaryButton onClick={() => { markEvent(e, false); if (useStore.getState().marks[e.key]?.done) { toast('Операция уже вошла в сверку или использована'); return; } toast('Отметка снята'); close(); }} className="w-full"><Undo2 size={16} strokeWidth={1.5} /> Снять отметку</SecondaryButton>}
         </>
       ) : editing ? (
         <div className="card space-y-3 p-4">
@@ -148,16 +193,16 @@ function Body({ e }: { e: CalEvent }) {
             <AmountInput value={amount} onChange={setAmount} size="md" />
           </div>
           {e.kind !== 'weekly' && <label className="block text-[13px]">
-            Фактическая дата<input className="field mt-1" type="date" value={paidDate} max={now} onChange={x => setPaidDate(x.target.value)} />
+            Фактическая дата<input className="field mt-1" type="date" value={paidDate} max={moscowDate} onChange={x => setPaidDate(x.target.value)} />
           </label>}
           {e.kind === 'payment' && (
             <div>
               <div className="mb-1.5 text-[12.5px] font-medium text-muted">Откуда оплачено</div>
-              <select className="field" value={account} onChange={x => { setAccount(x.target.value); setFrom(x.target.value === LIFE_ACCOUNT ? 'card' : 'reserve'); }}>
+              <select className="field" value={account} onChange={x => setAccount(x.target.value)}>
                 <option value="">Выберите счёт по выписке</option>
                 {accountOptions(book).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
-              {account && account !== e.accountId && <button type="button" className="mt-2 text-[13px] text-sea" onClick={() => {
+              {account && account !== assigned && <button type="button" className="mt-2 text-[13px] text-sea" onClick={() => {
                 useStore.getState().setPaymentAccount(e.key, account);
                 toast('Счёт списания назначен');
               }}>Назначить счёт для этого платежа</button>}
@@ -179,8 +224,12 @@ function Body({ e }: { e: CalEvent }) {
             </label>)}
           </details>}
           {isBonus(e) && <p className="text-[12.5px] leading-snug text-muted">Распределение начинается после сверки зачисления. Досрочка доступна в пределах безопасного лимита.</p>}
-          <PrimaryButton onClick={done} disabled={value <= 0 || !paidDate || paidDate > now || (e.kind === 'payment' && !account)}>
-            {e.kind === 'income' ? (isBonus(e) ? 'Пришла — распределить' : 'Пришло') : e.kind === 'weekly' ? 'Долил' : 'Оплачено'}
+          {e.kind === 'payment' && value > 0 && value < e.amount && <label className="flex items-start gap-2 text-[13px]">
+            <input type="checkbox" checked={partial} onChange={x => setPartial(x.target.checked)} /> Банк списал только часть. Остальное ещё к оплате.
+          </label>}
+          {e.kind === 'weekly' && value > led.reserve && <p className="text-[13px] text-warn">В резерве недостаточно денег.</p>}
+          <PrimaryButton onClick={done} disabled={value <= 0 || !paidDate || paidDate > moscowDate || (e.kind === 'payment' && !account) || (e.kind === 'weekly' && (led.lifeAvailable == null || value > led.reserve))}>
+            {e.kind === 'income' ? (isBonus(e) ? 'Пришла — распределить' : 'Пришло') : e.kind === 'weekly' ? 'Долил' : partial ? 'Записать частичное списание' : 'Платёж списан'}
           </PrimaryButton>
           {e.kind === 'weekly' ? (
             <>

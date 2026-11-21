@@ -9,7 +9,8 @@ import { rub, parseAmount } from './money';
 import { categoryLimit, currentPhase, DEFAULT_PLAN, setPlanSource, splitBonus, targetDebt, weeklyLimit, type PlanConfig } from './plan';
 import { fromAi, fromDrafts } from './proposals';
 import { PROTOCOL_VERSION } from './sync';
-import { accruedOnCard, cardOn, checkupPlan, heldKeys, ledger, transferPlan, type Checkup, type LedgerInput } from './ledger';
+import { paymentPreparations, preparationDue } from './funds';
+import { accruedOnCard, cardOn, checkupPlan, heldKeys, ledger, type Checkup, type LedgerInput } from './ledger';
 import { mergeSeed, type PlanState } from './planUpdate';
 import { applyExchange, buildExchange, dropChatTwins, exchangeDigest, normalize, parseExchange, previewExchange, type ExchangeState } from './exchange';
 import { parseStatementText, isIncomeLine } from './pdf';
@@ -880,28 +881,17 @@ describe('учёт по счетам для воскресной сверки', 
 });
 
 describe('перевод из резерва на карту под платёж', () => {
-  const pay = (key: string, date: string, amount: number): CalEvent => ({ key, date, title: key, amount, kind: 'payment' } as CalEvent);
-  const events = [pay('pay:a:2026-11', '2026-11-11', 40_000), pay('fix:b:2026-11', '2026-11-11', 2000), pay('pay:c:2026-11', '2026-11-13', 9000)];
-  const NOW = '2026-11-10';
-  const ask = (o: Partial<Parameters<typeof transferPlan>[0]> = {}) => transferPlan({ events, marks: {}, log: [], incomeOnCard: 0, now: NOW, hour: 19, ...o });
-
-  it('шаг появляется накануне с 18:00 и в день платежа; сумма — все платежи этого дня', () => {
-    expect(ask({ hour: 17 })).toBeNull();
-    expect(ask()).toMatchObject({ keys: ['pay:a:2026-11', 'fix:b:2026-11'], total: 42_000, onCard: 0, amount: 42_000, when: 'tomorrow' });
-    expect(ask({ now: '2026-11-11', hour: 8 })).toMatchObject({ amount: 42_000, when: 'today' });
-    // послезавтрашний платёж ещё не зовёт; прошедший неотмеченный — тоже: его отмечают, а не переводят под него
-    expect(ask({ now: '2026-11-12', hour: 12 })).toBeNull();
-    expect(ask({ now: '2026-11-12', hour: 18 })).toMatchObject({ keys: ['pay:c:2026-11'], when: 'tomorrow' });
-  });
-
-  it('поступления на карте идут в счёт платежа; отмеченное и уже переведённое не предлагается', () => {
-    expect(ask({ incomeOnCard: 30_000 })).toMatchObject({ total: 42_000, onCard: 30_000, amount: 12_000 });
-    expect(ask({ incomeOnCard: 90_000 })).toMatchObject({ onCard: 42_000, amount: 0 });
-    expect(ask({ marks: { 'pay:a:2026-11': { done: true, amount: 40_000, at: 'x' } } })).toMatchObject({ keys: ['fix:b:2026-11'], amount: 2000 });
-    const log = [{ id: 't', date: NOW, at: '2026-11-10T19:00:00.000Z', amount: -42_000, note: 'под платёж', card: 42_000, forKeys: ['pay:a:2026-11', 'fix:b:2026-11'] }];
-    expect(ask({ log })).toBeNull();
-    expect([...heldKeys(log, {})]).toEqual(['pay:a:2026-11', 'fix:b:2026-11']);
-    expect([...heldKeys(log, { 'pay:a:2026-11': { done: true, at: 'x' } })]).toEqual(['fix:b:2026-11']);
+  it('показывает подготовку с 20:00 и исключает подтверждённые платежи', () => {
+    const e: CalEvent = { kind: 'payment', title: 'Платёж', key: 'pay:a:2026-11',
+      accountId: 'life', date: '2026-11-11', dateMode: 'exact', amount: 42000 };
+    const [group] = paymentPreparations([e], {}, [], 40000);
+    expect(group).toMatchObject({ toFund: 42000, reserveShortfall: 2000 });
+    expect(preparationDue(group, { date: '2026-11-10', time: '19:59' }, '20:00')).toBe(false);
+    expect(preparationDue(group, { date: '2026-11-10', time: '20:00' }, '20:00')).toBe(true);
+    expect(paymentPreparations([e], { [e.key]: { done: true, at: 'x' } }, [], 40000)).toEqual([]);
+    const log = [{ id: 't', date: '2026-11-10', at: '2026-11-10T19:00:00.000Z', amount: -42000, note: 'под платёж', card: 42000, forKeys: [e.key] }];
+    expect([...heldKeys(log, {})]).toEqual([e.key]);
+    expect([...heldKeys(log, { [e.key]: { done: true, at: 'x' } })]).toEqual([]);
   });
 
   const check = (date: string, at: string, card: number, reserve: number): Checkup => ({ monday: '2026-11-02', date, at, expected: { card: null, reserve, credit: null }, actual: { card, reserve }, topUp: 0, toReserve: 0, after: { card, reserve } });

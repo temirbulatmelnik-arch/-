@@ -13,6 +13,7 @@ import { dayBudget, type DayBudget } from '../domain/summary';
 import type { Expense } from '../domain/types';
 import { useStore } from '../store/store';
 import { toast, useBudgetExpenses, useToday, useUi } from '../store/ui';
+import { useLedger } from './Checkup';
 import { CATEGORY } from '../domain/plan';
 
 export function useTodaySpends() {
@@ -48,7 +49,10 @@ export function TodayDetails({ summary }: { summary?: boolean }) {
   // в листе строки свайпаются (фон листа под ними сплошной), в карточке стопки — просто нажимаются
   const { budget: b, counted } = useTodaySpends();
   const set = useUi(s => s.set);
-  const note = dayNote(b);
+  const { lifeAvailable } = useLedger();
+  const note = lifeAvailable != null && b.mode === 'ok' && lifeAvailable < b.canSpend
+    ? { text: `На неделю на карте свободно ${lifeAvailable.toLocaleString('ru-RU')} ₽.`, over: false }
+    : dayNote(b);
   const edit = (e: Expense) => set({ today: false, add: { edit: e } });
   const share = b.day > 0 ? Math.min(1, b.spentToday / b.day) : b.spentToday > 0 ? 1 : 0;
   return (

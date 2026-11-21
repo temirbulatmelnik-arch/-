@@ -10,20 +10,23 @@ import { useShallow } from 'zustand/react/shallow';
 import { motion } from 'motion/react';
 import { AmountInput, Money, PrimaryButton, SecondaryButton, Sheet } from '../components/ui';
 import { addDays, ddmm, today, weekStart } from '../domain/dates';
+import { DEFAULT_PREPARATION_TIME, moscowClock, weeklyTopUp } from '../domain/funds';
 import { checkupPlan, ledger, MATCH, weekLeftover, type CardLedger, type Ledger } from '../domain/ledger';
 import { num, parseAmount, round } from '../domain/money';
 import type { Debt } from '../domain/types';
 import { weekReport } from '../domain/weekly';
 import { useStore } from '../store/store';
 import { salute } from '../store/events';
-import { toast, useUi } from '../store/ui';
+import { toast, useCal, useMoscowClock, useUi } from '../store/ui';
 
 /** учёт по счетам: что должно быть в банке сейчас */
 export function useLedger(): Ledger {
-  const [checkups, cardBalance, reserve, reserveLog, marks, expenses, oneOff, debts, bridge, accountBook] = useStore(useShallow(s =>
-    [s.checkups, s.cardBalance, s.reserve, s.reserveLog, s.marks, s.expenses, s.oneOff, s.debts, s.bridge, s.accountBook] as const));
-  return useMemo(() => ledger({ checkups, cardBalance, reserve, reserveLog, marks, expenses, oneOff, debts, bridge, accountBook }),
-    [checkups, cardBalance, reserve, reserveLog, marks, expenses, oneOff, debts, bridge, accountBook]);
+  const { date: now } = useMoscowClock();
+  const cal = useCal();
+  const [checkups, cardBalance, reserve, reserveLog, expenses] = useStore(useShallow(s =>
+    [s.checkups, s.cardBalance, s.reserve, s.reserveLog, s.expenses] as const));
+  return useMemo(() => ledger({ ...cal, marks: cal.marks ?? {}, bridge: cal.bridge ?? null,
+    checkups, cardBalance, reserve, reserveLog, expenses, now }), [cal, checkups, cardBalance, reserve, reserveLog, expenses, now]);
 }
 
 let snoozed = 0;
@@ -34,10 +37,10 @@ export function useSundayCheckup() {
     let timer = 0;
     const check = () => {
       if (document.visibilityState !== 'visible') return;
-      const now = new Date();
-      if (now.getDay() !== 0 || now.getHours() < 18 || Date.now() - snoozed < 3_600_000) return;
-      const monday = weekStart(today());
+      const clock = moscowClock();
       const s = useStore.getState();
+      const monday = weekStart(clock.date);
+      if (clock.date !== addDays(monday, 6) || clock.time < (s.settings.preparationTime ?? DEFAULT_PREPARATION_TIME) || Date.now() - snoozed < 3_600_000) return;
       if (!s.ready || s.checkups.some(c => c.monday === monday)) return;
       // файл обмена с сайта открывается первым — сверка после него
       window.clearTimeout(timer);
@@ -47,10 +50,11 @@ export function useSundayCheckup() {
       }, 1600);
     };
     check();
+    const interval = window.setInterval(check, 60_000);
     document.addEventListener('visibilitychange', check);
     // закрыли окно обмена — теперь можно и сверку
     const unsub = useUi.subscribe((st, prev) => { if ((prev.sync && !st.sync) || (prev.inbox && !st.inbox)) check(); });
-    return () => { document.removeEventListener('visibilitychange', check); window.clearTimeout(timer); unsub(); };
+    return () => { document.removeEventListener('visibilitychange', check); window.clearTimeout(timer); window.clearInterval(interval); unsub(); };
   }, []);
 }
 
@@ -83,10 +87,14 @@ function Body({ monday }: { monday: string }) {
   const otherCards = led.cards.filter(c => !c.bridge);
 
   const balance = cardV ?? led.card;
+  const unmatched = cardV != null && led.card != null ? Math.max(0, round(cardV - led.card)) : 0;
   const leftover = balance == null ? weekLeftover(expenses, debts, overrides, bridge, monday) :
-    Math.max(0, balance - led.incomeOnCard - led.heldOnCard);
-  const plan = useMemo(() => checkupPlan({ expenses, debts, overrides, bridge, marks, monday, leftover, incomeOnCard: led.incomeOnCard }),
-    [expenses, debts, overrides, bridge, marks, monday, leftover, led.incomeOnCard]);
+    Math.max(0, balance - led.incomeOnCard - led.heldOnCard - led.unassignedOnCard - unmatched);
+  const plan = useMemo(() => {
+    const choice = checkupPlan({ expenses, debts, overrides, bridge, marks, monday, leftover, incomeOnCard: 0 });
+    const topUp = marks[`wk:${addDays(monday, 7)}`]?.done ? 0 : weeklyTopUp(choice.nextLimit, leftover);
+    return { ...choice, topUp, net: topUp };
+  }, [expenses, debts, overrides, bridge, marks, monday, leftover]);
   const [sent, setSent] = useState('');
   useEffect(() => setSent(String(Math.abs(plan.net))), [plan.net]);
   const sentV = parseAmount(sent) ?? 0;
@@ -108,13 +116,9 @@ function Body({ monday }: { monday: string }) {
 
   const save = (transfer: boolean) => {
     if (!ready) return;
-    // поправленная сумма перевода: направление то же, разница — в пополнении или в переводе в резерв
-    let topUp = transfer ? plan.topUp : 0;
-    let toReserve = transfer ? plan.toReserve : 0;
-    if (transfer && sentV !== Math.abs(plan.net)) {
-      if (plan.net >= 0) topUp = Math.max(0, sentV + toReserve);
-      else toReserve = Math.max(0, sentV + topUp);
-    }
+    const topUp = transfer && plan.topUp > 0 ? sentV : 0;
+    if (topUp > reserveV!) { toast('В резерве недостаточно денег'); return; }
+    const toReserve = 0; // Доход переводится отдельно и подтверждается своей банковской операцией.
     const r = weekReport(expenses, debts, overrides, monday, bridge);
     useStore.getState().checkup({
       monday,
@@ -192,11 +196,10 @@ function Body({ monday }: { monday: string }) {
           <div className="space-y-1.5 text-[13px] leading-snug text-card-muted">
             {plan.toppedBefore > 0
               ? <div>Пополнение на неделю уже отмечено: <Money value={plan.toppedBefore} className="text-card" />. Второй раз не списываю.</div>
-              : bridgeNext(bridge, monday)
-              ? <div>По плану моста из резерва — <Money value={plan.topUp} className="text-card" />. Остаток недели <Money value={plan.leftover} /> уменьшает траты с кредитки.</div>
-              : <div>Лимит следующей недели <Money value={plan.nextLimit} className="text-card" /> минус остаток на карте по учёту <Money value={plan.leftover} /> = <Money value={plan.topUp} className="text-card" />.</div>}
-            {plan.toReserve > 0 && <div>Поступления на карту после прошлой сверки — в резерв: <Money value={plan.toReserve} className="text-card" />.</div>}
-            {plan.credit > 0 && <div>Со Сбер-кредитки на неделю — до <Money value={plan.credit} className="text-card" />, только покупки.</div>}
+              : <div>Лимит следующей недели <Money value={plan.nextLimit} className="text-card" /> · свободно <Money value={leftover} kopecks />.</div>}
+            {unmatched > 0 && <div className="text-warn"><Money value={unmatched} kopecks /> на карте требуют уточнения по выписке.</div>}
+            {plan.topUp > reserveV! && <div className="text-warn">В резерве не хватает <Money value={plan.topUp - reserveV!} kopecks />.</div>}
+            {led.incomeOnCard > 0 && <div>Доход <Money value={led.incomeOnCard} kopecks /> можно отдельно перевести в резерв с главного экрана.</div>}
           </div>
           {plan.net !== 0 && (
             <div>
@@ -204,7 +207,7 @@ function Body({ monday }: { monday: string }) {
               <AmountInput value={sent} onChange={setSent} size="md" />
             </div>
           )}
-          <PrimaryButton onClick={() => save(true)}>{plan.net === 0 ? 'Сохранить и закрыть неделю' : 'Перевёл'}</PrimaryButton>
+          <PrimaryButton onClick={() => save(true)} disabled={sentV > reserveV!}>{plan.net === 0 ? 'Сохранить и закрыть неделю' : 'Перевёл'}</PrimaryButton>
           <button type="button" onClick={() => save(false)} className="w-full py-1 text-[13px] text-card-muted">Сохранить остатки, перевести позже</button>
         </section>
       )}
@@ -234,9 +237,6 @@ function Body({ monday }: { monday: string }) {
     </div>
   );
 }
-
-const bridgeNext = (bridge: ReturnType<typeof useStore.getState>['bridge'], monday: string) =>
-  !!bridge && !bridge.closed && bridge.weeks.some(w => w.monday === addDays(monday, 7));
 
 function line(name: string, expected: number | null, actual: number): ReactNode {
   if (expected == null) return <>{name} <Money value={actual} /></>;

@@ -3,12 +3,14 @@ import { useEffect, useRef, useState } from 'react';
 import { Field, PrimaryButton, SecondaryButton, Segmented, Sheet, Switch, Tile } from '../components/ui';
 import { MODELS } from '../domain/models';
 import { ddmmyyyy, today } from '../domain/dates';
+import { DEFAULT_PREPARATION_TIME } from '../domain/funds';
 import { downloadFile } from '../domain/ics';
 import { INSTALL_URL } from '../install/platform';
 import { useStore } from '../store/store';
 import { CATEGORY } from '../domain/plan';
 import { toast, useUi } from '../store/ui';
-import { enableBadge, exportCalendar, updateBadge } from './reminders';
+import { disablePaymentPush, enablePaymentPush, pushConfigured, pushEnabled, testPaymentPush } from './paymentPush';
+import { enableBadge, exportCalendar, exportCalendarTest, reminderDiagnostics, updateBadge } from './reminders';
 
 export function SettingsSheet() {
   const open = useUi(s => s.settings);
@@ -84,27 +86,37 @@ function Body() {
       </Section>
 
       <Section title="Напоминания" id="reminders">
-        <p className="text-[13.5px] leading-snug text-muted">Веб-приложение не может само будить телефон по расписанию, поэтому напоминания идут через календарь iPhone: один файл — все платежи, поступления и воскресные пополнения карты на полгода, с будильниками.</p>
-        <div className="grid grid-cols-3 gap-2">
-          {[3, 1, 0].map(d => {
+        <p className="text-[13.5px] leading-snug text-muted">На iPhone при закрытом «Курсе» напомнит приложение «Календарь». Сначала импортируйте файл и разрешите уведомления Календаря в настройках iOS.</p>
+        <Field label="Подготовка платежей и недели по Москве">
+          <input type="time" value={st.preparationTime ?? DEFAULT_PREPARATION_TIME}
+            onChange={e => s.setSettings({ preparationTime: e.target.value || DEFAULT_PREPARATION_TIME })} className="field" />
+        </Field>
+        <p className="text-[12.5px] text-muted">Подготовка назначается на вечер накануне списания. Недельное пополнение — на воскресенье. Ниже можно настроить дополнительные напоминания.</p>
+        <div className="grid grid-cols-2 gap-2">
+          {[3, 0].map(d => {
             const on = st.remindDays.includes(d);
             return (
               <button key={d} type="button" onClick={() => s.setSettings({ remindDays: on ? st.remindDays.filter(x => x !== d) : [...st.remindDays, d] })}
                 className={`rounded-xl py-2.5 text-[13px] font-medium ${on ? 'bg-sea text-on-sea' : 'bg-surface-2 text-muted'}`}>
-                {d === 0 ? 'в день' : d === 1 ? 'за день' : 'за 3 дня'}
+                {d === 0 ? 'в день' : 'за 3 дня'}
               </button>
             );
           })}
         </div>
-        <Field label="Во сколько напоминать">
+        <Field label="Время дополнительных напоминаний">
           <input type="time" value={st.remindTime} onChange={e => s.setSettings({ remindTime: e.target.value || '10:00' })} className="field" />
         </Field>
-        <Switch checked={st.hideAmounts} onChange={v => s.setSettings({ hideAmounts: v })} label="Скрывать суммы" hint="На экране блокировки будет только «Курс: Кредитка, минимальный»." />
+        <Switch checked={st.hideAmounts} onChange={v => s.setSettings({ hideAmounts: v })} label="Скрывать суммы" hint="Календарь покажет напоминания без сумм." />
         <PrimaryButton onClick={() => exportCalendar()}><BellRing size={18} /> Добавить в календарь iPhone</PrimaryButton>
         <p className="text-[12.5px] leading-snug text-faint">
-          Откроется окно «Добавить все» — подтвердите. Повторная загрузка обновит события, а не задублирует.
-          {st.lastIcsAt ? ` Последний раз: ${ddmmyyyy(st.lastIcsAt.slice(0, 10))}.` : ''} Обновляйте после крупных изменений и раз в квартал.
+          Выберите отдельный календарь «Курс». При изменении даты, суммы или оплаты замените старые события новой выгрузкой, чтобы iPhone не напоминал дважды.
+          {st.lastIcsAt ? ` Последний раз: ${ddmmyyyy(st.lastIcsAt.slice(0, 10))}.` : ''}
         </p>
+        <SecondaryButton onClick={() => void exportCalendarTest()} className="w-full">Тест уведомления Календаря через 3 минуты</SecondaryButton>
+        <details className="text-[13px] text-muted">
+          <summary className="text-sea">Диагностика уведомлений</summary>
+          <ReminderStatus />
+        </details>
         <Switch checked={st.badge} onChange={async v => {
           if (v && !(await enableBadge())) { toast('Разрешите уведомления для «Курса» в Настройках iPhone'); return; }
           s.setSettings({ badge: v });
@@ -191,4 +203,33 @@ function Body() {
       </Section>
     </div>
   );
+}
+
+
+function ReminderStatus() {
+  const [enabled, setEnabled] = useState(pushEnabled);
+  const [busy, setBusy] = useState(false);
+  const status = reminderDiagnostics();
+  const permissions = { granted: 'разрешение выдано', denied: 'разрешение запрещено', default: 'разрешение не запрашивали', unavailable: 'разрешение недоступно' };
+  return <div className="mt-2 space-y-1">
+    <p>Режим {status.mode ? 'с экрана «Домой»' : 'в браузере'}. {status.online ? 'Сеть доступна.' : 'Сети нет. Календарь работает с ранее импортированными событиями.'}</p>
+    <p>Web Push {status.worker && status.push ? 'поддерживается устройством' : 'недоступен в этом режиме'}, {permissions[status.permission]}.</p>
+    {pushConfigured ? <>
+      <Switch checked={enabled} onChange={async next => {
+        if (busy) return;
+        setBusy(true);
+        try {
+          if (next) {
+            const ok = await enablePaymentPush();
+            setEnabled(ok);
+            if (!ok) toast('Проверьте установку на экран «Домой», сеть и разрешение уведомлений');
+          } else { setEnabled(false); await disablePaymentPush(); }
+        } catch { toast('Изменение подписки будет повторено при подключении к сети'); }
+        finally { setBusy(false); }
+      }} label="Уведомления о платежах" hint="Отправитель получает подписку и время уведомления без сумм и названий." />
+      {enabled && <SecondaryButton onClick={async () => {
+        toast(await testPaymentPush() ? 'Тест передан отправителю. Проверьте системное уведомление.' : 'Тест не принят. Проверьте сеть и отправителя.');
+      }} className="w-full">Отправить тест Web Push</SecondaryButton>}
+    </> : <p>Отправитель Web Push не подключён. Системные напоминания доступны через Календарь.</p>}
+  </div>;
 }

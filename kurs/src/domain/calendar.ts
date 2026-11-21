@@ -1,3 +1,4 @@
+import { partialPayments } from './funds';
 // Календарь платежей и поступлений: разовые события из плана + ежемесячный шаблон + воскресные пополнения карты жизни.
 import type { AccountBook } from './accounts';
 import { kopecks } from './accounts';
@@ -212,6 +213,7 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
       return { ...e,
         amount: fact ? mark?.amount ?? e.amount : custom?.amount ?? e.amount,
         date: fact ? mark?.paidDate ?? e.date : custom?.date ?? e.date,
+        prepareOn: custom?.prepareOn ?? e.prepareOn,
         dateMode: scenario && e.dateMode !== 'month' ? 'approx' as const : e.dateMode,
         economicType: custom?.economicType ?? e.economicType, projection: custom?.projection ?? e.projection,
         approx: scenario || (!fact && custom?.amount == null && e.approx),
@@ -230,8 +232,11 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
     linkedReviews.add(event.key);
     if (!input.marks?.[target.key]?.done) possibleExtras.set(target.key, kopecks((possibleExtras.get(target.key) ?? 0) + event.amount));
   }
+  const partial = partialPayments(input.accountBook?.operations ?? []);
   return dated.filter(e => !linkedReviews.has(e.key))
     .map(e => possibleExtras.has(e.key) ? { ...e, possibleExtra: possibleExtras.get(e.key) } : e)
+    .map(e => e.kind === 'payment' && !input.marks?.[e.key]?.done && partial.has(e.key)
+      ? { ...e, originalAmount: e.amount, amount: Math.max(0, kopecks(e.amount - partial.get(e.key)! / 100)) } : e)
     .filter(e => e.date >= rangeFrom && e.date <= rangeTo)
     .sort((a, b) => a.date.localeCompare(b.date) || rank[a.kind] - rank[b.kind] || a.title.localeCompare(b.title));
 }

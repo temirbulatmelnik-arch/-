@@ -214,7 +214,7 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
               className={`relative flex flex-col items-center gap-px rounded-[15px] py-1.5 transition-[color,transform,box-shadow] duration-200 ${on ? 'text-white' : 'text-muted'} ${drag?.over === id ? 'drop-over shadow-[0_0_0_2px_var(--ink)]' : ''}`}>
               <span className="flex items-center gap-1.5 text-[13.5px] font-medium"><Icon size={15} strokeWidth={1.8} />{SOURCE_LABEL[id]}</span>
               <span className={`text-[11px] leading-tight ${on ? 'opacity-85' : 'opacity-80'}`}>
-                {id === 'life' ? (led.card != null ? <>на карте <Money value={Math.max(0, led.card)} /></> : 'с карты')
+                {id === 'life' ? (led.lifeAvailable != null ? <>свободно <Money value={led.lifeAvailable} /></> : 'с карты')
                   : id === 'credit' ? (loan ? <>мост: ещё <Money value={Math.max(0, loan.left)} /></> : 'с кредитки')
                     : <Money value={led.reserve} />}
               </span>

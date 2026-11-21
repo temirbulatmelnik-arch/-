@@ -24,6 +24,7 @@ interface OperationBase {
   amount: number;
   accountId: string;
   eventKey?: string;
+  partialFor?: string;
   cashBooked?: boolean;
   externalId?: string;
   note?: string;
@@ -32,12 +33,16 @@ interface OperationBase {
   fundingSource: 'own' | 'borrowed' | 'unknown';
 }
 
+export interface PaymentShare { key: string; amount: number }
+
 export type AccountOperation = OperationBase & (
-  { type: 'transfer'; toAccountId: string }
+  { type: 'transfer'; toAccountId: string; purpose?: 'weekly' | 'sweep' | 'prepare' | 'return'; shares?: PaymentShare[]; weeklyExcess?: number }
+  | { type: 'allocation'; shares: PaymentShare[]; existingCash?: boolean }
   | { type: 'loan_disbursement'; debtId: string; splitPlanId?: string; debtBooked?: boolean; auditId?: string }
   | { type: 'debt_payment'; debtId?: string; principal?: number; interest?: number; fee?: number; debtBooked?: boolean }
   | { type: 'interest' | 'fee'; debtId?: string }
-  | { type: 'income' | 'adjustment' | 'expense' }
+  | { type: 'income'; pendingSweep?: boolean }
+  | { type: 'adjustment' | 'expense' }
   | { type: 'refund'; expenseId: string; debtId?: string }
 );
 
@@ -104,6 +109,7 @@ export const validAmount = (amount: unknown): amount is number => typeof amount 
 
 export function validOperation(op: AccountOperation): boolean {
   if (!op || (op.eventKey != null && typeof op.eventKey !== 'string') ||
+      (op.partialFor != null && (typeof op.partialFor !== 'string' || !op.partialFor || op.eventKey || !['debt_payment', 'expense'].includes(op.type))) ||
       (op.externalId != null && typeof op.externalId !== 'string') ||
       (op.note != null && typeof op.note !== 'string') ||
       typeof op.id !== 'string' || !op.id || !validDate(op.date) ||
@@ -112,14 +118,28 @@ export function validOperation(op: AccountOperation): boolean {
       !['manual', 'bank', 'exchange'].includes(op.origin) ||
       !['own', 'borrowed', 'unknown'].includes(op.fundingSource) ||
       (op.at != null && (typeof op.at !== 'string' || !Number.isFinite(Date.parse(op.at))))) return false;
+  const validShares = (shares: PaymentShare[] | undefined) => Array.isArray(shares) && shares.length > 0 &&
+    new Set(shares.map(share => share?.key)).size === shares.length &&
+    shares.every(share => typeof share?.key === 'string' && !!share.key && validAmount(share.amount) && cents(share.amount) > 0) &&
+    shares.reduce((sum, share) => sum + cents(share.amount), 0) === cents(op.amount);
   switch (op.type) {
-    case 'transfer': return typeof op.toAccountId === 'string' && !!op.toAccountId && op.accountId !== op.toAccountId;
+    case 'transfer':
+      if (typeof op.toAccountId !== 'string' || !op.toAccountId || op.accountId === op.toAccountId) return false;
+      if (op.purpose === 'prepare' || op.purpose === 'return') return !op.eventKey && validShares(op.shares) &&
+        (op.purpose === 'prepare' ? op.toAccountId !== RESERVE_ACCOUNT : op.toAccountId === RESERVE_ACCOUNT);
+      if (op.purpose === 'sweep') return !op.eventKey && op.toAccountId === RESERVE_ACCOUNT;
+      if (op.purpose === 'weekly') return op.eventKey?.startsWith('wk:') === true && op.accountId === RESERVE_ACCOUNT &&
+        op.toAccountId === LIFE_ACCOUNT && (op.weeklyExcess == null ||
+        (validAmount(op.weeklyExcess) && op.weeklyExcess >= 0 && cents(op.weeklyExcess) <= cents(op.amount)));
+      return op.purpose == null;
+    case 'allocation': return !op.eventKey && op.accountId !== RESERVE_ACCOUNT &&
+      (!op.existingCash || op.accountId !== LIFE_ACCOUNT) && validShares(op.shares);
     case 'loan_disbursement': return typeof op.debtId === 'string' && !!op.debtId && op.fundingSource === 'borrowed'
       && (op.auditId == null || (typeof op.auditId === 'string' && !!op.auditId && typeof op.debtBooked === 'boolean'));
     case 'refund': return typeof op.expenseId === 'string' && !!op.expenseId;
     case 'debt_payment': {
       const parts = [op.principal, op.interest, op.fee];
-      return (typeof op.debtId === 'string' && !!op.debtId || op.eventKey?.startsWith('split-debit:') === true)
+      return (typeof op.debtId === 'string' && !!op.debtId || (op.eventKey ?? op.partialFor)?.startsWith('split-debit:') === true)
         && parts.every(p => p == null || (validAmount(p) && p >= 0))
         && parts.reduce<number>((sum, p) => sum + cents(p ?? 0), 0) <= cents(op.amount);
     }
@@ -167,7 +187,7 @@ export function recordedAfter(op: { id: string; date: string; at?: string }, anc
 }
 
 export function accountMovement(op: AccountOperation, id: string): number {
-  if (op.cashBooked) return 0;
+  if (op.cashBooked || op.type === 'allocation') return 0;
   if (op.type === 'transfer' && op.toAccountId === id) return cents(op.amount);
   if (op.accountId !== id) return 0;
   switch (op.type) {

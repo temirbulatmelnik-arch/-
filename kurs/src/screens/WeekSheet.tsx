@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { ExpenseRow } from '../components/rows';
 import { AmountInput, Bar, CatIcon, Money, PrimaryButton, SecondaryButton, Sheet } from '../components/ui';
+import { weeklyTopUp } from '../domain/funds';
 import { addDays, ddmm } from '../domain/dates';
 import { parseAmount } from '../domain/money';
 import { CATEGORY } from '../domain/plan';
@@ -29,15 +30,19 @@ function Body({ monday }: { monday: string }) {
   const set = useUi(s => s.set);
   const r = useMemo(() => weekReport(expenses, debts, overrides, monday, bridge), [expenses, debts, overrides, monday, bridge]);
   const led = useLedger();
-  const available = led.card == null ? null : Math.max(0, led.card - led.incomeOnCard - led.heldOnCard);
-  const topUp = available == null ? 0 : Math.max(0, r.nextLimit - available);
-  const [amount, setAmount] = useState(String(Math.round(topUp)));
+  const available = led.card == null ? null : led.lifeAvailable;
+  const topUp = available == null ? 0 : weeklyTopUp(r.nextLimit, available);
+  const [amount, setAmount] = useState(String(topUp));
   const value = parseAmount(amount) ?? 0;
   const max = Math.max(...r.byCategory.map(c => c.spent), 1);
   const list = useMemo(() => expenses.filter(e => e.date >= monday && e.date <= r.sunday).sort((a, b) => b.date.localeCompare(a.date)), [expenses, monday, r.sunday]);
 
   const close = (topUp: number) => {
-    closeWeek({ monday, limit: r.limit, spent: r.spent, left: r.left, transferred: 0, topUp });
+    if (topUp > 0 && !useStore.getState().confirmWeeklyTransfer(`wk:${addDays(monday, 7)}`, topUp)) {
+      toast('Пополнение уже отмечено или остатки требуют сверки');
+      return;
+    }
+    closeWeek({ monday, limit: r.limit, spent: r.spent, left: r.left, transferred: 0 });
     toast(topUp > 0 ? 'Неделя закрыта, карта жизни долита' : 'Неделя закрыта');
     set({ week: null });
   };
@@ -93,9 +98,10 @@ function Body({ monday }: { monday: string }) {
           </div>
           <PrimaryButton onClick={() => set({ week: null, checkup: monday })}>Сверить с банком и закрыть</PrimaryButton>
           <p className="text-[12px] leading-snug text-muted">Впишете остатки на карте, в резерве и на кредитке — приложение найдёт невнесённые траты и посчитает перевод. Или без сверки:</p>
+          {topUp > led.reserve && <p className="text-[13px] text-warn">В резерве не хватает <Money value={topUp - led.reserve} kopecks />.</p>}
           <AmountInput value={amount} onChange={setAmount} size="md" />
           <p className="text-[12px] leading-snug text-muted">Перевели другую сумму — поправьте. Резерв уменьшится на неё, а в календаре пополнение отметится сделанным.</p>
-          <SecondaryButton onClick={() => close(value)} disabled={value <= 0} className="w-full">Долил из резерва без сверки</SecondaryButton>
+          <SecondaryButton onClick={() => close(value)} disabled={value <= 0 || value > led.reserve || available == null} className="w-full">Долил из резерва без сверки</SecondaryButton>
           <button type="button" onClick={() => close(0)} className="w-full py-1 text-[13px] text-muted">Закрыть без пополнения</button>
         </div>
       )}

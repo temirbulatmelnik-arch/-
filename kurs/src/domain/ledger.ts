@@ -1,9 +1,11 @@
 // Учёт по счетам банка: сколько должно быть на карте жизни (мастер-счёт), в резерве (накопительный) и долга на
 // кредитке моста — от последней сверки. В воскресенье вечером человек вводит, что видит в банке, приложение сравнивает
 // и считает, сколько перевести между картой и резервом.
-import { accountMovement, accountProjection, cashAccount, debtProjection, EMPTY_BOOK, LIFE_ACCOUNT, recordedAfter, RESERVE_ACCOUNT, rubles, type AccountBook, type BankBalance } from './accounts';
+import { accountMovement, accountProjection, cents, kopecks, cashAccount, debtProjection, EMPTY_BOOK, LIFE_ACCOUNT, recordedAfter, RESERVE_ACCOUNT, rubles, type AccountBook, type BankBalance } from './accounts';
 import { activeBridge, bridgeWeek, weekMoney, type Bridge } from './bridge';
 import { addDays, daysBetween, today } from './dates';
+import { earmarks, type HeldPayment } from './funds';
+import { eventsBetween, type CalendarInput } from './calendar';
 import { weeklyLimit } from './plan';
 import type { CalEvent, CardBalance, Debt, EventMark, Expense, ReserveMove, WeeklyOverride } from './types';
 
@@ -30,12 +32,13 @@ export interface Checkup {
   /** остатки после перевода — точка отсчёта следующей сверки */
   after: { card: number; reserve: number };
   operationIds?: string[];
+  unmatchedOnCard?: number;
   creditCard?: string;
   /** остальные кредитки, кроме кредитки моста: долг по учёту и в банке; после сверки остаток долга берётся из банка */
   cards?: { id: string; expected: number | null; actual: number }[];
 }
 
-export interface LedgerInput {
+export interface LedgerInput extends Partial<Pick<CalendarInput, 'incomes' | 'fixed' | 'templateFrom' | 'weeklyOverrides' | 'overrides' | 'work'>> {
   checkups: Checkup[];
   accountBook?: AccountBook;
   cardBalance: CardBalance | null;
@@ -82,6 +85,12 @@ export interface Ledger {
   incomeOnCard: number;
   /** переведено из резерва на карту под платежи, которые ещё не отмечены: деньги на карте, но всё ещё часть резерва */
   heldOnCard: number;
+  lifeAvailable: number | null;
+  heldForPayments: HeldPayment[];
+  pendingSweepToReserve: Record<string, number>;
+  unassignedOnCard: number;
+  unmatchedOnCard: number;
+  allocationShortfall: number;
   /** из долга на кредитке моста — проценты по дням с последнего обновления остатка (сверки): банк начисляет их каждый
    *  день, поэтому credit больше, чем «сверка + траты с кредитки» */
   creditInterest: number;
@@ -96,10 +105,10 @@ const endOfDay = (date: string) => `${date}T23:59:59.999`;
 /** трата после точки: позже дня отсчёта; в сам день — только внесённая руками после сверки */
 const after = (e: Expense, at: string, date: string) => e.date > date || (e.date === date && e.origin === 'manual' && e.createdAt > at);
 
-type CardRef = { at: string; date: string; amount: number; dateOnly?: boolean; includedExpenseIds?: string[]; operationIds?: string[] };
+type CardRef = { at: string; date: string; amount: number; dateOnly?: boolean; includedExpenseIds?: string[]; operationIds?: string[]; unmatchedOnCard?: number };
 
 const fromBalance = (b: CardBalance): CardRef => ({ ...b, at: b.at ?? endOfDay(b.date), dateOnly: !b.at });
-const fromCheckup = (c: Checkup): CardRef => ({ at: c.at, date: c.date, amount: c.after.card, operationIds: c.operationIds });
+const fromCheckup = (c: Checkup): CardRef => ({ at: c.at, date: c.date, amount: c.after.card, operationIds: c.operationIds, unmatchedOnCard: c.unmatchedOnCard });
 const time = (at: string) => Date.parse(at);
 
 function afterCard(e: Expense, ref: CardRef, included: Set<string>): boolean {
@@ -143,38 +152,6 @@ export function heldKeys(log: ReserveMove[], marks: Record<string, EventMark>): 
   return out;
 }
 
-export interface TransferPlan {
-  events: CalEvent[];
-  keys: string[];
-  /** сумма платежей */
-  total: number;
-  /** сколько из неё покрывают поступления, уже лежащие на карте */
-  onCard: number;
-  /** сколько перевести из резерва */
-  amount: number;
-  when: 'today' | 'tomorrow' | 'both';
-}
-
-/**
- * Перевод из резерва на карту под обязательные платежи: накануне вечером (с 18:00) и в день платежа. Платежи списываются
- * с карты, поэтому деньги переводят заранее — и резерв в приложении сразу совпадает с банком. Поступления, которые уже
- * лежат на карте, идут в счёт платежа первыми. null — переводить не под что: платежей нет, они отмечены или деньги
- * под них уже на карте.
- */
-export function transferPlan(o: { events: CalEvent[]; marks: Record<string, EventMark>; log: ReserveMove[]; incomeOnCard: number; now: string; hour: number }): TransferPlan | null {
-  const held = heldKeys(o.log, o.marks);
-  const tomorrow = addDays(o.now, 1);
-  const events = o.events.filter(e => e.kind === 'payment' && !e.projection && !o.marks[e.key]?.done && !held.has(e.key) && (e.date === o.now || (e.date === tomorrow && o.hour >= 18)));
-  if (!events.length) return null;
-  const total = Math.round(events.reduce((t, e) => t + e.amount, 0) * 100) / 100;
-  const onCard = Math.min(total, Math.max(0, o.incomeOnCard));
-  const days = new Set(events.map(e => e.date));
-  return {
-    events, keys: events.map(e => e.key), total, onCard, amount: Math.round((total - onCard) * 100) / 100,
-    when: days.size > 1 ? 'both' : days.has(o.now) ? 'today' : 'tomorrow',
-  };
-}
-
 export function ledger(s: LedgerInput): Ledger {
   const now = s.now ?? today();
   const book = s.accountBook ?? EMPTY_BOOK;
@@ -191,52 +168,72 @@ export function ledger(s: LedgerInput): Ledger {
   // что уже перевели в резерв. Из них held — под ещё не отмеченные платежи, остальное ждёт перевода в резерв.
   // Платёж с карты без перевода под него (мелочь из недельных денег) в этот счёт не входит — как и раньше
   let pool = 0;
+  let unclassified = cents(ref?.unmatchedOnCard ?? 0);
+  const classified = new Set(book.historicalLoans?.map(loan => loan.eventKey));
   const earmarked = new Set(s.reserveLog.flatMap(r => r.forKeys ?? []));
   if (ref) {
-    card = ref.amount;
+    card = cents(ref.amount);
     for (const [key, m] of Object.entries(s.marks)) {
       if (!m.done || linked.has(key) || !(time(m.at) > time(ref.at))) continue;
-      const amount = m.amount ?? 0;
+      const amount = cents(m.amount ?? 0);
       const kind = kindOf(key, s.oneOff);
       if (kind === 'weekly') card += amount;
       else if (kind === 'payment' && m.paidFrom === 'card') { card -= amount; if (earmarked.has(key)) pool -= amount; }
-      else if (kind === 'income') { card += amount; pool += amount; }
+      else if (kind === 'income') { card += amount; if (classified.has(key)) unclassified += amount; else pool += amount; }
     }
     const included = new Set(ref.includedExpenseIds);
-    for (const e of s.expenses) if (cashAccount(e) === LIFE_ACCOUNT && afterCard(e, ref, included)) card -= e.amount;
+    for (const e of s.expenses) if (cashAccount(e) === LIFE_ACCOUNT && afterCard(e, ref, included)) card -= cents(e.amount);
     const bankRef: BankBalance = { amount: ref.amount, date: ref.date, at: ref.dateOnly ? undefined : ref.at, includedIds: ref.operationIds };
     for (const op of operations) {
       if (!recordedAfter(op, bankRef)) continue;
-      const amount = rubles(accountMovement(op, LIFE_ACCOUNT));
+      const amount = accountMovement(op, LIFE_ACCOUNT);
       card += amount;
-      if (op.fundingSource !== 'borrowed' && (op.type === 'income' || (op.type === 'transfer' && op.toAccountId === RESERVE_ACCOUNT))) pool += amount;
+      if ((op.type === 'income' && !op.pendingSweep && op.fundingSource !== 'borrowed') ||
+          (op.type === 'transfer' && !op.purpose && op.toAccountId === RESERVE_ACCOUNT)) pool += amount;
+      if (op.type === 'loan_disbursement' || (op.type === 'income' && op.fundingSource === 'borrowed') || op.type === 'adjustment') unclassified += Math.max(0, amount);
       if (op.eventKey && earmarked.has(op.eventKey) && (op.type === 'debt_payment' || op.type === 'expense')) pool += amount;
     }
-    for (const r of s.reserveLog) if (r.card && r.at && time(r.at) > time(ref.at)) { card += r.card; if (r.card < 0 || r.forKeys) pool += r.card; }
+    for (const r of s.reserveLog) if (r.date <= now && r.card && r.at && time(r.at) > time(ref.at)) { card += cents(r.card); if (r.card < 0 || r.forKeys) pool += cents(r.card); }
   }
   let held = 0;
   for (const r of s.reserveLog) {
-    if (!r.card || r.card <= 0 || !openKeys(r, s.marks).length) continue;
-    held += r.card;
+    if (r.date > now || !r.card || r.card <= 0 || !openKeys(r, s.marks).length) continue;
+    held += cents(r.card);
     // перевод сделан до точки отсчёта (сверка прошла между переводом и платежом): в остатке карты он уже есть
-    if (!ref || !r.at || time(r.at) <= time(ref.at)) pool += r.card;
+    if (!ref || !r.at || time(r.at) <= time(ref.at)) pool += cents(r.card);
   }
-  pool = Math.max(0, Math.round(pool * 100) / 100);
-  held = Math.min(Math.round(held * 100) / 100, pool);
+  pool = Math.max(0, pool);
+  held = Math.min(held, pool);
+
+  const relevantMoves = s.reserveLog.filter(r => r.date <= now && r.card && r.card > 0 && r.forKeys?.length);
+  const legacyEvents = relevantMoves.length && s.fixed && s.incomes && s.templateFrom
+    ? eventsBetween({ ...s, incomes: s.incomes, fixed: s.fixed, templateFrom: s.templateFrom, weeklyOverrides: s.weeklyOverrides ?? [] },
+      addDays(relevantMoves[0].date, -45), addDays(now, 45)) : s.oneOff;
+  const funding = earmarks(operations, relevantMoves, s.marks, now, legacyEvents);
+  const heldOnCard = kopecks(funding.held.filter(row => row.accountId === LIFE_ACCOUNT).reduce((sum, row) => sum + row.amount, 0) + funding.legacyUnmapped);
+  const legacyIncome = Math.max(0, rubles(pool - held - cents(funding.legacyDraw[LIFE_ACCOUNT] ?? 0)));
+  const incomeOnCard = kopecks((funding.pending[LIFE_ACCOUNT] ?? 0) + legacyIncome);
+  const pendingSweepToReserve = { ...funding.pending, [LIFE_ACCOUNT]: incomeOnCard };
+  card = card == null ? null : rubles(card);
+  const unmatchedOnCard = rubles(unclassified);
+  const unassignedOnCard = rubles(unclassified + cents(funding.unassignedLife));
+  const unavailable = heldOnCard + incomeOnCard + unassignedOnCard;
+  const lifeAvailable = card == null ? null : Math.max(0, kopecks(card - unavailable));
+  const allocationShortfall = card == null ? 0 : Math.max(0, kopecks(unavailable - card));
 
   // резерв: отметки «оплачено из резерва» и траты из резерва после последнего остатка из банка
   const anchor = [reserveAnchor(s.reserveLog), last ? { at: last.at, date: last.date, operationIds: last.operationIds } : null].filter(Boolean).sort((a, b) => b!.at.localeCompare(a!.at))[0] ?? null;
-  let reserve = s.reserve;
+  let reserve = cents(s.reserve);
   if (anchor) {
     for (const [key, m] of Object.entries(s.marks)) {
-      if (m.done && !linked.has(key) && m.at > anchor.at && kindOf(key, s.oneOff) === 'payment' && (m.paidFrom ?? 'reserve') === 'reserve') reserve -= m.amount ?? 0;
+      if (m.done && !linked.has(key) && m.at > anchor.at && kindOf(key, s.oneOff) === 'payment' && (m.paidFrom ?? 'reserve') === 'reserve') reserve -= cents(m.amount ?? 0);
     }
-    for (const e of s.expenses) if (cashAccount(e) === RESERVE_ACCOUNT && after(e, anchor.at, anchor.date)) reserve -= e.amount;
+    for (const e of s.expenses) if (cashAccount(e) === RESERVE_ACCOUNT && after(e, anchor.at, anchor.date)) reserve -= cents(e.amount);
   }
 
   for (const op of operations) {
     if (!anchor || recordedAfter(op, { ...anchor, amount: s.reserve, includedIds: anchor.operationIds })) {
-      reserve += rubles(accountMovement(op, RESERVE_ACCOUNT));
+      reserve += accountMovement(op, RESERVE_ACCOUNT);
     }
   }
 
@@ -254,8 +251,9 @@ export function ledger(s: LedgerInput): Ledger {
   return {
     cashAccounts: accountProjection(book, s.expenses, now), reserveVerified: !!anchor, debtBalances,
     unclassifiedCredit: s.expenses.filter(e => e.source === 'credit' && !s.debts.some(d => d.kind === 'card' && d.id === e.creditCard)),
-    card, cardFrom: ref ? { at: ref.at, date: ref.date } : null, reserve, credit, creditCard, cards,
-    incomeOnCard: Math.round((pool - held) * 100) / 100, heldOnCard: held, creditInterest: creditCard ? accruedOnCard(creditCard, now) : 0,
+    card, cardFrom: ref ? { at: ref.at, date: ref.date } : null, reserve: rubles(reserve), credit, creditCard, cards,
+    incomeOnCard, heldOnCard, lifeAvailable, pendingSweepToReserve, unassignedOnCard, unmatchedOnCard, allocationShortfall,
+    heldForPayments: funding.held, creditInterest: creditCard ? accruedOnCard(creditCard, now) : 0,
   };
 }
 
@@ -299,7 +297,7 @@ export function cardOn(s: LedgerInput, date: string): number | null {
   }
   for (const op of ops) {
     const afterRef = recordedAfter(op, { amount: ref.amount, date: ref.date, at: ref.dateOnly ? undefined : ref.at, includedIds: ref.operationIds });
-    if (fwd ? afterRef && op.date <= date : !afterRef && op.date > date) delta += rubles(accountMovement(op, LIFE_ACCOUNT));
+    if (fwd ? afterRef && op.date <= date && op.eventKey !== topUp : !afterRef && (op.date > date || op.eventKey === topUp)) delta += rubles(accountMovement(op, LIFE_ACCOUNT));
   }
   return Math.round((fwd ? ref.amount + delta : ref.amount - delta) * 100) / 100;
 }

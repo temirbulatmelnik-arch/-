@@ -190,7 +190,7 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
       // сегодняшний день: норма, траты по источникам и сколько ещё можно — то же число, что в кольце на «Сегодня»
       today: {
         date: now, allowance: r0(day.day), spent: r0(day.spentToday), spentLife: r0(day.spentLife), spentCredit: r0(day.spentCredit),
-        canSpend: r0(day.canSpend),
+        canSpend: r0(led.lifeAvailable == null ? day.canSpend : Math.min(day.canSpend, led.lifeAvailable)),
       },
       reserveNeed: { amount: r0(need.need), untilBonus: need.next },
       coverage: {
@@ -222,6 +222,9 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
       } : {}),
       ledger: {
         card: led.card == null ? null : r0(led.card), reserve: r0(led.reserve), credit: led.credit == null ? null : r0(led.credit),
+        lifeAvailable: led.lifeAvailable, heldForPayments: led.heldForPayments,
+        pendingSweepToReserve: led.pendingSweepToReserve, unassignedOnCard: led.unassignedOnCard,
+        allocationShortfall: led.allocationShortfall,
         incomeOnCard: r0(led.incomeOnCard), ...(led.heldOnCard ? { heldOnCard: r0(led.heldOnCard) } : {}), ...(led.creditInterest ? { creditInterest: r0(led.creditInterest) } : {}),
         ...(led.cardFrom ? { since: led.cardFrom.date } : {}),
       },
@@ -247,7 +250,8 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
       const exact = status ? status === 'recorded' || (status === 'documented' && !!e.payroll?.actualPayDate)
         : manuallyAdjusted && !e.approx;
       return {
-        key: e.key, date: e.date, title: e.title, kind: e.kind, amount: e.amount,
+        key: e.key, date: e.date, title: e.title, kind: e.kind, amount: e.originalAmount ?? e.amount,
+        ...(e.originalAmount != null ? { remainingPayment: e.amount } : {}), ...(e.prepareOn ? { prepareOn: e.prepareOn } : {}),
         ...(e.approx ? { approx: true } : {}), ...(e.dateMode !== 'exact' ? { dateMode: e.dateMode } : {}),
         ...(exact ? { exact: true } : {}), ...(manuallyAdjusted ? { manuallyAdjusted: true } : {}),
         ...(status ? { incomeStatus: status } : {}), ...(e.planned ? { planned: e.planned } : {}),
@@ -642,7 +646,7 @@ const stepCalendar: Step = (f, s, ctx) => {
     const recorded = s.accountBook?.operations.find(op => op.eventKey === e.key && op.status === 'confirmed');
     const historical = s.accountBook?.historicalLoans?.find(op => op.eventKey === e.key);
     if ((recorded || historical) && (p.done === false || (p.done === true &&
-        ((p.paid != null && p.paid !== (recorded ?? historical)?.amount) || (p.paidDate && p.paidDate !== (recorded ?? historical)?.date))))) {
+        ((p.paid != null && p.paid !== (mark?.amount ?? (recorded ?? historical)?.amount)) || (p.paidDate && p.paidDate !== (recorded ?? historical)?.date))))) {
       lines.push(`${name}: даты и суммы подтверждённой операции меняются в журнале`);
       continue;
     }
@@ -670,7 +674,7 @@ const stepCalendar: Step = (f, s, ctx) => {
       const o = { ...overrides[e.key] };
       const changes: string[] = [];
       if (p.resetAmount && !mark?.done && o.amount != null) { delete o.amount; changes.push('вернуть расчётную сумму'); }
-      if (!p.resetAmount && isNum(p.amount) && Math.abs(p.amount - e.amount) >= 1) { o.amount = p.amount; changes.push(`сумма ${arrow(money(e.amount), money(p.amount))}`); }
+      if (!p.resetAmount && isNum(p.amount) && Math.abs(p.amount - (e.originalAmount ?? e.amount)) >= 1) { o.amount = p.amount; changes.push(`сумма ${arrow(money(e.amount), money(p.amount))}`); }
       if (isDate(p.date) && p.date !== e.date) { o.date = p.date; changes.push(`дата ${arrow(ddmm(e.date), ddmm(p.date))}`); }
       if (['conditional', 'internal_transfer', 'review'].includes(p.projection ?? '') && o.projection !== p.projection) {
         o.projection = p.projection; changes.push(p.projection === 'conditional' ? 'только при подтверждении условий' :
@@ -914,6 +918,9 @@ const stepAccountBook: Step = (f, s, ctx) => {
     book = { ...book, operations };
     if (op.eventKey && op.status === 'confirmed' && !marks[op.eventKey]) marks[op.eventKey] = {
       done: true, paidDate: op.date, at: op.at ?? new Date(op.date + 'T00:00:00Z').toISOString(), amount: op.amount,
+      ...((op.type === 'debt_payment' || op.type === 'expense') ? {
+        paidFrom: op.accountId === LIFE_ACCOUNT ? 'card' as const : 'reserve' as const,
+      } : {}),
     };
     lines.push(`Операция ${op.type === 'loan_disbursement' ? 'выдача займа' : op.type} · ${op.date} · ${money(op.amount)}${op.eventKey ? ' · связана с календарём' : ''}`);
   }
