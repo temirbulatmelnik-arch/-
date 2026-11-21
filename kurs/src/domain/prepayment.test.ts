@@ -79,6 +79,40 @@ describe('расчёт досрочного погашения', () => {
     expect(withPay.find(row => closes(row, alfa.id, split.id))?.status).not.toBe('available');
   });
 
+  it('отдельно показывает более ранний разрыв, сумму обязательства, счёт и нехватку', () => {
+    const vtb = makeDebt('vtb-installment', 'installment', 85000, 70000, 0);
+    const scheduled = pay(vtb, '2026-12-21', 70000);
+    const provider = createRepaymentPlanner(setup(60000, [vtb, alfa], [scheduled]), today);
+    const choice = [{ debtId: alfa.id, mode: 'close' as const }];
+    const [, plan] = provider.analyze('2026-12-30', false, choice);
+    expect(plan.cashflow?.cautious.earlier).toMatchObject({ date: '2026-12-21', title: vtb.name, payment: 70000,
+      deficit: 10000, accountId: 'life' });
+    expect(plan.cashflow?.cautious).toMatchObject({ change: 'new', first: { date: '2026-12-30' } });
+    expect(plan.status).toBe('unsafe');
+  });
+
+  it('сравнивает произвольную сумму и показывает новый или устранённый разрыв', () => {
+    const rent = { ...pay(alfa, '2026-12-02', 49000), key: 'fix:rent:2026-12', title: 'Аренда', debtId: undefined };
+    const provider = createRepaymentPlanner(setup(73000, [alfa], [rent]), today);
+    const [, lowered] = provider.analyze(today, false, [{ debtId: alfa.id, mode: 'term', amount: 30001.25 }]);
+    expect(lowered.amount).toBe(30001.25);
+    expect(lowered.cashflow?.cautious).toMatchObject({ actualReserve: 73000, after: 42998.75, change: 'new',
+      first: { date: rent.date, payment: 49000, deficit: 6001.25, accountId: 'life' } });
+    expect(provider.analyze(today, false, [{ debtId: alfa.id, mode: 'term', amount: 999999 }])).toEqual([]);
+    const original = setup(50000, [alfa], [pay(alfa, '2026-12-10', 64000)], { [alfa.id]: { closeDate: today, closeAmount: 15000 } });
+    const [, close] = createRepaymentPlanner(original, today).analyze(today, false, [{ debtId: alfa.id, mode: 'close' }]);
+    expect(close.cashflow?.cautious).toMatchObject({ change: 'resolved', first: null, baselineFirst: { deficit: 14000 } });
+  });
+
+  it('возвращает только варианты рекомендации с покрытием в осторожном прогнозе либо помечает условие', () => {
+    const terms = { [alfa.id]: { closeDate: today, closeAmount: 80000 } };
+    const good = createRepaymentPlanner(setup(120000, [alfa], [pay(alfa, '2026-12-10', 8000)], terms), today).nextOpportunity(march);
+    expect(good?.result.status).toBe('available');
+    const unpayable = { ...pay(alfa, '2026-12-10', 22000), debtId: undefined };
+    const bad = createRepaymentPlanner(setup(10000, [alfa], [unpayable], terms), today).nextOpportunity(march);
+    expect(bad).toBeNull();
+  });
+
   it('считает проценты по кредиту и сравнивает оба подтверждённых режима ВТБ', () => {
     const vtb: Debt = { ...makeDebt('vtb', 'loan', 120000, 14000, 0.2), rule: { type: 'annuity', endDate: '2027-12-10', amount: 14000 } };
     const input = setup(400000, [vtb], [pay(vtb, '2026-12-10', 14000)],

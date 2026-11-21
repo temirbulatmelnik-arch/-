@@ -5,7 +5,25 @@ import { coverage, COVERAGE_SCENARIOS, projectedEvent, scenarioInput, type Cover
 import { RESERVE_BUFFER } from './plan';
 import type { CalEvent, Debt } from './types';
 
-type Mode = 'close' | 'term' | 'payment';
+export type Mode = 'close' | 'term' | 'payment';
+export interface RepaymentChoice { debtId: string; mode: Mode; amount?: number }
+export interface RepaymentProduct { id: string; name: string; short: string; balance: number; quote?: number; modes: Mode[] }
+export interface CashIssue { key?: string; date: string; title: string; accountId?: string; deficit: number | null; payment: number | null }
+export interface CashMilestone { date: string; title: string; amount: number | null; kind: 'action' | 'income' | 'payment' | 'minimum' | 'gap' }
+export interface RepaymentCashflow {
+  actualReserve: number | null;
+  before: number | null;
+  after: number | null;
+  until: string;
+  known: boolean;
+  earlier: CashIssue | null;
+  first: CashIssue | null;
+  baselineFirst: CashIssue | null;
+  change: 'none' | 'new' | 'worse' | 'same' | 'better' | 'resolved';
+  points: { date: string; reserve: number; schedule: number }[];
+  events: CashMilestone[];
+  savings: [number, number] | null;
+}
 export interface Repayment { debtId: string; mode: Mode; principal: number; cost: number; verified: boolean }
 interface DebtResult { cost: number; paidOff: string | null; balanceAt: number; points: [string, number, number][] }
 export interface RepaymentResult {
@@ -23,7 +41,60 @@ export interface RepaymentResult {
   reasons: string[];
   charts: { debt: number[]; cost: number[]; reserve: number[] };
   debtFree: string | null;
+  cashflow?: Record<Scenario, RepaymentCashflow>;
   debtDates: { id: string; date: string | null }[];
+}
+
+function nextIssue(track: Coverage, since: string): CashIssue | null {
+  const route = track.accountRisk;
+  const risks: CashIssue[] = track.paymentFunding?.flatMap(p => p.date >= since && p.reserveShortfall && p.reserveShortfall > 0
+    ? [{ key: p.key, date: p.date, title: p.title, accountId: p.accountId, deficit: p.reserveShortfall, payment: p.amount }] : []) ?? [];
+  if (route && route.date >= since) {
+    const payment = track.paymentFunding?.find(p => p.date === route.date && p.title === route.title);
+    const step = track.steps.find(item => item.date === route.date && item.title === route.title && item.delta < 0);
+    // Initial account checks also detect unassigned routes and payments due before any transfer.
+    risks.unshift({ key: payment?.key ?? step?.key, date: route.date, title: route.title, accountId: route.accountId,
+      deficit: route.amount, payment: payment?.amount ?? (step ? -step.delta : null) });
+  }
+  const negative = track.steps.find(step => step.date >= since && step.delta < 0 && step.balance < 0);
+  if (negative) risks.push({ key: negative.key, date: negative.date, title: negative.title, accountId: negative.accountId,
+    deficit: -negative.balance, payment: -negative.delta });
+  return risks.sort((a, b) => a.date.localeCompare(b.date) ||
+    Number(a.title === 'Модель досрочного погашения') - Number(b.title === 'Модель досрочного погашения'))[0] ?? null;
+}
+
+function cashflow(track: Coverage, baseline: Coverage, date: string, reserve: number | null, amount: number,
+  savings: [number, number] | null): RepaymentCashflow {
+  const old = nextIssue(baseline, baseline.from);
+  const earlier = old && old.date < date ? old : null;
+  const first = nextIssue(track, date);
+  const baselineFirst = nextIssue(baseline, date);
+  const change = !first ? baselineFirst ? 'resolved' : 'none' : !baselineFirst ? 'new' :
+    first.date < baselineFirst.date ? 'worse' : first.date > baselineFirst.date ? 'better' :
+      first.deficit != null && baselineFirst.deficit != null && cents(first.deficit) !== cents(baselineFirst.deficit)
+        ? first.deficit > baselineFirst.deficit ? 'worse' : 'better' : 'same';
+  const byDay = track.accountByDay ?? {};
+  const after = byDay[date]?.[RESERVE_ACCOUNT] ?? null;
+  const labels: CashMilestone[] = [{ date, title: 'Досрочное погашение', amount, kind: 'action' }];
+  const next = track.steps.filter(step => step.date >= date && step.kind === 'income');
+  for (const step of next.slice(0, 3)) labels.push({ ...step, amount: step.delta, kind: 'income' });
+  const due = (track.paymentFunding ?? []).filter(p => p.date >= date);
+  const large = [...due.filter(p => p.date <= addDays(date, 95))].sort((a, b) => b.amount - a.amount).slice(0, 3);
+  for (const p of large) labels.push({ ...p, kind: 'payment' });
+  const low = Object.entries(track.reserveLowByDay ?? {}).filter(([day]) => day >= date)
+    .reduce<[string, number] | null>((best, point) => !best || point[1] < best[1] ? point : best, null);
+  if (low) labels.push({ date: low[0], title: 'Минимум резерва', amount: low[1], kind: 'minimum' });
+  if (first) labels.push({ ...first, title: 'Первая нехватка', amount: first.deficit, kind: 'gap' });
+  if (earlier) labels.push({ ...earlier, title: 'Разрыв до досрочки', amount: earlier.deficit, kind: 'gap' });
+  const marks = new Set(labels.map(event => event.date));
+  const points = Object.entries(byDay).flatMap(([day, money], i, all) => {
+    const own = money[RESERVE_ACCOUNT], normal = baseline.accountByDay?.[day]?.[RESERVE_ACCOUNT];
+    return own == null || normal == null || !(i % 7 === 0 || i === all.length - 1 || marks.has(day))
+      ? [] : [{ date: day, reserve: own, schedule: normal }];
+  });
+  return { actualReserve: reserve, before: after == null ? null : rubles(cents(after) + cents(amount)), after,
+    until: track.to, known: reserve != null && after != null, earlier, first, baselineFirst, change, points,
+    events: labels.sort((a, b) => a.date.localeCompare(b.date)), savings };
 }
 
 const MIN_WINDOW = 180;
@@ -150,7 +221,23 @@ export function createRepaymentPlanner(input: CoverageInput, today: string, sett
     return days;
   };
 
-  function analyze(date: string, quick = false): RepaymentResult[] {
+  function products(date: string): RepaymentProduct[] {
+    if (date < today || date > until) return [];
+    const baseline = byScenario.base;
+    return eligible.flatMap(debt => {
+      const terms = payoffTerms(input.cal, debt.id);
+      const balance = rubles(modeledDebt(debt, baseline.scheduled.get(debt.id) ?? [], terms, today, date,
+        byDays(date), until, undefined, true).result.balanceAt);
+      if (!balance && terms?.closeDate !== date) return [];
+      const modes: Mode[] = ['close'];
+      if (debt.kind === 'loan') modes.push(...terms?.loanModes ?? []);
+      else if (debt.kind !== 'installment') modes.push('term');
+      return [{ id: debt.id, short: debt.short, name: debt.name, balance,
+        quote: terms?.closeDate === date ? terms.closeAmount : undefined, modes }];
+    });
+  }
+
+  function analyze(date: string, quick = false, requested?: RepaymentChoice[]): RepaymentResult[] {
     if (date < today || date > until) return [];
     const windows = [...new Set([30, 90, 180].map(days => addDays(date, days)).concat(until))].sort();
     const end = maximumDate(windows);
@@ -205,6 +292,20 @@ export function createRepaymentPlanner(input: CoverageInput, today: string, sett
       } satisfies Repayment)));
     });
     const options: Repayment[][] = [[]];
+    if (requested?.length) {
+      if (new Set(requested.map(choice => choice.debtId)).size !== requested.length) return [];
+      const selected = requested.flatMap<Repayment>(choice => {
+        if (choice.mode === 'close') return close.filter(item => item.debtId === choice.debtId);
+        const contract = products(date).find(item => item.id === choice.debtId);
+        if (!contract?.modes.includes(choice.mode) || !Number.isFinite(choice.amount) ||
+            cents(choice.amount!) <= 0 || cents(choice.amount!) >= cents(contract.balance)) return [];
+        const terms = payoffTerms(input.cal, choice.debtId);
+        return [{ ...choice, principal: rubles(cents(choice.amount!)),
+          cost: rubles(cents(choice.amount!) + cents(terms?.partialFee ?? 0)), verified: !!terms?.partialConfirmed }];
+      });
+      if (selected.length !== requested.length) return [];
+      options.push(selected);
+    }
     for (const action of close) options.push([action]);
     for (const [index, action] of close.entries()) {
       for (const other of close.slice(index + 1)) options.push([action, other]);
@@ -237,7 +338,10 @@ export function createRepaymentPlanner(input: CoverageInput, today: string, sett
       for (const action of actions) if (action.mode === 'close') releaseKeys.push(`bridge:${action.debtId}`);
       return coverage(model, today, scenario, end, { events: changed, prepayments: [{ date, amount, releaseKeys, title: 'Модель досрочного погашения' }] });
     };
-    const rows = options.map(actions => {
+    const planId = (actions: Repayment[]) => actions.map(a => `${a.debtId}:${a.mode}:${a.cost}`).sort().join('|') || 'schedule';
+    const requestedId = requested?.length ? planId(options[1]) : null;
+    const unique = [...new Map(options.map(actions => [planId(actions), actions])).values()];
+    const rows = unique.map(actions => {
       const amount = rubles(actions.reduce((sum, a) => sum + cents(a.cost), 0));
       const tracks = Object.fromEntries(COVERAGE_SCENARIOS.map(scenario => [scenario, payScenario(scenario, actions, amount)])) as Record<Scenario, Coverage>;
       const minimum = (track: Coverage, last: string) => {
@@ -257,18 +361,27 @@ export function createRepaymentPlanner(input: CoverageInput, today: string, sett
         const action = actions.find(a => a.debtId === d.id);
         return [d.id, action ? debtModel('base', d, action) : baselineModels.get(d.id)!] as const;
       });
-      const best = actions.map(action => {
-        const d = debts.find(debt => debt.id === action.debtId)!;
-        const high = baselineHigh.get(d.id)! - debtModel('base', d, action, true, end).result.cost;
-        const low = baselineLow.get(d.id)! - debtModel('base', d, action, false, end).result.cost;
-        return [Math.min(low, high), Math.max(low, high)];
-      });
+      const savingsFor = (scenario: Scenario): [number, number] | null => {
+        if (!actions.length) return null;
+        let lower = 0, upper = 0;
+        for (const action of actions) {
+          const d = debts.find(debt => debt.id === action.debtId)!;
+          const high = (scenario === 'base' ? baselineHigh.get(d.id)! : debtModel(scenario, d, undefined, true, end).result.cost)
+            - debtModel(scenario, d, action, true, end).result.cost;
+          const low = (scenario === 'base' ? baselineLow.get(d.id)! : debtModel(scenario, d, undefined, false, end).result.cost)
+            - debtModel(scenario, d, action, false, end).result.cost;
+          lower += Math.min(low, high); upper += Math.max(low, high);
+        }
+        return [rubles(lower), rubles(upper)];
+      };
+      const id = planId(actions);
+      const detailed = !quick && (requestedId ? id === requestedId : !actions.length);
       const results = models.map(([, m]) => m.result);
       const dates = results.map(r => r.paidOff);
       const removed = actions.length ? scenarios.base.events.filter(e => e.kind === 'payment' && e.date > date &&
         byDebt(e, input.cal).length > 0 && byDebt(e, input.cal).every(id => actions.some(a => a.mode === 'close' && a.debtId === id))) : [];
       return {
-        id: actions.map(a => `${a.debtId}:${a.mode}:${a.cost}`).join('|') || 'schedule',
+        id,
         title: actions.length ? actions.map(a => {
           const name = debts.find(d => d.id === a.debtId)!.short;
           return a.mode === 'close' ? `Закрыть ${name}` : `${name} · ${a.mode === 'payment' ? 'снизить платёж' : 'досрочно частично'}`;
@@ -278,7 +391,9 @@ export function createRepaymentPlanner(input: CoverageInput, today: string, sett
         horizons: windows.map(day => ({ date: day, minimum: Object.fromEntries(COVERAGE_SCENARIOS.map(s => [s, minimum(tracks[s], day)])) })),
         scenarios: Object.fromEntries(COVERAGE_SCENARIOS.map(s => [s, { reserveLow: min[s], shortage: tracks[s].shortage, accountRisk: tracks[s].accountRisk }])),
         removed: removed.map(({ key, title, date: day, amount: value }) => ({ key, title, date: day, amount: value })),
-        savings: actions.length ? [rubles(best.reduce((n, row) => n + row[0], 0)), rubles(best.reduce((n, row) => n + row[1], 0))] : null,
+        savings: savingsFor('base'),
+        ...(detailed ? { cashflow: Object.fromEntries(COVERAGE_SCENARIOS.map(s =>
+          [s, cashflow(tracks[s], scenarios[s].current, date, available, amount, savingsFor(s))])) } : {}),
         savingsUntil: end,
         reasons: [
           ...(unverified ? ['Уточните условия договора и сумму закрытия на выбранную дату.'] : []),
@@ -296,10 +411,13 @@ export function createRepaymentPlanner(input: CoverageInput, today: string, sett
             .flatMap(([, value]) => value[RESERVE_ACCOUNT] ?? []) },
       } as RepaymentResult;
     });
-    return rows.sort((a, b) => {
+    const ranked = rows.sort((a, b) => {
       const rank = { baseline: 0, available: 1, afterIncome: 2, conditional: 3, unsafe: 4 };
       return rank[a.status] - rank[b.status] || (b.savings?.[0] ?? 0) - (a.savings?.[0] ?? 0) || a.amount - b.amount;
     });
+    if (!requestedId) return ranked;
+    return [ranked[0], ranked.find(row => row.id === requestedId)!,
+      ...ranked.filter(row => row.actions.length && row.id !== requestedId)];
   }
 
   function nextOpportunity(seed: string) {
@@ -313,18 +431,32 @@ export function createRepaymentPlanner(input: CoverageInput, today: string, sett
       return [date];
     });
     const days = [...new Set([today, ...dates.filter(d => d <= addDays(today, 180)), ...eligible.flatMap(d => payoffTerms(input.cal, d.id)?.closeDate ?? []), seed])].sort();
-    let conditional: { date: string; result: RepaymentResult } | null = null;
+    type Offer = { date: string; result: RepaymentResult };
+    let conditional: Offer | null = null, ready: Offer | null = null;
+    const better = (candidate: Offer, current: Offer | null) => !current ||
+      (candidate.result.savings?.[0] ?? 0) > (current.result.savings?.[0] ?? 0) ||
+      candidate.result.savings?.[0] === current.result.savings?.[0] && candidate.result.amount < current.result.amount;
+    const blockers = [byScenario.cautious.current, byScenario.base.current].map(track => {
+      const below = Object.entries(track.reserveLowByDay ?? {}).find(([, amount]) => cents(amount) < BLOCK_CENTS)?.[0];
+      return [nextIssue(track, today)?.date, below].filter((v): v is string => !!v).sort()[0];
+    });
     for (const date of days) {
+      if (blockers.every(blocker => blocker && blocker < date)) break;
       const rows = analyze(date, true);
       const result = rows.find(row => (row.savings?.[1] ?? 0) > 0 && row.status !== 'baseline' && row.status !== 'unsafe');
       if (!result) continue;
-      if (result.status !== 'conditional') return { date, result };
-      conditional ??= { date, result };
+      const choice = { date, result };
+      if (result.status === 'conditional') {
+        if (better(choice, conditional)) conditional = choice;
+      } else if (better(choice, ready)) ready = choice;
     }
-    return conditional;
+    return ready ?? conditional;
   }
 
-  return { analyze, nextOpportunity, until };
+  const nextSalary = byScenario.cautious.current.steps.find(step => step.kind === 'income' && !!step.key?.startsWith('inc:salary:'));
+  const nextIncome = byScenario.cautious.current.steps.find(step => step.kind === 'income');
+  return { analyze, products, nextOpportunity, until, nextIncome, nextSalary,
+    baselineIssue: nextIssue(byScenario.cautious.current, today) };
 }
 
 export function bestPartial(rows: RepaymentResult[]) {

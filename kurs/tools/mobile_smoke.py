@@ -78,11 +78,18 @@ def check_features(browser, playwright, url):
     page.get_by_role("button", name=re.compile("^Долги")).first.click()
     page.get_by_role("button", name=re.compile("^Выгодная досрочка")).click()
     details = page.get_by_role("dialog", name="Выгодная досрочка")
-    details.get_by_role("button", name="Сравнить на 31 марта 2027").click()
-    details.get_by_role("table").wait_for(timeout=30000)
-    details.get_by_role("img", name="Прогноз резерва").wait_for()
-    details.get_by_role("checkbox", name="Сравнить без отпускных поступлений").check()
-    details.get_by_role("table").wait_for(timeout=30000)
+    details.get_by_role("button", name="Самостоятельный анализ").click()
+    details.get_by_role("button", name="31 марта 2027 года").click()
+    details.get_by_role("button", name=re.compile("^Карта Прогноз долга")).click()
+    details.get_by_role("button", name="Погасить частично", exact=True).click()
+    details.get_by_label("Сумма в счёт основного долга, ₽").fill("1234,56")
+    details.get_by_role("button", name="Рассчитать последствия").click()
+    details.get_by_role("img", name="График резерва по датам, ₽").wait_for(timeout=30000)
+    details.get_by_role("button", name="Базовый", exact=True).click()
+    details.get_by_text("Экономия на процентах и комиссиях", exact=True).wait_for()
+    assert details.get_by_role("table").count() == 0
+    assert details.locator("select").count() == 0
+    assert page.evaluate("JSON.parse(localStorage.kurs).state.debts[0].balance") == 36000
     details.get_by_role("button", name="Закрыть", exact=True).click()
     page.get_by_role("button", name="Сегодня", exact=True).first.click()
     page.get_by_role("button", name="Из банка", exact=True).first.click()
@@ -100,11 +107,12 @@ def check_features(browser, playwright, url):
     page.on("request", lambda req: foreign.append(req.url) if req.url.startswith(("http:", "https:")) and not req.url.startswith(url) else None)
     image = bank.locator('input[accept="image/*"]')
     image.set_input_files({"name": "example.png", "mimeType": "image/png", "buffer": sample})
-    bank.get_by_text("Сверьте каждую строку", exact=False).wait_for(timeout=90000)
+    bank.get_by_text("Найдена 1 операция", exact=True).wait_for(timeout=90000)
+    bank.get_by_role("button", name=re.compile("^Редактировать")).first.click()
     assert bank.get_by_label("Сумма", exact=True).first.input_value() == "350"
     assert page.evaluate("JSON.parse(localStorage.kurs).state.expenses.length") == 0
     bank.get_by_label("Проверено, добавить").first.check()
-    bank.get_by_role("button", name="Записать отмеченные").click()
+    bank.get_by_role("button", name=re.compile("^Записать отмеченные")).click()
     bank.wait_for(state="hidden")
     page.get_by_text("Свои на неделю", exact=True).wait_for()
     assert page.evaluate("JSON.parse(localStorage.kurs).state.expenses.length") == 1
@@ -112,6 +120,34 @@ def check_features(browser, playwright, url):
     image.set_input_files({"name": "example.png", "mimeType": "image/png", "buffer": sample})
     bank.get_by_text("Строка с этого снимка уже записана", exact=True).wait_for(timeout=90000)
     assert bank.get_by_label("Проверено, добавить").first.is_disabled()
+    bank.get_by_role("button", name="Закрыть", exact=True).click()
+    page.get_by_role("button", name="Из банка", exact=True).first.click()
+    artwork = context.new_page()
+    artwork.set_content("""<meta name="viewport" content="width=device-width">
+    <style>html{background:#131518;color:white;font:700 22px sans-serif} section{width:360px;padding:12px}
+    header{font-size:18px;margin:22px 0} .line{display:flex;justify-content:space-between;align-items:center;min-height:85px}
+    small{display:block;font-size:17px;color:#aaa}</style>
+    <section>
+      <header>История</header><header>14 ноября −725 ₽</header>
+      <div class="line"><span>Винлаб<small>Алкоголь</small></span><span>−480 P</span></div>
+      <div class="line"><span>Транспорт</span><span>−46</span></div>
+      <div class="line"><span>Яндекс Плюс</span><span>−199<br>руб.</span></div>
+      <header>13 ноября −1515,92 ₽</header>
+      <div class="line"><span>Пятерочка<small>Супермаркеты</small></span><span>−1 059,92 ₽</span></div>
+      <div class="line"><span>Администрация<small>Зарплата</small></span><span>+12 284 ₽</span></div>
+      <div class="line"><span>Кафе</span><span>−530 ₽</span></div>
+      <div class="line"><span>Между своими<br>счетами</span><span>1 000 ₽</span></div>
+      <div class="line">Баланс карты 70 000 ₽</div>
+    </section>""")
+    history = artwork.locator("section").screenshot()
+    artwork.close()
+    image.set_input_files([{"name": "history.png", "mimeType": "image/png", "buffer": history},
+                           {"name": "example.png", "mimeType": "image/png", "buffer": sample}])
+    bank.get_by_role("heading", name=re.compile("^Найден")).wait_for(timeout=110000)
+    count = bank.get_by_role("heading", name=re.compile("^Найден")).inner_text()
+    assert count == "Найдено 8 операций", bank.inner_text()
+    assert bank.get_by_text("Строка с этого снимка уже записана", exact=True).count() == 1
+    assert page.evaluate("JSON.parse(localStorage.kurs).state.expenses.length") == 1
     assert not foreign
     context.close()
 

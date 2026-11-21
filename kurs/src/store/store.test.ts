@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { CalEvent } from '../domain/types';
 import { useStore } from './store';
 import { debtProjection, EMPTY_BOOK } from '../domain/accounts';
-import { today } from '../domain/dates';
+import { moscowClock } from '../domain/funds';
 
 const sunday: CalEvent = { key: 'wk:2026-11-02', date: '2026-11-01', dateMode: 'exact', kind: 'weekly', title: 'Долить карту жизни до лимита', amount: 8000 };
 const s = () => useStore.getState();
@@ -63,7 +63,7 @@ describe('воскресная сверка с банком', () => {
   it('отметка оплаты в приложении — дата оплаты сегодня', () => {
     const pay: CalEvent = { key: 'fix:x:2026-12', date: '2026-12-20', dateMode: 'exact', kind: 'payment', title: 'Х', amount: 500 };
     s().markEvent(pay, true);
-    expect(s().marks['fix:x:2026-12']).toMatchObject({ done: true, paidDate: today() });
+    expect(s().marks['fix:x:2026-12']).toMatchObject({ done: true, paidDate: moscowClock().date });
   });
 
   it('погашение кредитки: только подтверждённое тело, банковский остаток сохраняется', () => {
@@ -73,7 +73,7 @@ describe('воскресная сверка с банком', () => {
     const pay: CalEvent = { key: 'pay:k:2025-10', date: '2025-10-11', dateMode: 'exact', kind: 'payment', title: 'К', amount: 5000, debtId: 'k' };
     s().markEvent(pay, true, 5000, 'reserve', { principal: 4000, interest: 1000 });
     expect(s().debts[0].balance).toBe(100_000);
-    expect(debtProjection(s().debts[0], [], s().accountBook, today()).estimated).toBe(96_000);
+    expect(debtProjection(s().debts[0], [], s().accountBook, moscowClock().date).estimated).toBe(96_000);
     s().markEvent(pay, false);
     expect(s().debts[0].balance).toBe(100_000);
   });

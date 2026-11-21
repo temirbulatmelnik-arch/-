@@ -7,8 +7,9 @@ import { Chip, Money, PrimaryButton, SecondaryButton, Sheet, Tile } from '../com
 import { ddmm, fromKey, today } from '../domain/dates';
 import { CATEGORIES } from '../domain/plan';
 import { fromAi, fromBank, fromDrafts, type AnyProposal } from '../domain/proposals';
-import { ScreenshotReview } from './ScreenshotImport';
-import { screenshotRows, type ScreenshotRow } from '../domain/screenshots';
+import { ScreenshotFlow } from './ScreenshotImport';
+import type { ImageOCR } from '../domain/imageText';
+import { moscowClock } from '../domain/funds';
 import { parseBankText } from '../domain/bankText';
 import { draft, parseCsv, parseText } from '../domain/statements';
 import type { CategoryId, Source } from '../domain/types';
@@ -27,7 +28,7 @@ export function ImportSheet() {
 }
 
 type Review = { summary: string; warnings: string[]; items: AnyProposal[] };
-type Step = { s: 'pick' } | { s: 'text' } | { s: 'busy'; label: string } | { s: 'review'; review: Review } | { s: 'screenshots'; rows: ScreenshotRow[] } | { s: 'error'; text: string };
+type Step = { s: 'pick' } | { s: 'text' } | { s: 'busy'; label: string } | { s: 'review'; review: Review } | { s: 'screenshots'; images: ImageOCR[] } | { s: 'error'; text: string };
 
 function ctx() {
   const st = useStore.getState();
@@ -68,14 +69,10 @@ function Flow() {
         return;
       }
       const { readImageText } = await import('../domain/imageText');
-      const images = await readImageText(files);
-      const c = ctx();
-      const rows = [...new Map(images.flatMap(image =>
-        screenshotRows(image.text, c.now, image.id, image.confidence, c.memory).map(row => [row.fingerprint, row] as const))).values()];
-      setStep(rows.length ? { s: 'screenshots', rows } :
-        { s: 'error', text: 'Не распознаны строки операций с суммой и валютой. Попробуйте отдельный снимок операции или вставьте текст через «Фото».' });
+      const images = await readImageText(files, moscowClock().date);
+      setStep({ s: 'screenshots', images });
     } catch {
-      setStep({ s: 'error', text: 'Не удалось прочитать изображение. Выберите PNG, JPEG или используйте распознавание текста в «Фото».' });
+      setStep({ s: 'screenshots', images: [{ id: uid(), text: '', confidence: 0, stage: 'ocr' }] });
     }
   };
 
@@ -120,7 +117,7 @@ function Flow() {
       </div>
     );
   }
-  if (step.s === 'screenshots') return <ScreenshotReview rows={step.rows} onBack={() => setStep({ s: 'pick' })} />;
+  if (step.s === 'screenshots') return <ScreenshotFlow images={step.images} onBack={() => setStep({ s: 'pick' })} />;
   if (step.s === 'review') return <ReviewList review={step.review} onBack={() => setStep({ s: 'pick' })} />;
   // одно касание: прочитать буфер (iPhone спросит «Вставить») и сразу показать, что нашлось
   const pasteBank = async () => {
