@@ -111,7 +111,9 @@ export function CoverageCard() {
   const riskName = accountOptions(input.cal.accountBook ?? EMPTY_BOOK).find(a => a.id === risk?.accountId)?.name;
   const [open, setOpen] = useState(false);
   const [compare, setCompare] = useState(false);
-  const comparisons = useMemo(() => compare ? compareCoverage(input, now, addDays(now, HORIZON_DAYS)) : [], [compare, input, now]);
+  const [compareYear, setCompareYear] = useState(false);
+  const end = compareYear ? `${Math.max(2027, Number(now.slice(0, 4)))}-12-31` : addDays(now, HORIZON_DAYS);
+  const comparisons = useMemo(() => compare ? compareCoverage(input, now, end) : [], [compare, input, now, end]);
   const funding = cov.paymentFunding?.filter(p => p.date <= addDays(now, 45)) ?? [];
   const accountName = (id?: string) => accountOptions(input.cal.accountBook ?? EMPTY_BOOK).find(a => a.id === id)?.name;
   const hints = useMemo(() => coverageHints(input, now, cov), [input, now, cov]);
@@ -131,7 +133,7 @@ export function CoverageCard() {
           {s || risk ? <TriangleAlert size={22} strokeWidth={1.8} className="mt-0.5 shrink-0 text-[#ff9a70]" /> : <CheckCircle2 size={22} strokeWidth={1.8} className="mt-0.5 shrink-0 text-[#9ff0d4]" />}
           <div className="min-w-0">
             <h2 className="font-display text-[21px] leading-tight font-medium">
-              {s ? <>Максимальная нехватка <Money value={s.amount} kopecks /></> : risk ? <>Счёт требует проверки</> : <>Хватает по прогнозу до {dayMonth(cov.to)}</>}
+              {s ? <>Кассовый разрыв по прогнозу <Money value={s.amount} kopecks /></> : risk ? <>Счёт требует проверки</> : <>Хватает по прогнозу до {dayMonth(cov.to)}</>}
             </h2>
             <p className="mt-1 text-[13.5px] leading-snug text-card-muted">
               {s ? <>Первый дефицит {dayMonth(s.date)} после «{s.title}». Минимум {ddmm(m?.date ?? now)}, расчёт до {ddmmyyyy(cov.to)}.</>
@@ -144,7 +146,8 @@ export function CoverageCard() {
 
       {risk && <div className="mt-3 rounded-[18px] bg-warn/12 px-4 py-3 text-[13.5px]">
         <b>{dayMonth(risk.date)} · {risk.title}</b>
-        <div>{riskName ?? 'Счёт списания не указан'}{risk.amount != null ? <> · не хватает <Money value={risk.amount} /></> : riskName ? ' · остаток не подтверждён' : ''}</div>
+        <div>{riskName ?? 'Счёт списания не указан'}{risk.amount != null ? <> · прогнозная недостача <Money value={risk.amount} kopecks /></>
+          : riskName ? ' · остаток не подтверждён' : ' · сумма на этом счёте пока неизвестна'}</div>
         {hints[0] && <p className="mt-1 text-muted">{hints[0].text}</p>}
       </div>}
       {cov.bufferRisk && <p className="mt-3 px-1 text-[13px] text-muted">С {dayMonth(cov.bufferRisk.date)} запас ниже цели на <Money value={cov.bufferRisk.amount} />.</p>}
@@ -159,14 +162,20 @@ export function CoverageCard() {
                   : ' · хватает по прогнозу'}</p>
           </div>)}
         </div>
-        <p className="mt-2 text-muted">Суммы учитывают предыдущие обязательства. Остаток на карте и срок зачисления проверьте в банке.</p>
+        <p className="mt-2 text-muted">Сначала подтвердите счёт списания. Затем сверьте доступные деньги на счёте-источнике и срок перевода. Если перевод нужен, подготовьте разницу на счёте списания к указанной дате.</p>
       </details>}
       <details className="card mt-3 p-4 text-[13px]" onToggle={event => setCompare(event.currentTarget.open)}>
         <summary className="font-medium text-sea">Сравнить сценарии на одинаковом горизонте</summary>
-        {comparisons.map(row => <p className="mt-2" key={row.scenario}>
-          {{ base: 'Базовый', cautious: 'Осторожный', stress: 'Стрессовый' }[row.scenario]} · минимум <Money value={row.min} kopecks /> {ddmm(row.minDate)}
-        </p>)}
-        {comparisons[0] && <p className="mt-2 text-muted">До {ddmmyyyy(comparisons[0].to)}. Базовый включает условные доходы. Осторожный исключает их и снижает оценку отпускных. Стрессовый дополнительно сдвигает отпускные и учитывает заданный внеплановый расход.</p>}
+        {compare && <button type="button" className="my-2 text-sea" onClick={() => setCompareYear(!compareYear)}>
+          {compareYear ? 'Показать первые 150 дней' : 'Показать до конца года'}
+        </button>}
+        {comparisons.map(row => <div className="border-t border-line py-2" key={row.scenario}>
+          <p>{{ base: 'Базовый', cautious: 'Осторожный', stress: 'Стрессовый' }[row.scenario]} · минимум <Money value={row.min} kopecks /> {ddmm(row.minDate)}</p>
+          <p className="mt-1 text-muted">{row.assumptions}</p>
+          {row.criticalDates.length > 0 && <ul className="mt-1 text-muted">{row.criticalDates.map(critical =>
+            <li key={critical.date}>{ddmm(critical.date)} · {critical.title} · <Money value={critical.balance} kopecks /></li>)}</ul>}
+        </div>)}
+        {comparisons[0] && <p className="mt-2 text-muted">Расчёт до {ddmmyyyy(comparisons[0].to)}. В день автоплатежа поступления с неизвестным временем считаются после списания.</p>}
       </details>
       {scenario === 'stress' && !input.cal.accountBook?.stress && <p className="mt-2 px-1 text-[13px] text-muted">Добавьте непредвиденный расход в настройках счетов для стресс-сценария.</p>}
       {s && (

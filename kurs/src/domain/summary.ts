@@ -136,7 +136,7 @@ export function alerts(opts: {
       });
     }
     if (e.kind === 'income' && e.date <= opts.now && e.date >= addDays(opts.now, -10) && !opts.marks[e.key]?.done && (e.incomeKind === 'bonusQuarter' || e.incomeKind === 'bonusYear' || e.incomeKind === 'vacation' || e.incomeKind === 'thirteenth')) {
-      out.push({ id: e.key, tone: 'good', event: e, action: 'income', title: `Ожидается: ${e.title}`, text: 'Пришла? В тот же день распределите: резерв по формуле, остальное — досрочно в долг.' });
+      out.push({ id: e.key, tone: 'good', event: e, action: 'income', title: `Ожидается: ${e.title}`, text: 'Проверьте зачисление в банке. После прихода сверяйте обязательные платежи, резерв и безопасную сумму досрочки.' });
     }
   }
   // траты моста на кредитке — по плану, не нарушение
@@ -151,6 +151,10 @@ export function alerts(opts: {
   }
   for (const c of opts.checklist ?? []) {
     if (opts.checks?.[c.id]?.done ?? c.done) continue;
+    if (c.afterReceiptKey) {
+      if (opts.marks[c.afterReceiptKey]?.done) out.push({ id: `check:${c.id}`, tone: 'info', action: 'check', title: c.title, text: c.note });
+      continue;
+    }
     const due = checklistDue(c, opts.now);
     if (due === 'overdue' || due === 'soon') out.push({ id: `check:${c.id}`, tone: due === 'overdue' ? 'warn' : 'info', action: 'check', title: c.title, text: c.due ? `Срок — ${c.due.length === 7 ? c.due : ddmm(c.due)}${c.note ? `. ${c.note}` : ''}` : c.note });
   }

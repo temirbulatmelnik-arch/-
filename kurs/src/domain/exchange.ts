@@ -1,4 +1,4 @@
-import { accountOptions, appendOperations, bookOperationAllowed, budgetExpenses, cents, EMPTY_BOOK, LIFE_ACCOUNT, monthDebtActivity, RESERVE_ACCOUNT, validAmount, validBankBalance, validDate, validLoanReview, validSplitDebit, validSplitPlan, type AccountBook, type CashAccount } from './accounts';
+import { accountOptions, appendOperations, bookOperationAllowed, budgetExpenses, cents, EMPTY_BOOK, LIFE_ACCOUNT, monthDebtActivity, RESERVE_ACCOUNT, rubles, validAmount, validBankBalance, validDate, validLoanReview, validSplitDebit, validSplitPlan, type AccountBook, type CashAccount } from './accounts';
 import { validPayroll, with2027Unit, type PayrollProfile } from './payroll';
 import { annualIncome } from './annualIncome';
 // Файл обмена с чатом «Финансы»: один формат в обе стороны.
@@ -77,7 +77,7 @@ export interface ExchangeFile {
   incomes?: IncomeTemplate[];
   /** события календаря по key: amount и date — плановые, paid — фактически оплачено или пришло */
   /** событие ищется по key, а без него — по названию, дате (±7 дней) и сумме */
-  calendar?: { key?: string; date?: string; title?: string; kind?: string; amount?: number; done?: boolean; paid?: number; paidFrom?: string; paidDate?: string; reset?: boolean; resetAmount?: boolean; approx?: boolean; exact?: boolean; planned?: string; dateMode?: string; accountId?: string; economicType?: CalEvent['economicType']; projection?: CalEvent['projection']; accrualPeriod?: string; nominalDate?: string; expectedPayDate?: string; actualPayDate?: string; confidence?: CalEvent['confidence']; incomeStatus?: IncomeStatus; manuallyAdjusted?: boolean }[];
+  calendar?: { key?: string; date?: string; title?: string; kind?: string; amount?: number; done?: boolean; paid?: number; paidFrom?: string; paidDate?: string; reset?: boolean; resetAmount?: boolean; approx?: boolean; exact?: boolean; planned?: string; dateMode?: string; accountId?: string; economicType?: CalEvent['economicType']; projection?: CalEvent['projection']; accrualPeriod?: string; nominalDate?: string; expectedPayDate?: string; actualPayDate?: string; confidence?: CalEvent['confidence']; incomeStatus?: IncomeStatus; manuallyAdjusted?: boolean; reviewFor?: string | null; possibleExtra?: number; incomeEvidence?: object }[];
   /** разовые платежи и поступления */
   events?: ({ key?: string; date?: string; title?: string; amount?: number; kind?: 'payment' | 'income'; dateMode?: CalEvent['dateMode']; note?: string; debtId?: string } & Del)[];
   expensesFrom?: string;
@@ -95,6 +95,7 @@ export interface ExchangeFile {
   strategy?: StrategySection[];
   strategyEdits?: { title: string; find: string; replace: string }[];
   rules?: string[];
+  ruleEdits?: { find: string; replace: string }[];
 }
 
 const r0 = (n: number) => Math.round(n);
@@ -145,6 +146,12 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
   const day = dayBudget(expenses, s.debts, s.weeklyOverrides, now);
   // тот же вход прогноза, что у календаря и «Хватит ли» в приложении: остаток дня в календаре = status.coverage
   const input = coverageInput(s, led);
+  const debtRows = s.debts.map(d => {
+    const { anchor, ...row } = led.debtBalances[d.id];
+    return { id: d.id, ...row, anchor: anchor ? { amount: anchor.amount, date: anchor.date, at: anchor.at } : null };
+  });
+  const basis = debtRows.reduce((sum, row) => sum + cents(row.basis), 0);
+  const estimated = debtRows.reduce((sum, row) => sum + cents(row.estimated), 0);
   const cov = coverage(input, now);
   const byScenario = (scenario: 'cautious' | 'stress') => {
     const p = coverage(input, now, scenario);
@@ -177,6 +184,7 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
     about: 'Файл обмена приложения «Курс». status — сводка только для чтения. Остальные разделы можно менять: в ответ присылай этот же формат только с изменениями.',
     status: {
       totalDebt: r0(Object.values(led.debtBalances).reduce((sum, d) => sum + d.estimated, 0)),
+      ...(!short ? { debtReconciliation: { asOf: now, basis: rubles(basis), estimated: rubles(estimated), delta: rubles(estimated - basis), rows: debtRows } } : {}),
       phase: { id: phase.id, title: phase.title, weekly: phase.weekly, monthly: phase.monthly },
       week: { from: week.monday, to: week.sunday, ...weekFields(s, week.monday, led.card) },
       // сегодняшний день: норма, траты по источникам и сколько ещё можно — то же число, что в кольце на «Сегодня»
@@ -207,6 +215,7 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
           .flatMap(reportYear => [incomeReport(reportYear, 'base'), incomeReport(reportYear, 'cautious')]) } : {}),
         ...(!short && s.work ? { payUnitScenarios: compare2027Coverage(input, now).map(scenario => ({
           id: scenario.id, unit: scenario.unit, to: scenario.to, min: Math.min(scenario.start, scenario.min?.balance ?? scenario.start),
+          minDate: scenario.min && scenario.min.balance < scenario.start ? scenario.min.date : now,
           shortage: scenario.shortage, accountRisk: scenario.accountRisk,
         })) } : {}),
         safePrepayment: Object.fromEntries(accountOptions(s.accountBook).map(a => [a.id, safePrepayment(input, now, a.id)])),
@@ -244,6 +253,11 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
         ...(status ? { incomeStatus: status } : {}), ...(e.planned ? { planned: e.planned } : {}),
         ...(e.accountId ? { accountId: e.accountId } : {}), ...(e.economicType ? { economicType: e.economicType } : {}),
         ...(e.projection ? { projection: e.projection } : {}),
+        ...(e.possibleExtra ? { possibleExtra: e.possibleExtra } : {}),
+        ...(e.payroll ? { incomeEvidence: { recorded: !!m?.done, documented: !!e.payroll.documented,
+          gross: e.payroll.gross, grossSource: e.payroll.actualGrossKnown ? 'document' : 'estimate',
+          tax: e.payroll.tax, taxSource: e.payroll.actualTaxKnown ? 'document' : 'estimate',
+          ...(e.payroll.taxDeduction ? { deduction: e.payroll.taxDeduction, deductionSource: 'estimate' } : {}) } } : {}),
         ...(status === 'conditional' ? { confidence: 'estimate' as const } : e.confidence ? { confidence: e.confidence } : {}),
         ...(e.accrualPeriod ? { accrualPeriod: e.accrualPeriod, nominalDate: e.nominalDate, expectedPayDate: e.expectedPayDate,
           actualPayDate: m?.done ? paidOn(e, m) : e.payroll?.actualPayDate } : {}),
@@ -602,13 +616,15 @@ function findEvent(p: NonNullable<ExchangeFile['calendar']>[number], list: CalEv
 const stepCalendar: Step = (f, s, ctx) => {
   const lines: string[] = [];
   if (!f.calendar) return { lines, patch: {} };
-  const list = eventsBetween(s, addDays(ctx.now, -120), addDays(ctx.now, 400));
+  const overridesForLookup = f.calendar.some(row => row.reviewFor !== undefined)
+    ? Object.fromEntries(Object.entries(s.overrides).map(([key, row]) => [key, { ...row, reviewFor: undefined }])) : s.overrides;
+  const list = eventsBetween({ ...s, overrides: overridesForLookup }, addDays(ctx.now, -120), addDays(ctx.now, 400));
   const known = new Map(list.map(e => [e.key, e]));
   const marks = { ...s.marks };
   const overrides = { ...s.overrides };
   let mc = false, oc = false;
   for (const p of f.calendar) {
-    if ((p.resetAmount || p.projection || p.economicType === 'non_income') && (!p.key || !known.has(p.key))) {
+    if ((p.resetAmount || p.projection || p.reviewFor !== undefined || p.economicType === 'non_income') && (!p.key || !known.has(p.key))) {
       lines.push(`Не найден точный ключ ${p.key ?? ''}, изменение пропущено`);
       continue;
     }
@@ -659,6 +675,15 @@ const stepCalendar: Step = (f, s, ctx) => {
       if (['conditional', 'internal_transfer', 'review'].includes(p.projection ?? '') && o.projection !== p.projection) {
         o.projection = p.projection; changes.push(p.projection === 'conditional' ? 'только при подтверждении условий' :
           p.projection === 'internal_transfer' ? 'внутренний перевод без расхода' : 'предварительно, нужна сверка');
+      }
+      if (p.reviewFor === null && o.reviewFor != null && !mark?.done) { delete o.reviewFor; changes.push('отвязать возможную доплату'); }
+      else if (typeof p.reviewFor === 'string' && p.reviewFor !== o.reviewFor && e.kind === 'payment' && o.projection === 'review' && !mark?.done) {
+        const target = known.get(p.reviewFor);
+        if (target?.kind === 'payment' && target.key !== e.key && !target.projection && target.debtId
+            && (!e.debtId || e.debtId === target.debtId) && !marks[target.key]?.done && target.date === e.date) {
+          o.reviewFor = target.key;
+          changes.push(`проверять как возможную доплату к «${target.title}»`);
+        }
       }
       if (p.economicType === 'non_income' && e.kind === 'income' && o.economicType !== 'non_income') {
         o.economicType = 'non_income'; changes.push('исключить из доходов, сохранить денежную историю');
@@ -957,21 +982,23 @@ const stepChecklist: Step = (f, s, ctx) => {
     }
     const status = p.status && ['review', 'payment', 'clarify'].includes(p.status) ? p.status : undefined;
     const eventKey = typeof p.eventKey === 'string' && p.eventKey ? p.eventKey : undefined;
+    const afterReceiptKey = typeof p.afterReceiptKey === 'string' ? p.afterReceiptKey : undefined;
     if (i < 0) {
       if (!p.title) continue;
-      list.push({ id: p.id, title: p.title, ...(status ? { status } : {}), ...(eventKey ? { eventKey } : {}), ...(p.note ? { note: p.note } : {}), ...(p.due ? { due: p.due } : {}) });
+      list.push({ id: p.id, title: p.title, ...(status ? { status } : {}), ...(eventKey ? { eventKey } : {}), ...(afterReceiptKey ? { afterReceiptKey } : {}), ...(p.note ? { note: p.note } : {}), ...(p.due ? { due: p.due } : {}) });
       lc = true;
       lines.push(`Новый пункт: ${p.title}${p.due ? `, срок ${p.due}` : ''}`);
     } else {
       const cur = list[i];
       const changes: string[] = [];
       if (p.title && p.title !== cur.title) changes.push(`«${p.title}»`);
-      if (p.due !== undefined && p.due !== cur.due) changes.push(`срок ${p.due || 'без срока'}`);
-      if (p.note !== undefined && p.note !== cur.note) changes.push('пояснение');
+      if (p.due !== undefined && (p.due || undefined) !== cur.due) changes.push(`срок ${p.due || 'без срока'}`);
+      if (p.note !== undefined && (p.note || undefined) !== cur.note) changes.push('пояснение');
       if (status && status !== cur.status) changes.push('статус');
       if (eventKey && eventKey !== cur.eventKey) changes.push('связанный платёж');
+      if (afterReceiptKey !== undefined && afterReceiptKey !== (cur.afterReceiptKey ?? '')) changes.push('начало задачи после зачисления');
       if (changes.length) {
-        list[i] = { ...cur, ...(status ? { status } : {}), ...(eventKey ? { eventKey } : {}), ...(p.title ? { title: p.title } : {}), ...(p.due !== undefined ? { due: p.due || undefined } : {}), ...(p.note !== undefined ? { note: p.note || undefined } : {}) };
+        list[i] = { ...cur, ...(status ? { status } : {}), ...(eventKey ? { eventKey } : {}), ...(afterReceiptKey !== undefined ? { afterReceiptKey: afterReceiptKey || undefined } : {}), ...(p.title ? { title: p.title } : {}), ...(p.due !== undefined ? { due: p.due || undefined } : {}), ...(p.note !== undefined ? { note: p.note || undefined } : {}) };
         lc = true;
         lines.push(`${cur.title}: ${changes.join(', ')}`);
       }
@@ -1010,6 +1037,17 @@ const stepStrategy: Step = (f, s) => {
   if (Array.isArray(f.rules) && !same(f.rules, s.rules)) {
     patch.rules = f.rules.filter(r => typeof r === 'string' && r.trim());
     lines.push(`Правила: ${patch.rules.length}`);
+  }
+  if (Array.isArray(f.ruleEdits)) {
+    const original = patch.rules ?? s.rules;
+    const rules = original.map(rule => {
+      const edit = f.ruleEdits?.find(row => row?.find === rule && typeof row.replace === 'string' && row.replace.trim());
+      return edit?.replace ?? rule;
+    });
+    if (!same(rules, original)) {
+      patch.rules = rules;
+      lines.push('Обновлены совпавшие правила');
+    }
   }
   return { lines, patch };
 };

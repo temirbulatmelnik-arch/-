@@ -89,3 +89,20 @@ it('compares scenarios on identical exact dates, separating conditional receipts
   expect(rows[1].flowsOnComparisonDate.conditionalIncome).toBe(0);
   expect(rows[0].closingOnComparisonDate).toBeGreaterThanOrEqual(rows[1].closingOnComparisonDate);
 });
+
+it('budgets an unconfirmed supplement under one payment key, without an extra disbursement', async () => {
+  const { eventsBetween } = await import('./calendar');
+  const regular = { ...payment, key: 'pay:sample:2026-11', debtId: 'sample' };
+  const review = { ...payment, key: 'review:sample', amount: 1200, accountId: undefined };
+  const state = input([regular, review], { debit: 8800, reserve: 350000, life: 1000 });
+  state.cal.overrides = { [review.key]: { projection: 'review', reviewFor: regular.key } };
+  expect(eventsBetween(state.cal, payment.date, payment.date).filter(e => e.kind === 'payment'))
+    .toMatchObject([{ key: regular.key, amount: 8000, possibleExtra: 1200 }]);
+  const run = (scenario: 'base' | 'cautious' | 'stress') => coverage(state, date, scenario, payment.date);
+  expect(run('base').paymentFunding).toMatchObject([{ accountId: 'debit', amount: 8000, shortfall: 0 }]);
+  expect(run('cautious').paymentFunding).toMatchObject([{ accountId: 'debit', amount: 9200, shortfall: 400 }]);
+  expect(run('stress').paymentFunding).toMatchObject([{ accountId: 'debit', amount: 9200, shortfall: 400 }]);
+  state.marks[regular.key] = { done: true, at: payment.date + 'T06:00:00Z', paidDate: payment.date, amount: 9200 };
+  state.cal.marks = state.marks;
+  expect(run('cautious').paymentFunding).toEqual([]);
+});

@@ -72,6 +72,24 @@ function Body({ d }: { d: Debt }) {
           {projected.confirmed == null ? 'Банковская сверка не подтверждена' : <>В банке <Money value={projected.confirmed} /> · операций после сверки <Money value={projected.delta} sign /></>}
           {projected.unknownPrincipal > 0 && <> · требуется разбивка <Money value={projected.unknownPrincipal} /></>}
         </p>
+        <details className="mt-3 rounded-xl bg-surface-2 p-3 text-[13px]">
+          <summary className="font-medium text-sea">Из чего состоит оценка долга</summary>
+          <p className="mt-2">База расчёта <Money value={projected.basis} kopecks />
+            {projected.anchor ? <> · {ddmmyyyy(projected.anchor.date)}
+              {projected.anchor.at && <> · {new Date(projected.anchor.at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</>}
+              {projected.basisKind === 'recorded' && ' · отметка об обновлении'}</> : ' · дата сверки отсутствует'}</p>
+          <p>После точки отсчёта: покупки <Money value={projected.added.purchases} kopecks /> · комиссии <Money value={projected.added.fees} kopecks />
+            {' · '}проведённые проценты <Money value={projected.added.interest} kopecks /></p>
+          <p>Выдачи <Money value={projected.added.loanDisbursements} kopecks /> · погашено тело <Money value={projected.added.principal} kopecks />
+            {' · '}возвраты <Money value={projected.added.refunds} kopecks /></p>
+          <p>Оценочные проценты <Money value={projected.estimatedInterest} kopecks /> · итог <Money value={projected.estimated} kopecks /></p>
+          {Object.values(projected.alreadyCovered).some(Boolean) && <p className="mt-2 text-muted">
+            В базе или до сверки: покупки <Money value={projected.alreadyCovered.purchases} kopecks /> · комиссии <Money value={projected.alreadyCovered.fees} kopecks />
+            {' · '}прочие движения <Money value={projected.alreadyCovered.interest + projected.alreadyCovered.loanDisbursements + projected.alreadyCovered.refunds + projected.alreadyCovered.principal} kopecks />
+          </p>}
+          {Object.values(projected.missingTime).some(Boolean) && <p className="text-warn">Часть операций относится к дню сверки. Для них точное время не установлено.</p>}
+          {!!projected.classifiedLoanHistory && <p className="text-muted">Исторические выдачи без повторной проводки <Money value={projected.classifiedLoanHistory} kopecks /></p>}
+        </details>
         <Field label="Счёт списания по графику">
           <select className="field" value={book.paymentAccounts[d.id] ?? ''} onChange={e => useStore.getState().setPaymentAccount(d.id, e.target.value)}>
             <option value="">Не указан</option>
@@ -101,7 +119,9 @@ function Body({ d }: { d: Debt }) {
             <Field label="Погашено тела долга по выписке"><input className="field" inputMode="decimal" value={principal} onChange={e => setPrincipal(e.target.value)} /></Field>
             <Field label="Проценты по выписке"><input className="field" inputMode="decimal" value={interestPart} onChange={e => setInterestPart(e.target.value)} /></Field>
             <Field label="Комиссия по выписке"><input className="field" inputMode="decimal" value={fee} onChange={e => setFee(e.target.value)} /></Field>
-            <p className="text-[13px] text-muted">По осторожному прогнозу доступно до <Money value={safe} />. После использования всего лимита целевой запас может уменьшиться.</p>
+            <p className="text-[13px] text-muted">{safe > 0
+              ? <>По осторожному прогнозу доступно до <Money value={safe} /> при сохранении запаса 20 000 ₽.</>
+              : 'Безопасный лимит досрочки сейчас 0 ₽. Сверьте ближайшие платежи и поступления.'}</p>
             <PrimaryButton disabled={extraValue <= 0 || extraValue > safe || principalValue == null} onClick={() => {
               const ok = prepay(d.id, extraValue, account, { principal: principalValue!, interest: parseAmount(interestPart) ?? undefined, fee: parseAmount(fee) ?? undefined });
               if (ok) { setExtra(''); setPrincipal(''); setInterestPart(''); setFee(''); }

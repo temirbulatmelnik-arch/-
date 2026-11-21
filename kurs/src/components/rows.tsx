@@ -68,6 +68,7 @@ export function EventRow({ e, mark, now, onClick, onToggle, showDate = true }: {
               : e.projection === 'conditional' ? 'условная досрочка'
               : e.projection === 'internal_transfer' ? 'между своими счетами'
               : e.projection === 'review' ? 'нужна сверка'
+              : e.possibleExtra ? 'возможна доплата'
               : u === 'done' ? (g === 'income' ? 'пришло' : g === 'weekly' ? 'долито' : 'оплачено')
               : e.dateMode === 'month' ? 'дата не известна' : relDays(now, e.date)}
             {missed ? ', не отмечено' : ''}

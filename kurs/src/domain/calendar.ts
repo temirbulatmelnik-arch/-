@@ -1,5 +1,6 @@
 // Календарь платежей и поступлений: разовые события из плана + ежемесячный шаблон + воскресные пополнения карты жизни.
 import type { AccountBook } from './accounts';
+import { kopecks } from './accounts';
 import { addDays, dayIn, monthKey, weekStart } from './dates';
 import type { CalEvent, CalendarOverride, Debt, EventMark, FixedItem, IncomeKind, IncomeTemplate, WeeklyOverride } from './types';
 import { bridgeWeek, type Bridge } from './bridge';
@@ -180,7 +181,7 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
   });
   const accounts = input.accountBook?.paymentAccounts;
   const rank = { payment: 0, weekly: 1, income: 2 } as const;
-  return out
+  const dated = out
     .filter(e => !replaced.has(e.key))
     .map(e => {
       const loan = journalLoans.get(e.key);
@@ -215,7 +216,22 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
         economicType: custom?.economicType ?? e.economicType, projection: custom?.projection ?? e.projection,
         approx: scenario || (!fact && custom?.amount == null && e.approx),
         moved: !fact && custom?.date != null && custom.date !== e.date };
-    })
+    });
+  const datedByKey = new Map(dated.map(e => [e.key, e]));
+  const linkedReviews = new Set<string>();
+  const possibleExtras = new Map<string, number>();
+  for (const event of dated) {
+    const targetKey = ov[event.key]?.reviewFor;
+    if (!targetKey || targetKey === event.key || event.kind !== 'payment' || event.projection !== 'review' ||
+        event.amount <= 0 || input.marks?.[event.key]?.done) continue;
+    const target = datedByKey.get(targetKey);
+    if (target?.kind !== 'payment' || target.date !== event.date || target.projection || !target.debtId ||
+        (event.debtId && event.debtId !== target.debtId)) continue;
+    linkedReviews.add(event.key);
+    if (!input.marks?.[target.key]?.done) possibleExtras.set(target.key, kopecks((possibleExtras.get(target.key) ?? 0) + event.amount));
+  }
+  return dated.filter(e => !linkedReviews.has(e.key))
+    .map(e => possibleExtras.has(e.key) ? { ...e, possibleExtra: possibleExtras.get(e.key) } : e)
     .filter(e => e.date >= rangeFrom && e.date <= rangeTo)
     .sort((a, b) => a.date.localeCompare(b.date) || rank[a.kind] - rank[b.kind] || a.title.localeCompare(b.title));
 }

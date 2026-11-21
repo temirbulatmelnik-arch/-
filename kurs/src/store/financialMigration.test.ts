@@ -112,7 +112,10 @@ it('classifies historical loans and card fees without moving balances or repeati
   const after = store.getState();
   expect(calc.eventsBetween(after, date, date).filter(e => e.key === key)).toMatchObject([{ economicType: 'loan_disbursement', amount: 780 }]);
   expect(summary.monthDebtActivity(after.accountBook, after.expenses, date)).toMatchObject({ loanDisbursements: 780, creditPurchases: 0, fees: 19 });
-  expect(ledger(after)).toEqual(ledger(before));
+  const actual = ledger(after), original = ledger(before);
+  expect(actual.debtBalances[debt.id]).toMatchObject({ estimated: original.debtBalances[debt.id].estimated, classifiedLoanHistory: 780 });
+  expect(actual.card).toBe(original.card);
+  expect(actual.reserve).toBe(original.reserve);
   expect(after.marks).toEqual(before.marks);
   expect(after.expenses).toEqual(before.expenses);
   expect(after.accountBook.operations).toEqual([]);
@@ -155,4 +158,46 @@ it('updates only matching strategy text and preserves all payment and checklist 
   expect(store.getState().marks).toEqual(before.marks);
   expect(store.getState().checks).toEqual(before.checks);
   expect(previewExchange(file, store.getState(), date)).toEqual([]);
+});
+
+it('exports the exact debt delta and separates post-anchor charges from amounts already in the base', async () => {
+  const credit = { ...debt, kind: 'card' as const, balance: 100000.25, rate: 0.365, updatedAt: '2026-11-19T10:00:00Z',
+    bankBalance: { amount: 100000.25, date: '2026-11-19', at: '2026-11-19T10:00:00Z', includedIds: ['included'] } };
+  const spend = (id: string, date: string, amount: number, createdAt?: string) =>
+    ({id,date,amount,createdAt,source:'credit' as const,category:'fixed' as const,creditCard:credit.id});
+  const store = await reopen(5, { ...old, debts: [credit], expenses: [
+    spend('included', '2026-11-19', 34), spend('unknown-time','2026-11-19', 25),
+    spend('later', date, 60), spend('fee', date, 12.35),
+  ], accountBook: { ...EMPTY_BOOK, creditChargeKinds: { fee: 'fee' } } });
+  const out = buildExchange(store.getState(), date, { short: false });
+  expect(out.status?.debtReconciliation).toMatchObject({
+    basis: 100000.25, estimated: 100172.60, delta: 172.35,
+    rows: [{ id: credit.id, basisKind: 'bank', added: { purchases: 60, fees: 12.35 },
+      alreadyCovered: { purchases: 34 }, missingTime: { purchases: 25 }, estimatedInterest: 100 }],
+  });
+  expect(out.status?.totalDebt).toBe(100173);
+});
+
+it('links a review payment idempotently, edits only notes, and waits for booked income before raising a task', async () => {
+  const { alerts } = await import('../domain/summary');
+  const main = { key: 'scheduled-test', title: 'Оплата по графику', kind: 'payment', amount: 600, date, dateMode: 'exact', debtId: debt.id, note: 'Старое пояснение' } as const;
+  const review = { ...main, key: 'review-test', amount: 30 };
+  const store = await reopen(5, { ...old, oneOff: [main, review], checklist: [{id:'check',title:'Сверить', due: date }] });
+  const patch = exchange({
+    calendar: [{ key: review.key, projection: 'review', reviewFor: main.key }],
+    events: [{ key: main.key, note: 'Сверить карту' }],
+    checklist: [{ id: 'check', due: '', afterReceiptKey: 'expected-receipt' }],
+  });
+  const before = store.getState();
+  const selected = new Set(previewExchange(patch, before, date).map(entry => entry.id));
+  store.getState().applySync(applyExchange(patch, before, date, selected, () => 'test'));
+  const after = store.getState();
+  expect(previewExchange(patch, after, date)).toEqual([]);
+  expect(ledger(after)).toEqual(ledger(before));
+  expect(after.marks).toEqual(before.marks);
+  expect(after.oneOff.find(e => e.key === main.key)).toEqual({ ...main, note: 'Сверить карту' });
+  const alert = (marks: typeof before.marks) => alerts({ cal: after, marks, checklist: after.checklist, now: date,
+    checks: after.checks, lastBackupAt: date, lastIcsAt: date, nowMs: Date.parse(at), expenses: [], wishes: [] });
+  expect(alert(after.marks).map(r => r.id)).not.toContain('check:check');
+  expect(alert({ ...after.marks, 'expected-receipt': { done: true, at, paidDate: date, amount: 200 } }).map(r => r.id)).toContain('check:check');
 });

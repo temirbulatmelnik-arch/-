@@ -86,6 +86,7 @@ export interface WorkPay {
   documentarySource?: string;
   actualGrossKnown?: boolean;
   actualTaxKnown?: boolean;
+  taxDeduction?: number;
   alternatePayDate?: string;
   recordedForecast?: number;
   gross: number;
@@ -336,7 +337,8 @@ export function workPayments(profile: PayrollProfile, from: string, to: string, 
     const known = profile.taxBase?.[year];
     const gross = actual?.gross ?? p.gross;
     const before = bases.get(year) ?? (known?.base ?? 0);
-    const taxable = Math.max(0, gross - (profile.deductions?.[p.key] ?? 0));
+    const taxDeduction = profile.deductions?.[p.key];
+    const taxable = Math.max(0, gross - (taxDeduction ?? 0));
     const within = !known || date > known.asOf;
     const tax = actual?.tax ?? (within ? progressiveTax(before + taxable) - progressiveTax(before) : progressiveTax(taxable));
     if (within) bases.set(year, before + taxable);
@@ -344,7 +346,7 @@ export function workPayments(profile: PayrollProfile, from: string, to: string, 
     const net = Math.max(0, kopecks(gross - tax - (actual?.otherWithheld ?? 0)));
     return [{ ...p, gross, tax, net, actualPayDate, actualNet, actualMonth: actualNet != null ? monthKey(date) : undefined,
       documented: actual?.net != null, documentarySource: actual?.verifiedBy,
-      actualGrossKnown: actual?.gross != null, actualTaxKnown: actual?.tax != null, recordedForecast: actual?.expectedNet,
+      actualGrossKnown: actual?.gross != null, actualTaxKnown: actual?.tax != null, taxDeduction, recordedForecast: actual?.expectedNet,
       ...(known || actualNet != null ? {} : { netRange: [kopecks(gross * 0.78), kopecks(gross * 0.87)] as [number, number] }) }];
   });
 }

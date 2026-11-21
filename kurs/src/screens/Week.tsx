@@ -226,7 +226,7 @@ export function Week() {
         const bonus = list.some(a => a.action === 'income' && a.event?.key === e.key);
         out.push({
           id: e.key, tone: 'in', kicker: old ? `Ожидалось ${ddmm(e.date)}` : 'Поступление сегодня', title: e.title, amount: <Money value={e.amount} approx={e.approx} sign />,
-          text: bonus ? 'Пришла? Распределите в тот же день: резерв по формуле, остальное в долг.' : undefined,
+          text: bonus ? 'Сверьте зачисление, обязательные платежи и безопасный лимит досрочки.' : undefined,
           primary: { label: 'Пришло', run: () => ui.set(bonus ? { bonus: { event: e } } : { event: e }) },
         });
       } else if (e.kind === 'weekly' && !closing && e.date >= addDays(now, -7)) {

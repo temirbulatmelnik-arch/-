@@ -1,4 +1,4 @@
-import { accountOptions, LIFE_ACCOUNT, RESERVE_ACCOUNT } from '../domain/accounts';
+import { accountOptions, LIFE_ACCOUNT } from '../domain/accounts';
 // Платёж, поступление или воскресное пополнение карты: отметить, поправить сумму и дату (у кредиток они плавают), распределить премию.
 import { CalendarDays, Undo2 } from 'lucide-react';
 import { useState } from 'react';
@@ -51,7 +51,7 @@ function Body({ e }: { e: CalEvent }) {
   // деньги под платёж уже перевели на карту — по умолчанию «с карты»
   const [from, setFrom] = useState<'reserve' | 'card'>(() => mark?.paidFrom ?? (heldKeys(useStore.getState().reserveLog, useStore.getState().marks).has(e.key) ? 'card' : 'reserve'));
   const book = useStore(s => s.accountBook);
-  const [account, setAccount] = useState(e.accountId ?? (from === 'card' ? LIFE_ACCOUNT : RESERVE_ACCOUNT));
+  const [account, setAccount] = useState(e.accountId ?? (e.kind === 'payment' ? '' : LIFE_ACCOUNT));
   const [paidDate, setPaidDate] = useState(now);
   const [principal, setPrincipal] = useState('');
   const [interest, setInterest] = useState('');
@@ -94,14 +94,19 @@ function Body({ e }: { e: CalEvent }) {
           {e.kind === 'payment' && !mark?.done && <Row label="Счёт списания">
             {accountOptions(book).find(option => option.id === e.accountId)?.name ?? 'Требует уточнения'}
           </Row>}
+          {!!e.possibleExtra && !mark?.done && <Row label="Диапазон до сверки">
+            <Money value={e.amount} kopecks />–<Money value={e.amount + e.possibleExtra} kopecks />
+          </Row>}
           {pay && <>
             <Row label="Расчётный период">{pay.accrualPeriod}</Row>
             <Row label="Номинальная дата">{ddmmyyyy(pay.nominalDate)}</Row>
             <Row label="Ожидаемая дата">{pay.documented && !pay.actualPayDate ? 'Дата требует сверки' : ddmmyyyy(pay.expectedPayDate)}</Row>
             {pay.alternatePayDate && <Row label="Альтернативная дата">{ddmmyyyy(pay.alternatePayDate)} · после подтверждения</Row>}
-            <Row label="Дата поступления">{pay.actualPayDate ? ddmmyyyy(pay.actualPayDate) : 'Не подтверждена'}</Row>
-            <Row label="Начислено">{!pay.documented || pay.actualGrossKnown ? <Money value={pay.gross} /> : 'Нет данных'}</Row>
-            <Row label="НДФЛ">{!pay.documented || pay.actualTaxKnown ? <Money value={pay.tax} /> : 'Нет данных'}</Row>
+            <Row label="Банковская отметка">{mark?.done ? (pay.actualPayDate ? ddmmyyyy(pay.actualPayDate) : 'Отмечено') : 'Ожидает сверки'}</Row>
+            {pay.documented && !mark?.done && pay.actualPayDate && <Row label="Дата по документам">{ddmmyyyy(pay.actualPayDate)}</Row>}
+            <Row label={pay.actualGrossKnown ? 'Начислено по листку' : 'Оценка начисления'}>{pay.gross ? <Money value={pay.gross} approx={!pay.actualGrossKnown} kopecks /> : 'Нет данных'}</Row>
+            <Row label={pay.actualTaxKnown ? 'НДФЛ по листку' : 'Оценка НДФЛ'}><Money value={pay.tax} approx={!pay.actualTaxKnown} kopecks /></Row>
+            {!!pay.taxDeduction && <Row label="Предполагаемый вычет"><Money value={pay.taxDeduction} approx /></Row>}
             <Row label="Основание">{pay.documentarySource ?? pay.source}</Row>
           </>}
           {e.dateMode !== 'month' && !mark?.done && actionableEvent(e) && <Row label="Осталось">{relDays(now, e.date)}</Row>}
@@ -149,9 +154,10 @@ function Body({ e }: { e: CalEvent }) {
             <div>
               <div className="mb-1.5 text-[12.5px] font-medium text-muted">Откуда оплачено</div>
               <select className="field" value={account} onChange={x => { setAccount(x.target.value); setFrom(x.target.value === LIFE_ACCOUNT ? 'card' : 'reserve'); }}>
+                <option value="">Выберите счёт по выписке</option>
                 {accountOptions(book).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
-              {account !== e.accountId && <button type="button" className="mt-2 text-[13px] text-sea" onClick={() => {
+              {account && account !== e.accountId && <button type="button" className="mt-2 text-[13px] text-sea" onClick={() => {
                 useStore.getState().setPaymentAccount(e.key, account);
                 toast('Счёт списания назначен');
               }}>Назначить счёт для этого платежа</button>}
@@ -172,8 +178,8 @@ function Body({ e }: { e: CalEvent }) {
               {part.label}<input className="field mt-1" inputMode="decimal" value={part.value} onChange={x => part.set(x.target.value)} />
             </label>)}
           </details>}
-          {isBonus(e) && <p className="text-[12.5px] leading-snug text-muted">Дальше — распределение премии: резерв до следующей премии, остальное сегодня же в долг.</p>}
-          <PrimaryButton onClick={done} disabled={value <= 0 || !paidDate || paidDate > now}>
+          {isBonus(e) && <p className="text-[12.5px] leading-snug text-muted">Распределение начинается после сверки зачисления. Досрочка доступна в пределах безопасного лимита.</p>}
+          <PrimaryButton onClick={done} disabled={value <= 0 || !paidDate || paidDate > now || (e.kind === 'payment' && !account)}>
             {e.kind === 'income' ? (isBonus(e) ? 'Пришла — распределить' : 'Пришло') : e.kind === 'weekly' ? 'Долил' : 'Оплачено'}
           </PrimaryButton>
           {e.kind === 'weekly' ? (

@@ -92,6 +92,7 @@ export interface CalEvent {
   accountId?: string;
   economicType?: 'income' | 'loan_disbursement' | 'debt_payment' | 'non_income';
   projection?: 'conditional' | 'internal_transfer' | 'review';
+  possibleExtra?: number;
   payroll?: import('./payroll').WorkPay;
   confidence?: 'confirmed' | 'regular' | 'estimate' | 'tentative';
   accrualPeriod?: string;
@@ -104,7 +105,7 @@ export interface CalEvent {
   planned?: string;
 }
 
-export type CalendarOverride = Pick<CalEvent, 'projection'> & { amount?: number; date?: string; economicType?: 'non_income' };
+export type CalendarOverride = Pick<CalEvent, 'projection'> & { amount?: number; date?: string; economicType?: 'non_income'; reviewFor?: string };
 
 export type IncomeKind = 'salary' | 'bonusMonthly' | 'advance' | 'bonusQuarter' | 'bonusYear' | 'vacation' | 'thirteenth' | 'other';
 
@@ -224,6 +225,7 @@ export interface ChecklistItem {
   /** YYYY-MM-DD или YYYY-MM */
   due?: string;
   eventKey?: string;
+  afterReceiptKey?: string;
   status?: 'review' | 'payment' | 'clarify';
   /** выполнено на момент составления плана */
   done?: boolean;

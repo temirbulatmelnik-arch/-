@@ -185,7 +185,8 @@ function includeIncome(e: CalEvent, scenario: Scenario): boolean {
 export function projectedEvent(e: CalEvent, scenario: Scenario): CalEvent | null {
   if (e.projection === 'conditional' || e.projection === 'internal_transfer' ||
       (e.projection === 'review' && e.kind !== 'income' && scenario === 'base')) return null;
-  if (e.kind !== 'income') return e;
+  if (e.kind !== 'income') return scenario !== 'base' && e.possibleExtra
+    ? { ...e, amount: rubles(cents(e.amount) + cents(e.possibleExtra)) } : e;
   if (!includeIncome(e, scenario)) return null;
   if (e.payroll?.vacationId && e.confidence === 'tentative' && scenario !== 'base') {
     return { ...e, amount: rubles(Math.round(cents(e.amount) * (scenario === 'cautious' ? 0.8 : 0.7))),
@@ -374,12 +375,18 @@ export function coverage(input: CoverageInput, from: string, scenario: Scenario 
 }
 
 export const COVERAGE_SCENARIOS = ['base', 'cautious', 'stress'] as const;
+export const SCENARIO_ASSUMPTIONS: Record<Scenario, string> = {
+  base: 'Условные доходы включены. Отпускные — по плановой оценке. Спорная доплата к обязательству не включена.',
+  cautious: 'Без условных доходов. Плановые отпускные — 80%. По спорным доплатам проверяется верхняя граница.',
+  stress: 'Без условных доходов. Плановые отпускные — 70% с задержкой на 14 дней. Учтены верхние границы платежей и заданный внеплановый расход.',
+};
 
 export function compareCoverage(input: CoverageInput, from: string, to: string) {
   if (to < from) return [];
   const scenarios = COVERAGE_SCENARIOS.map(scenario => ({ scenario, cov: coverage(input, from, scenario, to) }));
   const cautious = scenarios[1].cov;
   const comparisonDate = cautious.min && cautious.min.balance < cautious.start ? cautious.min.date : from;
+  const baseline = new Map(scenarios[0].cov.steps.filter(step => step.key).map(step => [step.key!, step]));
   return scenarios.map(({ scenario, cov }) => {
     const min = Math.min(cov.start, cov.min?.balance ?? cov.start);
     const flows = { forecastIncome: 0, conditionalIncome: 0, expenses: 0 };
@@ -388,8 +395,19 @@ export function compareCoverage(input: CoverageInput, from: string, to: string) 
       const group = step.kind !== 'income' ? 'expenses' : step.incomeStatus === 'conditional' ? 'conditionalIncome' : 'forecastIncome';
       flows[group] += cents(step.delta);
     }
+    const stepsByKey = new Map(cov.steps.filter(step => step.key).map(step => [step.key!, step]));
+    const changedFlows = scenario === 'base'
+      ? cov.steps.filter(step => step.incomeStatus === 'conditional').map(step => ({ key: step.key, title: step.title, date: step.date, amount: step.delta }))
+      : [...new Set([...baseline.keys(), ...stepsByKey.keys()])].flatMap(key => {
+        const a = baseline.get(key), b = stepsByKey.get(key);
+        if (a?.delta === b?.delta && a?.date === b?.date) return [];
+        return [{ key, title: (a ?? b)!.title, date: b?.date ?? a?.date, amount: b?.delta ?? 0, baseDate: a?.date, baseAmount: a?.delta ?? 0 }];
+      });
+    const criticalDates = cov.narrow.filter(step => step.balance < 0).slice(0, 5)
+      .map(({ date, title, balance }) => ({ date, title, balance }));
     return { scenario, from, to, min, minDate: cov.min && cov.min.balance < cov.start ? cov.min.date : from,
       firstShortage: cov.shortage, accountRisk: cov.accountRisk, bufferRisk: cov.bufferRisk,
+      assumptions: SCENARIO_ASSUMPTIONS[scenario], criticalDates, changedFlows,
       comparisonDate, closingOnComparisonDate: rubles(cents(cov.start) + flows.forecastIncome + flows.conditionalIncome + flows.expenses),
       flowsOnComparisonDate: { forecastIncome: rubles(flows.forecastIncome), conditionalIncome: rubles(flows.conditionalIncome), expenses: rubles(-flows.expenses) } };
   });

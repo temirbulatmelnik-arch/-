@@ -178,18 +178,6 @@ export function accountMovement(op: AccountOperation, id: string): number {
   }
 }
 
-interface DebtMovement { change: number; unknown: boolean }
-
-export function debtMovement(op: AccountOperation, debtId: string): DebtMovement {
-  if (!('debtId' in op) || op.debtId !== debtId || ('debtBooked' in op && op.debtBooked)) return { change: 0, unknown: false };
-  switch (op.type) {
-    case 'loan_disbursement': case 'interest': case 'fee': return { change: cents(op.amount), unknown: false };
-    case 'refund': return { change: -cents(op.amount), unknown: false };
-    case 'debt_payment': return { change: -cents(op.principal ?? 0), unknown: op.principal == null };
-    default: return { change: 0, unknown: false };
-  }
-}
-
 export function accountOptions(book: AccountBook): { id: string; name: string }[] {
   return [{ id: LIFE_ACCOUNT, name: 'Карта жизни' }, { id: RESERVE_ACCOUNT, name: 'Резерв' }, ...book.accounts];
 }
@@ -209,20 +197,46 @@ export function accountProjection(book: AccountBook, expenses: Expense[], now: s
 
 export function debtProjection(debt: Debt, expenses: Expense[], book: AccountBook, now: string, estimatedInterest = 0) {
   const anchor = debt.bankBalance ?? (debt.updatedAt ? { amount: debt.balance, date: debt.updatedAt.slice(0, 10), at: debt.updatedAt } : null);
-  let delta = 0;
+  const amounts = () => ({ purchases: 0, fees: 0, interest: 0, loanDisbursements: 0, principal: 0, refunds: 0 });
+  const after = amounts(), inBase = amounts(), unverified = amounts();
+  const includedIds = new Set(anchor?.includedIds);
+  const target = (entry: { id: string; date: string; at?: string }, booked = false) => {
+    if (booked || includedIds.has(entry.id)) return inBase;
+    if (!anchor || recordedAfter(entry, anchor)) return after;
+    if (entry.date === anchor.date && (!entry.at || !anchor.at)) return unverified;
+    return inBase;
+  };
   let unknown = 0;
   for (const op of book.operations) {
-    if (op.status !== 'confirmed' || op.date > now || (anchor && !recordedAfter(op, anchor))) continue;
-    const move = debtMovement(op, debt.id);
-    delta += move.change;
-    if (move.unknown) unknown += cents(op.amount);
+    if (op.status !== 'confirmed' || op.date > now || !('debtId' in op) || op.debtId !== debt.id) continue;
+    const totals = target(op, 'debtBooked' in op && op.debtBooked === true);
+    switch (op.type) {
+      case 'loan_disbursement': totals.loanDisbursements += cents(op.amount); break;
+      case 'interest': totals.interest += cents(op.amount); break;
+      case 'fee': totals.fees += cents(op.amount); break;
+      case 'refund': totals.refunds += cents(op.amount); break;
+      case 'debt_payment':
+        totals.principal += cents(op.principal ?? 0);
+        if (totals === after && op.principal == null) unknown += cents(op.amount);
+        break;
+    }
   }
   for (const e of expenses) {
     if (e.source !== 'credit' || e.creditCard !== debt.id || e.date > now) continue;
-    if (!anchor || recordedAfter({ ...e, at: e.occurredAt ?? e.createdAt }, anchor)) delta += cents(e.amount);
+    const totals = target({ ...e, at: e.occurredAt ?? e.createdAt });
+    const kind = book.creditChargeKinds?.[e.id];
+    totals[kind === 'interest' ? 'interest' : kind === 'fee' ? 'fees' : 'purchases'] += cents(e.amount);
   }
+  const delta = after.purchases + after.fees + after.interest + after.loanDisbursements - after.principal - after.refunds;
   const estimated = Math.max(0, kopecks(debt.balance + rubles(delta) + estimatedInterest));
+  const toRubles = (row: ReturnType<typeof amounts>) => Object.fromEntries(
+    Object.entries(row).map(([key, value]) => [key, rubles(value)])) as ReturnType<typeof amounts>;
+  const linked = new Set(book.operations.filter(op => op.status === 'confirmed' && op.type === 'loan_disbursement').map(op => op.eventKey));
+  const archivedLoans = (book.historicalLoans ?? []).filter(row => row.date <= now && row.debtId === debt.id && !linked.has(row.eventKey));
   return { confirmed: debt.bankBalance?.amount ?? null, anchor, estimated, estimatedInterest, delta: rubles(delta),
+    basis: debt.balance, basisKind: debt.bankBalance ? 'bank' as const : anchor ? 'recorded' as const : 'undated' as const,
+    added: toRubles(after), alreadyCovered: toRubles(inBase), missingTime: toRubles(unverified),
+    classifiedLoanHistory: rubles(archivedLoans.reduce((sum, row) => sum + cents(row.amount), 0)),
     unknownPrincipal: rubles(unknown), difference: debt.bankBalance ? kopecks(estimated - debt.bankBalance.amount) : null };
 }
 
