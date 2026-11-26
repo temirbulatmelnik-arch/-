@@ -113,3 +113,27 @@ it('counts a documented historical income once and retains both holiday payments
   const cautious = annualIncome(cal, 2027, '2026-11-20', 'cautious');
   expect(base.months[2].total).toBeGreaterThan(cautious.months[2].total!);
 });
+
+it('рассчитывает условную квартальную премию по графику и сохраняет один документальный факт', () => {
+  const key = 'inc:bonusQuarter:2027-04';
+  const profile = { ...model, quarterlyBonus: { from: '2027-01-01', months: [4, 7, 10], day: 20, gross: 100000 } };
+  expect(workPayments(profile, '2027-04-01', '2027-04-30').filter(p => p.key === key)).toMatchObject([
+    { gross: 100000, tax: 13000, net: 87000, confidence: 'estimate' },
+  ]);
+  expect(workPayments({ ...profile, actual: { [key]: { asOf: '2027-04-21', payDate: '2027-04-21', net: 98000 } } },
+    '2027-04-01', '2027-04-30').filter(p => p.key === key)).toMatchObject([{ actualNet: 98000, actualPayDate: '2027-04-21' }]);
+});
+
+it('сверяет листок отдельно с прогнозом, банковской проводкой и ручной отметкой', async () => {
+  const { auditPayroll } = await import('./payrollAudit');
+  const key = 'inc:advance:2026-11';
+  const date = '2026-11-25';
+  const profile = { ...model, actual: { [key]: { asOf: date, payDate: date, net: 43500, expectedNet: 43600, gross: 50000 } } };
+  const income = { id: 'bank', date, eventKey: key, accountId: 'life', amount: 43501, type: 'income', status: 'confirmed',
+    origin: 'bank', fundingSource: 'own' } as const;
+  expect(auditPayroll(profile, [income], {}, 2026)).toMatchObject({ withBank: 1, rows: [{ net: 43500, tax: null,
+    plannedDelta: -100, plannedBasis: 'recorded', bank: { evidence: 'bank', amount: 43501 }, bankDelta: 1 }] });
+  expect(auditPayroll(profile, [], { [key]: { done: true, at: date, amount: 43500, paidDate: date } }, 2026))
+    .toMatchObject({ withMark: 1, withBank: 0, rows: [{ bank: { evidence: 'marked' } }] });
+  expect(auditPayroll(profile, [], {}, 2026)).toMatchObject({ undocumentedBank: 1, rows: [{ bank: null }] });
+});

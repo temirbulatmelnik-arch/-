@@ -14,6 +14,7 @@ export interface PdfStatement {
   lines: PdfLine[];
   /** исходящий остаток, если нашёлся */
   closingBalance: number | null;
+  openingBalance: number | null;
   /** дата конца периода выписки */
   periodEnd: string | null;
   raw: string;
@@ -47,18 +48,24 @@ const stripDates = (s: string) => s.replace(/\b\d{2}[./]\d{2}[./]\d{2,4}\b/g, ' 
 export function parseStatementText(raw: string): PdfStatement {
   const lines: PdfLine[] = [];
   let closingBalance: number | null = null;
+  let openingBalance: number | null = null;
   let periodEnd: string | null = null;
   const period = raw.match(/по\s+(\d{2}[./]\d{2}[./]\d{4})/i);
   if (period) periodEnd = parseDate(period[1]);
   let current: PdfLine | null = null;
   for (const line of raw.split('\n')) {
     const low = line.toLowerCase();
-    if (/исходящ|остаток на конец|баланс на конец|конечный остаток/.test(low)) {
+    const isOpening = /входящ|остаток на начало|баланс на начало|начальный остаток/.test(low);
+    if (isOpening || /исходящ|остаток на конец|баланс на конец|конечный остаток/.test(low)) {
       const m = [...stripDates(line).matchAll(MONEY)].pop();
-      if (m) closingBalance = Number(`${m[2].replace(/[   ]/g, '')}.${m[3]}`) * (m[1] === '-' || m[1] === '−' ? -1 : 1);
+      if (m) {
+        const amount = Number(`${m[2].replace(/[   ]/g, '')}.${m[3]}`) * (m[1] === '-' || m[1] === '−' ? -1 : 1);
+        if (isOpening) openingBalance = amount;
+        else closingBalance = amount;
+      }
       continue;
     }
-    if (/входящ|остаток на начало|итого|оборот/.test(low)) continue;
+    if (/итого|оборот/.test(low)) continue;
     const d = line.match(DATE);
     const amounts = [...stripDates(line).matchAll(MONEY)];
     if (d && amounts.length) {
@@ -73,7 +80,7 @@ export function parseStatementText(raw: string): PdfStatement {
       current.text = `${current.text} ${line}`.trim();
     }
   }
-  return { lines, closingBalance, periodEnd, raw };
+  return { lines, openingBalance, closingBalance, periodEnd, raw };
 }
 
 const INCOME_WORDS = /зачислен|поступлен|заработн|зарплат|аванс|преми|отпускн|возврат|кэшбэк|cashback|пополнение/i;

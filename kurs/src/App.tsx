@@ -1,5 +1,5 @@
 import { MotionConfig } from 'motion/react';
-import { lazy, Suspense, startTransition, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, startTransition, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Island } from './components/Island';
 import { Salute } from './components/Salute';
 import { TABS, TabBar } from './components/TabBar';
@@ -29,8 +29,10 @@ import { TodaySheet } from './screens/TodaySheet';
 import { Tour, TOUR_VERSION } from './screens/Tour';
 import { Week } from './screens/Week';
 import { WeekSheet } from './screens/WeekSheet';
-import { cleanedTwins, useStore } from './store/store';
-import { toast as showToast, useUi, type Tab } from './store/ui';
+import { currentLegacyFile, migrationBackupFile, useStore } from './store/store';
+import { migrationProblem, subscribeMigration } from './store/financeStorage';
+import { downloadFile } from './domain/ics';
+import { useUi, type Tab } from './store/ui';
 
 const FinanceSheet = lazy(() => import('./screens/FinanceSheet').then(m => ({ default: m.FinanceSheet })));
 const WorkSheet = lazy(() => import('./screens/WorkSheet').then(m => ({ default: m.WorkSheet })));
@@ -129,6 +131,7 @@ function useTabScroll(tab: Tab) {
 export default function App() {
   useTheme();
   const ready = useStore(s => s.ready);
+  const storageProblem = useSyncExternalStore(subscribeMigration, migrationProblem, migrationProblem);
   const tourSeen = useStore(s => s.settings.tourSeen ?? 0);
   const tab = useUi(s => s.tab);
   const toast = useUi(s => s.toast);
@@ -150,7 +153,6 @@ export default function App() {
   useEffect(() => {
     // просим браузер не вычищать данные при нехватке места
     void navigator.storage?.persist?.().catch(() => {});
-    if (cleanedTwins) showToast(`Убрал повторы трат из чата: ${cleanedTwins}`);
     updateBadge();
     const onVis = () => document.visibilityState === 'visible' && updateBadge();
     document.addEventListener('visibilitychange', onVis);
@@ -187,6 +189,24 @@ export default function App() {
     return () => clearTimeout(t);
   }, [ready, tourSeen, set]);
 
+  if (storageProblem) return <main className="mx-auto max-w-md space-y-4 px-4 pt-12">
+    <h1 className="text-xl font-semibold">Нужно проверить данные</h1>
+    <p>{storageProblem === 'changed' ? 'Данные изменились в другой вкладке или старой версии. Закройте другие окна «Курса» перед повторной проверкой.'
+      : 'Хранилище не прошло проверку. Исходная копия сохраняется, если браузер дал к ней доступ.'}</p>
+    <button type="button" className="card block min-h-11 px-4" onClick={() => window.location.reload()}>Проверить снова</button>
+    <button type="button" className="card block min-h-11 px-4" onClick={() => {
+      try {
+        const copy = ready ? useStore.getState().exportData() : migrationBackupFile() ?? currentLegacyFile();
+        if (copy) downloadFile('kurs-lokalnaya-kopiya.json', copy, 'application/json');
+      } catch { /* Несверенную копию не выдаём за проверенную. */ }
+    }}>Сохранить копию</button>
+    {storageProblem === 'changed' && <button type="button" className="card block min-h-11 px-4" onClick={() => {
+      try {
+        const copy = currentLegacyFile();
+        if (copy) downloadFile('kurs-staraya-versiya.json', copy, 'application/json');
+      } catch { /* Некорректная копия остаётся в исходном хранилище. */ }
+    }}>Сохранить данные старой версии</button>}
+  </main>;
   if (!ready) return <MotionConfig reducedMotion="user"><Onboarding /></MotionConfig>;
 
   return (

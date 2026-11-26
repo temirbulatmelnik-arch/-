@@ -67,10 +67,31 @@ export function accruedOnCard(d: Debt, until: string): number {
   return Math.round(((d.balance * d.rate * days) / 365) * 100) / 100;
 }
 
+export interface CardFunds {
+  balanceMinor: number | null;
+  freeMinor: number | null;
+  reservedMinor: number;
+  awaitingTransferMinor: number;
+  unresolvedMinor: number;
+  allocationShortfallMinor: number;
+}
+
+export function cardFunds(balance: number | null, reserved: number, awaitingTransfer: number, unresolved: number): CardFunds {
+  const balanceMinor = balance == null ? null : cents(balance);
+  const reservedMinor = cents(reserved);
+  const awaitingTransferMinor = cents(awaitingTransfer);
+  const unresolvedMinor = cents(unresolved);
+  const allocated = reservedMinor + awaitingTransferMinor + unresolvedMinor;
+  return { balanceMinor, reservedMinor, awaitingTransferMinor, unresolvedMinor,
+    freeMinor: balanceMinor == null ? null : Math.max(0, balanceMinor - allocated),
+    allocationShortfallMinor: balanceMinor == null ? 0 : Math.max(0, allocated - balanceMinor) };
+}
+
 export interface Ledger {
   /** ожидаемый остаток карты; null — нет точки отсчёта */
   card: number | null;
   cardFrom: { at: string; date: string } | null;
+  cardFunds: CardFunds;
   /** ожидаемый резерв: резерв приложения минус то, что оплачено из него после последнего остатка из банка */
   reserve: number;
   /** ожидаемый долг на кредитке моста */
@@ -212,9 +233,9 @@ export function ledger(s: LedgerInput): Ledger {
   const pendingSweepToReserve = { ...funding.pending, [LIFE_ACCOUNT]: incomeOnCard };
   const unmatchedOnCard = rubles(unclassified);
   const unassignedOnCard = rubles(unclassified + cents(funding.unassignedLife));
-  const unavailable = heldOnCard + incomeOnCard + unassignedOnCard;
-  const lifeAvailable = card == null ? null : Math.max(0, kopecks(card - unavailable));
-  const allocationShortfall = card == null ? 0 : Math.max(0, kopecks(unavailable - card));
+  const partitions = cardFunds(card, heldOnCard, incomeOnCard, unassignedOnCard);
+  const lifeAvailable = partitions.freeMinor == null ? null : rubles(partitions.freeMinor);
+  const allocationShortfall = rubles(partitions.allocationShortfallMinor);
 
   const point = [reserveAnchor(s.reserveLog.filter(row => row.date <= now)), last].filter(Boolean)
     .sort((a, b) => time(b!.at) - time(a!.at))[0] ?? null;
@@ -242,7 +263,7 @@ export function ledger(s: LedgerInput): Ledger {
   return {
     totalCash: card == null || cashAccounts.some(account => account.expected == null) ? null
       : rubles(cents(card) + cents(reserve) + cashAccounts.reduce((sum, account) => sum + cents(account.expected ?? 0), 0)),
-    cashAccounts, reserveVerified: !!point, debtBalances, reconciliation,
+    cardFunds: partitions, cashAccounts, reserveVerified: !!point, debtBalances, reconciliation,
     cardPosted: ref ? cardProjection.posted : null, reservePosted: point ? reserveProjection.posted : null,
     unclassifiedCredit: s.expenses.filter(e => e.source === 'credit' && !s.debts.some(d => d.kind === 'card' && d.id === e.creditCard)),
     card, cardFrom: ref ? { at: ref.at, date: ref.date } : null, reserve: kopecks(reserve), credit, creditCard, cards,

@@ -134,9 +134,16 @@ it.skipIf(!backup || !expected)('репетирует перенос полно�
       expenses: reference.counts.expenses, operations: reference.counts.operations, debts: reference.counts.debts });
     expect(result.state.expenses).toEqual(state.expenses);
     expect(result.state.work).toEqual(state.work);
-    expect(dryRunFinanceMigration(result.state, reference.date).state).toEqual(result.state);
+    const { packFinanceState, unpackFinanceState, stableJson } = await import('../../src/store/financeStorage');
+    const { migrationProjection } = await import('../../src/domain/financeMigration');
+    const archived = packFinanceState(result.state);
+    const restored = unpackFinanceState<typeof result.state>(archived);
+    expect(archived.length).toBeLessThan(JSON.stringify(result.state).length);
+    expect(stableJson(restored)).toBe(stableJson(result.state));
+    expect(migrationProjection(restored, reference.date)).toEqual(result.before);
+    expect(dryRunFinanceMigration(restored, reference.date).state).toEqual(result.state);
     expect(readFileSync(backup!, 'utf8')).toBe(raw);
   } finally {
     setPlanSource(() => null);
   }
-});
+}, 20000);

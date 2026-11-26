@@ -1,4 +1,4 @@
-import { cents } from './accounts';
+import { cashAccount, cents, LIFE_ACCOUNT, RESERVE_ACCOUNT, type AccountOperation } from './accounts';
 // Ответ разбора (Claude, CSV или текст) → список предложений «что обновить в приложении».
 // Человек смотрит список, снимает лишние галочки и нажимает «Применить».
 import type { AiResult } from './ai';
@@ -18,6 +18,7 @@ export type Proposal =
   /** selfKey — перевод на своё имя закрыл платёж: запомнить, что это я */
   | ({ id: string; type: 'mark'; on: boolean; event: CalEvent; amount: number; date?: string; selfKey?: string } & BankEvidence)
   | ({ id: string; type: 'income'; on: boolean; event: CalEvent | null; amount: number; date: string; bonus: boolean } & BankEvidence)
+  | { id: string; type: 'posting'; on: boolean; op: AccountOperation; text: string }
   | { id: string; type: 'reserve'; on: boolean; balance: number }
   | { id: string; type: 'card'; on: boolean; balance: number; date: string };
 
@@ -65,6 +66,42 @@ const bankEvidence = (tx: DraftTx): BankEvidence => tx.structured ? {
 } : {};
 
 /** Платёж по долгу или обязательный платёж в выписке → отметка «оплачено» в календаре */
+function structuredPosting(tx: DraftTx, ctx: Ctx, amount: number): Proposal | null {
+  if (!tx.structured || !tx.fingerprint.startsWith('["csv:') || tx.duplicate) return null;
+  const owned = /между своими|на свой сч[её]т|со своего сч[её]та|перевод себе/i.test(tx.merchant);
+  const accountId = tx.source === 'reserve' ? RESERVE_ACCOUNT : LIFE_ACCOUNT;
+  const operations = ctx.cal.accountBook?.operations ?? [];
+  const base = { id: tx.fingerprint, externalId: tx.fingerprint, date: tx.date, at: tx.occurredAt, note: tx.merchant,
+    amount, accountId, status: 'confirmed' as const, origin: 'bank' as const, fundingSource: 'own' as const };
+  const row = (op: AccountOperation, text: string, on: boolean): Proposal => ({ id: pid(), type: 'posting', op, on, text });
+  if (owned) {
+    const other = accountId === LIFE_ACCOUNT ? RESERVE_ACCOUNT : LIFE_ACCOUNT;
+    const from = tx.income ? other : accountId;
+    const to = tx.income ? accountId : other;
+    const possible = operations.some(op => op.status === 'confirmed' && op.type === 'transfer' &&
+      op.date === tx.date && op.accountId === from && op.toAccountId === to && cents(op.amount) === cents(amount));
+    const explicitCounterparty = tx.source === 'reserve' ? /карт[ауыое]/i.test(tx.merchant) : /накопительн|резерв/i.test(tx.merchant);
+    if (possible || !tx.occurredAt || !explicitCounterparty) return null;
+    return row({ ...base, type: 'transfer', accountId: from, toAccountId: to }, from === LIFE_ACCOUNT ? 'С карты в резерв' : 'Из резерва на карту', true);
+  }
+  if (!tx.income) return null;
+  const merchantKey = (name?: string) => (name ?? '').toLowerCase().replace(/возврат(?: средств)?/g, '').replace(/[^а-яёa-z0-9]/g, '');
+  if (/возврат/i.test(tx.merchant)) {
+    const key = merchantKey(tx.merchant);
+    const candidates = ctx.expenses.filter(expense => key.length >= 4 && key === merchantKey(expense.note) && expense.date <= tx.date &&
+      cashAccount(expense) === accountId && cents(expense.amount) - operations.reduce((sum, op) => sum +
+        (op.type === 'refund' && op.status === 'confirmed' && op.expenseId === expense.id ? cents(op.amount) : 0), 0) >= cents(amount));
+    if (candidates.length !== 1) return null;
+    return row({ ...base, type: 'refund', expenseId: candidates[0].id }, 'Возврат к покупке', true);
+  }
+  if (/выдача займа|кредитн|сплит|за[её]м/i.test(tx.merchant)) return null;
+  if (/к[эе]шб[эе]к|cashback|процент[ыа] на|выплата процентов/i.test(tx.merchant)) return row({ ...base, type: 'income' }, 'Зачисление банка', true);
+  if (/аванс|зарплат|заработн|отпуск|преми|материальн.*помощ/i.test(tx.merchant)) {
+    return row({ ...base, type: 'income', pendingSweep: accountId === LIFE_ACCOUNT }, 'Зачисление без связи с календарём', false);
+  }
+  return null;
+}
+
 function paymentMarks(txs: DraftTx[], ctx: Ctx, items: Proposal[]) {
   for (const t of txs) {
     if (t.income || (t.structured && t.duplicate)) continue;
@@ -82,7 +119,16 @@ function paymentMarks(txs: DraftTx[], ctx: Ctx, items: Proposal[]) {
 
 export function fromDrafts(txs: DraftTx[], ctx: Ctx, summary: string, extra: { cardBalance?: { amount: number; date: string } } = {}): Review {
   const items: Proposal[] = [];
-  const checked = markDuplicates(txs, ctx.expenses);
+  const known = new Set(ctx.cal.accountBook?.operations.flatMap(op => op.externalId ? [op.externalId] : []));
+  const alreadyProposed = (candidate: Proposal) => {
+    if (candidate.type !== 'posting' || candidate.op.type !== 'transfer') return false;
+    const transfer = candidate.op;
+    return items.some(item => item.type === 'posting' && item.op.type === 'transfer' &&
+      item.op.accountId === transfer.accountId && item.op.toAccountId === transfer.toAccountId &&
+      item.op.date === transfer.date && cents(item.op.amount) === cents(transfer.amount));
+  };
+  const checked = markDuplicates(txs.map(tx => tx.structured && /накопительн.*сч[её]т|^резерв$/i.test(tx.bankAccount ?? '')
+    ? { ...tx, source: 'reserve' as const } : tx), ctx.expenses).filter(tx => !tx.structured || !known.has(tx.fingerprint));
   const structuredPayments = new Set<string>();
   for (const tx of checked.filter(t => t.structured && !t.income && !t.duplicate)) {
     const label = tx.merchant.toUpperCase();
@@ -97,10 +143,15 @@ export function fromDrafts(txs: DraftTx[], ctx: Ctx, summary: string, extra: { c
     const event = candidates[0];
     structuredPayments.add(tx.id);
     if (!ctx.marks[event.key]?.done && !items.some(item => item.type === 'mark' && item.event.key === event.key)) {
-      items.push({ id: pid(), type: 'mark', on: true, event, amount: tx.amount, date: tx.date, ...bankEvidence(tx) });
+      items.push({ id: pid(), type: 'mark', on: true, event: { ...event, accountId: tx.source === 'reserve' ? RESERVE_ACCOUNT : event.accountId }, amount: tx.amount, date: tx.date, ...bankEvidence(tx) });
     }
   }
   for (const tx of checked.filter(t => !t.income && !structuredPayments.has(t.id))) {
+    const posting = structuredPosting(tx, ctx, tx.amount);
+    if (posting && !alreadyProposed(posting)) {
+      items.push(posting);
+      continue;
+    }
     items.push({ id: pid(), type: 'tx', on: !tx.skip && !tx.duplicate, tx });
   }
   paymentMarks(txs.filter(t => !t.structured), ctx, items);
@@ -115,6 +166,13 @@ export function fromDrafts(txs: DraftTx[], ctx: Ctx, summary: string, extra: { c
       matchesKind(e) && cents(e.amount) === cents(t.amount) && !ctx.marks[e.key]?.done &&
       !items.some(item => item.type === 'income' && item.event?.key === e.key)) : [];
     const ev = t.structured ? (exactCandidates.length === 1 ? exactCandidates[0] : null) : matchEvent(ctx, t.date, matchesKind);
+    if (!ev && exactCandidates.length === 0) {
+      const alreadyBooked = kind && eventsBetween(ctx.cal, addDays(t.date, -3), addDays(t.date, 3)).some(event =>
+        matchesKind(event) && ctx.marks[event.key]?.done && ctx.marks[event.key]?.paidDate === t.date &&
+        cents(ctx.marks[event.key]?.amount ?? event.amount) === cents(t.amount));
+      const posting = alreadyBooked ? null : structuredPosting(t, ctx, t.amount);
+      if (posting && !alreadyProposed(posting)) { items.push(posting); continue; }
+    }
     items.push({ id: pid(), type: 'income', on: !!ev, event: ev, amount: t.amount, date: t.date, bonus: !t.structured && !!ev?.incomeKind && BONUS.includes(ev.incomeKind), ...bankEvidence(t) });
   }
   return { summary, warnings: [], items };

@@ -3,7 +3,9 @@ import { allocatePayrollReceipt, payrollReceiptParts } from '../domain/payrollRe
 // Резервная копия — файл JSON (Настройки → Данные), календарь — файл .ics.
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { accountOptions, appendOperations, cents, kopecks, bookOperationAllowed, cashAccount, linkedExpenseId, expenseOperation, EMPTY_BOOK, LIFE_ACCOUNT, RESERVE_ACCOUNT, reversibleOperation, reviseOperations, validAmount, validDate, validSplitDebit, validSplitPlan, validPayoffTerms, type PayoffTerms, type AccountBook, type AccountOperation, type BankBalance, type BankImportBatch, type CashAccount, type SplitDebit, type SplitPlan } from '../domain/accounts';
+import { createFinanceStorage, FINANCE_KEY, FINANCE_SCHEMA, LEGACY_KEY, readMigrationBackup, stableJson } from './financeStorage';
+import { dryRunFinanceMigration, migrationProjection } from '../domain/financeMigration';
+import { accountOptions, appendOperations, cents, kopecks, bookOperationAllowed, canonicalBook, cashAccount, linkedExpenseId, expenseOperation, EMPTY_BOOK, LIFE_ACCOUNT, RESERVE_ACCOUNT, reversibleOperation, reviseOperations, validAmount, validDate, validSplitDebit, validSplitPlan, validPayoffTerms, type PayoffTerms, type AccountBook, type AccountOperation, type BankBalance, type BankImportBatch, type CashAccount, type SplitDebit, type SplitPlan } from '../domain/accounts';
 import { DEFAULT_MODEL } from '../domain/models';
 import { DEFAULT_PREPARATION_TIME, moscowClock, paymentBudget, paymentShares, partialPayments, weeklyTopUp, type FundingMode } from '../domain/funds';
 import { coverageInput, safePrepayment } from '../domain/coverage';
@@ -13,8 +15,7 @@ import { setPlanSource, totalDebt, weeklyLimit, type PlanConfig } from '../domai
 import { validPayroll, type PayrollProfile } from '../domain/payroll';
 import { mergeSeed } from '../domain/planUpdate';
 import type { Bridge } from '../domain/bridge';
-import { fixDefaultCategories } from '../domain/categorize';
-import { dropChatTwins, exchangeRevision } from '../domain/exchange';
+import { exchangeRevision } from '../domain/exchange';
 import { canVoidOperation, freshReserve, heldKeys, ledger, reserveAnchor, type Checkup } from '../domain/ledger';
 import type { CalEvent, CalendarOverride, CardBalance, ChecklistItem, Debt, DebtSnapshot, EventMark, Expense, FixedItem, IncomeTemplate, MemoryRule, PlanSeed, ReserveMove, Settings, StrategySection, WeekClosure, WeeklyOverride, WishItem } from '../domain/types';
 
@@ -105,7 +106,7 @@ interface Actions {
   setStress: (stress: AccountBook['stress']) => void;
   /** запомнить снимок данных до импорта из банка — откатить можно так же, как импорт из чата */
   beginImport: (summary: string) => void;
-  applyBankImport: (revision: string, summary: string, batch: BankImportBatch | undefined, apply: (state: State) => void) => boolean;
+  applyBankImport: (revision: string, summary: string, batch: BankImportBatch | undefined, apply: (state: State, current: () => State) => void) => boolean;
   /** запомнить продавца; null — забыть */
   remember: (key: string, rule: MemoryRule | null) => void;
   /** вернуть данные к снимку до импорта; этот и более поздние импорты уходят из журнала */
@@ -147,9 +148,6 @@ interface Actions {
 }
 
 export type State = Data & Actions;
-
-/** сколько повторов трат из чата убрало обновление данных — App покажет это сообщением один раз */
-export let cleanedTwins = 0;
 
 export interface ImportRecord {
   id: string;
@@ -460,15 +458,15 @@ export const useStore = create<State>()(
       applyBankImport: (revision, summary, batch, apply) => {
         const current = get();
         if (staged || exchangeRevision(current) !== revision ||
-            batch && current.accountBook.importBatches?.some(row => row.fileHash === batch.fileHash)) return false;
+            batch && current.accountBook.importBatches?.some(row => row.fileHash === batch.fileHash && !row.partial)) return false;
         staged = current;
         let next: State;
         try {
-          apply(staged);
+          apply(staged, get);
           next = staged;
         } catch { return false; } finally { staged = undefined; }
         if (exchangeRevision(next) === revision && next.merchantMemory === current.merchantMemory) return false;
-        const accountBook = batch ? { ...next.accountBook, importBatches: [...next.accountBook.importBatches ?? [], batch] } : next.accountBook;
+        const accountBook = batch ? { ...next.accountBook, importBatches: [...(next.accountBook.importBatches ?? []).filter(row => row.fileHash !== batch.fileHash), batch] } : next.accountBook;
         const { imports, settings, planCode, ready, ...snapshot } = pickData(current);
         void settings; void planCode; void ready;
         const afterRevision = exchangeRevision({ ...next, accountBook });
@@ -675,7 +673,7 @@ export const useStore = create<State>()(
             if (e.kind === 'payment' && (debt || e.key.startsWith('split-debit:'))) {
               const op: AccountOperation = {
                 ...link, type: 'debt_payment', debtId: debt?.id, accountId, amount: paid,
-                date, at: bookedAt, createdAt: at, origin: 'manual', status: 'confirmed', fundingSource: 'unknown', budget,
+                date, at: bookedAt, createdAt: at, origin: details?.externalId ? 'bank' : 'manual', status: 'confirmed', fundingSource: 'unknown', budget,
                 principal: details?.principal, interest: details?.interest, fee: details?.fee,
               };
               if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
@@ -685,7 +683,7 @@ export const useStore = create<State>()(
             }
             if (e.kind === 'payment' && !debt && !e.key.startsWith('split-debit:') && (singleCard || details?.accountId)) {
               const op: AccountOperation = { ...link, type: 'expense', amount: paid,
-                accountId, date, at: bookedAt, createdAt: at, origin: 'manual', status: 'confirmed', fundingSource: 'unknown', budget };
+                accountId, date, at: bookedAt, createdAt: at, origin: details?.externalId ? 'bank' : 'manual', status: 'confirmed', fundingSource: 'unknown', budget };
               if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
               const operations = appendOperations(accountBook.operations, [op]);
               if (operations === accountBook.operations) return {};
@@ -693,7 +691,7 @@ export const useStore = create<State>()(
             }
             if (cashIncomeEvent(e) && (singleCard || e.accountId || e.nominalDate || e.incomeKind)) {
               const op: AccountOperation = { ...link, type: 'income', amount: paid,
-                accountId: details?.externalId ? accountId : singleCard ? LIFE_ACCOUNT : e.accountId ?? LIFE_ACCOUNT, date, at: bookedAt, createdAt: at, origin: 'manual', status: 'confirmed', fundingSource: 'own', pendingSweep: true };
+                accountId: details?.externalId ? accountId : singleCard ? LIFE_ACCOUNT : e.accountId ?? LIFE_ACCOUNT, date, at: bookedAt, createdAt: at, origin: details?.externalId ? 'bank' : 'manual', status: 'confirmed', fundingSource: 'own', pendingSweep: true };
               if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
               const operations = appendOperations(accountBook.operations, [op]);
               if (operations === accountBook.operations) return {};
@@ -792,15 +790,13 @@ export const useStore = create<State>()(
       setSettings: patch => set(s => ({ settings: { ...s.settings, ...patch } })),
 
       exportData: () => {
-        const { settings, planCode: _code, ...rest } = pickData(get());
-        // ключ API и код плана в резервную копию не кладём: файл может попасть в облако или к другим людям
-        return JSON.stringify({ app: 'kurs', version: 2, exportedAt: nowIso(), ...rest, settings: { ...settings, apiKey: '' } }, null, 1);
+        return exportBackup(pickData(get()));
       },
       importData: raw => {
         const d = raw as Partial<Data> & { app?: string };
         if (!d || d.app !== 'kurs' || !Array.isArray(d.debts) || !Array.isArray(d.expenses)) return false;
         set(s => ({ ...EMPTY, ...pickData({ ...EMPTY, ...d } as Data), fixed: withIds(d.fixed ?? []),
-          accountBook: withExpenses({ ...(d.accountBook ?? EMPTY_BOOK), paymentRouting: 'life' }, d.expenses!),
+          accountBook: canonicalBook({ ...(d.accountBook ?? EMPTY_BOOK), paymentRouting: 'life' }, d.expenses!),
           cardBalance: restoreCardTime(d.cardBalance ?? null, d.imports ?? []), ready: true, planCode: s.planCode,
           settings: { ...DEFAULT_SETTINGS, ...d.settings, apiKey: s.settings.apiKey } }));
         return true;
@@ -809,42 +805,14 @@ export const useStore = create<State>()(
       };
     },
     {
-      name: 'kurs',
-      version: 9,
+      name: FINANCE_KEY,
+      version: FINANCE_SCHEMA,
       partialize: s => pickData(s),
-      // версия 1: обязательные платежи без id — добавляем, остальное новые поля берут значения по умолчанию;
-      // версия 2: файл из чата задваивал траты, уже внесённые под другим названием, — убираем копии один раз;
-      // версия 3: подпись банка «Транспорт» записывалась в «кафе и досуг» — поправляем категорию
-      migrate: (persisted, version) => {
-        const p = persisted as Partial<Data>;
-        if (version === 8) {
-          const raw = window.localStorage.getItem('kurs');
-          if (raw) {
-            const key = 'kurs:before-0.9.0';
-            try {
-              if (window.localStorage.getItem(key) == null) window.localStorage.setItem(key, raw);
-            } catch { /* The additive adapter also reads the previous format directly. */ }
-          }
-        }
-        if (version < 8) {
-          try {
-            const backup = 'kurs:before-0.7.1';
-            const raw = window.localStorage.getItem('kurs');
-            if (raw && !window.localStorage.getItem(backup)) window.localStorage.setItem(backup, raw);
-            if (version < 6 && raw && !window.localStorage.getItem('kurs:before-0.6.0')) window.localStorage.setItem('kurs:before-0.6.0', raw);
-          } catch { /* The additive change also works if the browser lacks room for a second copy. */ }
-        }
-        let expenses = p.expenses;
-        if (version < 3 && expenses) {
-          const r = dropChatTwins(expenses);
-          expenses = r.expenses;
-          cleanedTwins = r.removed.length;
-        }
-        if (version < 4 && expenses) expenses = fixDefaultCategories(expenses);
-        const accountBook = { ...(p.accountBook ?? EMPTY_BOOK), paymentRouting: 'life' as const };
-        return { ...p, expenses: expenses ?? [], accountBook: version === 8 ? withExpenses(accountBook, expenses ?? []) : accountBook,
-          fixed: withIds(p.fixed ?? []) } as State;
-      },
+      storage: typeof window === 'undefined' ? undefined : createFinanceStorage<Data>(() => window.localStorage, prepareLegacyData, (before, after) => {
+        const date = today();
+        const result = dryRunFinanceMigration(before, date);
+        return result.canCommit && stableJson(result.before) === stableJson(migrationProjection(after, date));
+      }),
       merge: (persisted, current) => {
         const p = persisted as Partial<Data> | undefined;
         return { ...current, ...p, cardBalance: restoreCardTime(p?.cardBalance ?? null, p?.imports ?? []), settings: { ...DEFAULT_SETTINGS, ...p?.settings } };
@@ -858,7 +826,7 @@ setPlanSource(() => useStore.getState().plan);
 
 if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener('storage', event => {
-    if (event.key === 'kurs' && event.newValue) void useStore.persist.rehydrate();
+    if (event.key === FINANCE_KEY || event.key === LEGACY_KEY) void useStore.persist.rehydrate();
   });
 }
 
@@ -869,4 +837,35 @@ function withIds(list: (Omit<FixedItem, 'id'> & { id?: string })[]): FixedItem[]
 function pickData(s: Data): Data {
   const keys = Object.keys(EMPTY) as (keyof Data)[];
   return Object.fromEntries(keys.map(k => [k, s[k] ?? EMPTY[k]])) as unknown as Data;
+}
+
+function prepareLegacyData(value: unknown, version: number): Data {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid legacy state');
+  const data = value as Partial<Data>;
+  if (data.debts != null && !Array.isArray(data.debts) || data.expenses != null && !Array.isArray(data.expenses)) throw new Error('invalid legacy data');
+  const expenses = data.expenses ?? [];
+  const book = data.accountBook ?? EMPTY_BOOK;
+  const accountBook = version < 9 ? { ...book, paymentRouting: 'life' as const } : book;
+  return pickData({ ...EMPTY, ...data, expenses,
+    fixed: withIds(data.fixed ?? []), accountBook: version === 8 ? withExpenses(accountBook, expenses) : accountBook,
+    cardBalance: restoreCardTime(data.cardBalance ?? null, data.imports ?? []),
+    settings: { ...DEFAULT_SETTINGS, ...data.settings } });
+}
+
+function exportBackup(data: Data) {
+  const { settings, planCode: _code, ...rest } = data;
+  return JSON.stringify({ app: 'kurs', version: 2, exportedAt: nowIso(), ...rest, settings: { ...settings, apiKey: '' } }, null, 1);
+}
+
+export function migrationBackupFile(): string | null {
+  const backup = readMigrationBackup(window.localStorage);
+  return backup ? exportBackup(prepareLegacyData(backup.state, backup.version ?? 0)) : null;
+}
+
+export function currentLegacyFile(): string | null {
+  const raw = window.localStorage.getItem(LEGACY_KEY);
+  if (!raw) return null;
+  const { state, version = 0 } = JSON.parse(raw) as { state: unknown; version?: number };
+  if (!Number.isInteger(version) || version < 0 || version >= FINANCE_SCHEMA) return null;
+  return exportBackup(prepareLegacyData(state, version));
 }

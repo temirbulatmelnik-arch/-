@@ -1,7 +1,7 @@
 {
   "name": "kurs",
   "private": true,
-  "version": "1.0.0-alpha.1",
+  "version": "1.0.0-alpha.2",
   "description": "Курс — личный план выхода из долгов: недельный лимит, календарь платежей, премии, разбор выписок и скриншотов",
   "type": "module",
   "scripts": {
@@ -17,6 +17,7 @@
     "@anthropic-ai/sdk": "0.132.1",
     "@fontsource-variable/geologica": "5.3.0",
     "@fontsource-variable/unbounded": "5.3.0",
+    "@noble/hashes": "2.4.0",
     "@tesseract.js-data/eng": "1.0.0",
     "@tesseract.js-data/rus": "1.0.0",
     "lucide-react": "1.59.0",

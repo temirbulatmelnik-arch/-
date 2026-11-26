@@ -125,3 +125,12 @@ describe('финансовый журнал', () => {
     expect(ledger({ ...base, accountBook: book(JSON.parse(JSON.stringify(operations))) })).toEqual(ledger({ ...base, accountBook: book(operations) }));
   });
 });
+
+it('явно разделяет деньги на карте, свободное и резервы без балансирующей операции', async () => {
+  const { cardFunds } = await import('./ledger');
+  const control = cardFunds(625.01, 110.05, 150.06, 20.90);
+  expect(control).toEqual({ balanceMinor: 62501, freeMinor: 34400, reservedMinor: 11005, awaitingTransferMinor: 15006,
+    unresolvedMinor: 2090, allocationShortfallMinor: 0 });
+  expect(cardFunds(1, 2, 3, 4)).toMatchObject({ freeMinor: 0, allocationShortfallMinor: 800 });
+  expect(cardFunds(null, 0, 0, 0)).toMatchObject({ balanceMinor: null, freeMinor: null });
+});

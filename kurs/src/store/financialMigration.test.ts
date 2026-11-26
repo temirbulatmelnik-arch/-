@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EMPTY_BOOK, RESERVE_ACCOUNT, type AccountOperation } from '../domain/accounts';
 import { applyExchange, buildExchange, exchangeRevision, prepareExchange, previewExchange, type ExchangeFile } from '../domain/exchange';
 import { ledger } from '../domain/ledger';
+import { FINANCE_KEY, MIGRATION_BACKUP_KEY } from './financeStorage';
 import type { Debt } from '../domain/types';
 
 const storage = new Map<string, string>();
@@ -26,7 +27,12 @@ const exchange = (patch: Partial<ExchangeFile>, protocolVersion = '2.7'): Exchan
   ({ app: 'kurs-exchange', version: 2, protocolVersion, ...patch });
 
 async function reopen(version: number, state: unknown) {
-  storage.set('kurs', JSON.stringify({ version, state }));
+  const raw = JSON.stringify({ version, state });
+  if (storage.get('kurs') !== raw) {
+    storage.delete(FINANCE_KEY);
+    storage.delete(MIGRATION_BACKUP_KEY);
+    storage.set('kurs', raw);
+  }
   vi.resetModules();
   return (await import('./store')).useStore;
 }
@@ -227,7 +233,7 @@ it('переносит журнал из версии 8, оставляет не
   const savedJournal = firstOpen.getState().accountBook;
   const store = await reopen(8, source);
   expect(store.getState().accountBook).toEqual(savedJournal);
-  expect(storage.get('kurs:before-0.9.0')).toBe(initial);
+  expect(JSON.parse(storage.get(MIGRATION_BACKUP_KEY)!).payload).toBe(initial);
   const current = store.getState();
   expect(current.expenses).toEqual(source.expenses);
   expect(current.accountBook.operations.map(op => op.id)).toEqual(['expense:trip-1', 'expense:trip-2']);
@@ -239,10 +245,11 @@ it('переносит журнал из версии 8, оставляет не
   expect(store.getState().accountBook.expenseChanges?.map(change => change.before.id)).toEqual(['trip-2', 'trip-1']);
   const backup = JSON.parse(current.exportData());
   for (let i = 0; i < 2; i++) expect(current.importData(backup)).toBe(true);
-  const restarted = await reopen(9, store.getState());
+  vi.resetModules();
+  const restarted = (await import('./store')).useStore;
   expect(restarted.getState().accountBook.operations.map(op => op.id)).toEqual(['expense:trip-2']);
   expect(ledger({ ...restarted.getState(), now: '2026-11-21' }).card).toBe(2900);
-  expect(storage.get('kurs:before-0.9.0')).toBe(initial);
+  expect(JSON.parse(storage.get(MIGRATION_BACKUP_KEY)!).payload).toBe(initial);
 });
 
 it('сверяет дублированный расход и доступные остатки одним патчем, сохраняя историю', async () => {
@@ -292,4 +299,20 @@ it('импорт выписки коммитится целиком, повто�
   expect(store.getState()).toBe(after);
   after.rollbackImport(after.imports.at(-1)!.id);
   expect(store.getState().expenses).toEqual(initial.expenses);
+});
+
+it.each([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])('открывает историческую схему %d через обычное хранилище приложения', async version => {
+  storage.clear();
+  const expense = { id: 'old-payment', source: 'life', category: 'groceries', date: '2026-11-21', amount: 154.35, createdAt: at } as const;
+  const source = { ...old, expenses: [expense] };
+  const store = await reopen(version, source);
+  const current = store.getState();
+  expect(current.expenses).toEqual([expense]);
+  expect(current.debts).toEqual(old.debts);
+  expect(current.marks).toEqual(old.marks);
+  expect(ledger({ ...current, now: expense.date }).card).toBe(2845.65);
+  const active = storage.get(FINANCE_KEY);
+  expect(JSON.parse(active!).version).toBe(10);
+  await store.persist.rehydrate();
+  expect(storage.get(FINANCE_KEY)).toBe(active);
 });

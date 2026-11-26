@@ -491,23 +491,30 @@ export function coverage(input: CoverageInput, from: string, scenario: Scenario 
 }
 
 /** Сколько можно забрать из свободных денег до первой надёжной выплаты. Платежи в её день идут раньше зачисления. */
-export function discretionaryLiquidityCap(input: CoverageInput, from: string): number | null {
-  if (!input.cash || input.cash[LIFE_ACCOUNT] == null || input.cash[RESERVE_ACCOUNT] == null) return null;
+export function positionBeforeIncome(input: CoverageInput, from: string) {
   const horizon = addDays(from, 45);
   const model = scenarioInput(input, 'cautious');
   const candidates = eventsBetween(model.cal, addDays(from, -45), horizon);
-  const next = candidates.find(e => e.kind === 'income' && e.date >= from && !model.marks[e.key]?.done &&
+  const income = candidates.find(e => e.kind === 'income' && e.date >= from && !model.marks[e.key]?.done &&
     !e.payroll?.documented && !e.payroll?.bankConfirmed && incomeStatus(e) !== 'conditional' &&
-    (e.confidence === 'confirmed' || e.confidence === 'regular' || e.incomeKind && REGULAR.has(e.incomeKind)));
-  const until = next?.date ?? horizon;
+    (e.confidence === 'confirmed' || e.confidence === 'regular' || e.incomeKind && REGULAR.has(e.incomeKind))) ?? null;
+  const until = income?.date ?? horizon;
+  if (!input.cash || input.cash[LIFE_ACCOUNT] == null || input.cash[RESERVE_ACCOUNT] == null) {
+    return { income, until, available: null, shortage: null, accountRisk: null };
+  }
   const events = candidates.flatMap(event => {
     if (event.kind === 'income') return [];
     const projected = projectedEvent(event, 'cautious');
     return projected && projected.date <= until ? [projected] : [];
   });
   const cov = coverage(model, from, 'cautious', until, { events, prepayments: [] });
-  if (cov.shortage || cov.accountRisk?.reason === 'insufficient') return 0;
-  return rubles(Math.max(0, Math.min(cents(cov.start), cents(cov.min?.balance ?? cov.start))));
+  const available = cov.shortage || cov.accountRisk?.reason === 'insufficient'
+    ? 0 : rubles(Math.max(0, Math.min(cents(cov.start), cents(cov.min?.balance ?? cov.start))));
+  return { income, until, available, shortage: cov.shortage, accountRisk: cov.accountRisk };
+}
+
+export function discretionaryLiquidityCap(input: CoverageInput, from: string): number | null {
+  return positionBeforeIncome(input, from).available;
 }
 
 export const COVERAGE_SCENARIOS = ['base', 'cautious', 'stress'] as const;

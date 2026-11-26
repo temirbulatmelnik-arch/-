@@ -292,7 +292,7 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
         safePrepayment: Object.fromEntries(accountOptions(s.accountBook).map(a => [a.id, safePrepayment(input, now, a.id)])),
       } : {}),
       ledger: {
-        card: led.card, reserve: led.reserve, credit: led.credit,
+        card: led.card, reserve: led.reserve, credit: led.credit, cardFunds: led.cardFunds,
         lifeAvailable: led.lifeAvailable, heldForPayments: led.heldForPayments,
         pendingSweepToReserve: led.pendingSweepToReserve, unassignedOnCard: led.unassignedOnCard,
         allocationShortfall: led.allocationShortfall,
@@ -1205,6 +1205,7 @@ const stepWork: Step = (f, s, ctx) => {
     accountId: keepExisting ? base?.accountId ?? incoming.accountId : incoming.accountId ?? base?.accountId,
     advancesBy: keepExisting ? base?.advancesBy ?? incoming.advancesBy : incoming.advancesBy ?? base?.advancesBy,
     cautiousUnit2027: keepExisting ? base?.cautiousUnit2027 ?? incoming.cautiousUnit2027 : incoming.cautiousUnit2027 ?? base?.cautiousUnit2027,
+    quarterlyBonus: keepExisting ? base?.quarterlyBonus ?? incoming.quarterlyBonus : incoming.quarterlyBonus ?? base?.quarterlyBonus,
     workingHours: merge(base?.workingHours, incoming.workingHours), absenceHours: merge(base?.absenceHours, incoming.absenceHours),
     attendance: merge(base?.attendance, incoming.attendance), vacations: [...vacations.values()],
     vacationDaysRemaining: keepExisting ? base?.vacationDaysRemaining ?? incoming.vacationDaysRemaining : incoming.vacationDaysRemaining ?? base?.vacationDaysRemaining,

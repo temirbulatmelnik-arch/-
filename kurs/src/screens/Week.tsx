@@ -8,12 +8,13 @@ import { flyCoin, NextStep, QuickSpends, type Step } from '../components/Home';
 import { DayRing } from '../components/DayRing';
 import { Wallets } from '../components/Wallets';
 import { bridgeControl, lampAt, setSceneHidden, SkyButton, WeekScene } from '../components/Petersburg';
-import { useCoverage, useDailyLiquidityCap } from '../components/Coverage';
+import { useCoverage } from '../components/Coverage';
 import { haptic } from '../components/haptics';
 import { Roll, spring } from '../components/motion';
 import { CAT_COLOR, Money } from '../components/ui';
 import { rubles, weeklyExpenseCents } from '../domain/accounts';
-import { cashIncomeEvent, eventsBetween } from '../domain/calendar';
+import { eventsBetween } from '../domain/calendar';
+import { positionBeforeIncome } from '../domain/coverage';
 import { activeBridge, bridgeState } from '../domain/bridge';
 import { addDays, dayMonth, ddmm, fromKey, plural, weekdayFull, weekRange } from '../domain/dates';
 import { DEFAULT_PREPARATION_TIME, paymentPreparations, preparationDue, weeklyTopUp } from '../domain/funds';
@@ -97,8 +98,8 @@ export function Week() {
   const week = useMemo(() => weekSummary(expenses, debts, overrides, now), [expenses, debts, overrides, now]);
   const today = useMemo(() => dayBudget(expenses, debts, overrides, now), [expenses, debts, overrides, now]);
   const led = useLedger();
-  const { cov } = useCoverage('cautious');
-  const liquidityCap = useDailyLiquidityCap();
+  const { input } = useCoverage('cautious');
+  const horizon = useMemo(() => positionBeforeIncome(input, now), [input, now]);
   const bridgeNow = useMemo(() => (activeBridge(bridge) ? bridgeState(expenses, bridge) : null), [expenses, bridge]);
   const over = week.left < 0;
   // в выходные и в начале недели — предложить закрыть неделю
@@ -114,9 +115,8 @@ export function Week() {
   const preparationTime = DEFAULT_PREPARATION_TIME;
   const planned = useMemo(() => eventsBetween(cal, addDays(clock.date, -14), addDays(clock.date, 45)), [cal, clock.date]);
   const groups = paymentPreparations(planned, marks, led.heldForPayments, led.reserve);
-  const nextIncome = planned.find(e => e.date >= clock.date && cashIncomeEvent(e) && !e.projection && !marks[e.key]?.done && !e.payroll?.bankConfirmed);
   const steps: Step[] = [];
-  const near = groups.filter(group => group.date >= clock.date).slice(0, 3);
+  const nextBill = groups.find(group => group.date >= clock.date);
   const incomeToSweep = Object.entries(led.pendingSweepToReserve).find(([, value]) => value > 0);
   if (incomeToSweep) {
     const [accountId, amount] = incomeToSweep;
@@ -138,8 +138,8 @@ export function Week() {
 
   // кольцо крутят пальцем: «а если потрачу?» — что останется сегодня и какой станет норма завтра
   const [whatIf, setWhatIf] = useState<number | null>(null);
-  const whatIfEffect = useMemo(() => spendEffect({ expenses, debts, weeklyOverrides: overrides, bridge }, { amount: whatIf ?? 0, source: 'life', date: now, now, reserve: led.reserve }),
-    [expenses, debts, overrides, bridge, whatIf, now, led.reserve]);
+  const whatIfEffect = useMemo(() => spendEffect({ expenses, debts, weeklyOverrides: overrides, bridge }, { amount: whatIf ?? 0, source: 'life', date: now, now, reserve: led.reserve, lifeAvailable: led.lifeAvailable, liquidityCap: horizon.available }),
+    [expenses, debts, overrides, bridge, whatIf, now, led.reserve, led.lifeAvailable, horizon.available]);
   const whatIfTomorrow = whatIf && !today.nextWeek && today.morning - today.spentToday - whatIf > 0 ? Math.floor((today.morning - today.spentToday - whatIf) / (today.daysLeft - 1) / 10) * 10 : null;
 
   // быстрые траты: частое — одной кнопкой, «как вчера» — пока сегодня пусто. Источник приложение выбирает само
@@ -148,7 +148,7 @@ export function Week() {
   const spendQuick = (q: QuickSpend, el: Element) => {
     const st = useStore.getState();
     const source = DEFAULT_SPEND_SOURCE;
-    const effect = spendEffect({ ...st, expenses }, { amount: q.amount, source, date: now, now, reserve: led.reserve });
+    const effect = spendEffect({ ...st, expenses }, { amount: q.amount, source, date: now, now, reserve: led.reserve, lifeAvailable: led.lifeAvailable, liquidityCap: horizon.available });
     withUndo(`${q.note ?? CATEGORY[q.category].short}, ${rub(q.amount)}. ${effect.text}`, () => st.addExpenses([{ date: now, amount: q.amount, category: q.category, note: q.note, source, origin: 'manual' }]));
     haptic('success');
     flyCoin(el, CAT_COLOR[q.category]);
@@ -192,7 +192,7 @@ export function Week() {
             {/* сколько на самом деле на карте (по учёту): остаток не сгорает, а уменьшает воскресное пополнение. При перерасходе
                 через кредитку моста на карте может остаться плюс — это нормально */}
           </div>
-          <DayRing day={today.day} canSpend={availableToday(today, led.lifeAvailable, liquidityCap)} mode={today.mode} overDay={today.overDay} nextWeek={today.nextWeek} onClick={() => ui.set({ today: true })}
+          <DayRing day={today.day} canSpend={availableToday(today, led.lifeAvailable, horizon.available)} mode={today.mode} overDay={today.overDay} nextWeek={today.nextWeek} onClick={() => ui.set({ today: true })}
             scrubMax={Math.max(1000, Math.ceil(Math.max(today.day * 2.5, 0) / 500) * 500)} onScrub={setWhatIf} onCommit={amount => ui.set({ add: { amount } })} />
         </div>
         {whatIf != null && (
@@ -206,48 +206,53 @@ export function Week() {
       </div>
 
       <div className="relative z-[1] space-y-2 bg-bg px-4 pt-2">
-        <Wallets card={led.lifeAvailable} weekLimit={week.limit} loan={bridgeNow} reserve={led.reserve}
-          onCard={() => ui.set({ card: true })} onLoan={() => ui.set({ loan: true })} onReserve={() => ui.set({ reserve: true })} />
-        <button className="flex min-h-11 w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-surface px-3 py-2 text-left text-[13px]" type="button" onClick={() => ui.set({ week: week.monday })}>
-          <span>Лимит <Money value={week.limit} kopecks /></span><span>Потрачено <Money value={week.spent} kopecks /></span>
-        </button>
-        {near.length > 0 && <section aria-label="Ближайшие обязательства">
-          {near.map(group => {
-            const due = preparationDue(group, clock, preparationTime);
-            const ready = group.prepared >= group.total && !group.inTransit;
-            return <button key={group.id} type="button" className="card mb-1 flex min-h-11 w-full items-center justify-between gap-2 p-3 text-left"
-              onClick={() => group.toFund && due ? ui.set({ transfer: { kind: 'payment', plan: group } })
-                : group.events.length === 1 ? ui.set({ event: group.events[0] }) : ui.set({ paymentQueue: true })}>
-              <span className="min-w-0"><span className="block text-[12px] text-muted">{ddmm(group.date)} · {ready ? '✓ Обеспечено' : group.accountId ? 'Нужны деньги' : 'Нужна сверка'}</span>
-                <span className="block font-medium">{group.events.length === 1 ? group.events[0].title : `Платежей ${group.events.length}`}</span>
-              </span><Money value={group.total} approx={group.events.some(e => e.approx)} kopecks className="shrink-0" />
-            </button>;
-          })}
-        </section>}
+        <section className="card divide-y divide-line" aria-label="Деньги и платежи">
+          <button type="button" className="flex min-h-12 w-full items-center justify-between gap-3 px-3 py-2 text-left"
+            onClick={() => ui.setTab('plan')}>
+            <span>Свои деньги</span>
+            {led.totalCash == null ? <span className="text-[12px] text-warn">Нужна сверка</span> : <Money value={led.totalCash} kopecks className="shrink-0" />}
+          </button>
+          <button type="button" className="flex min-h-12 w-full items-center justify-between gap-3 px-3 py-2 text-left"
+            onClick={() => {
+              if (nextBill?.toFund && preparationDue(nextBill, clock, preparationTime)) ui.set({ transfer: { kind: 'payment', plan: nextBill } });
+              else if (nextBill?.events.length === 1) ui.set({ event: nextBill.events[0] });
+              else ui.setTab('payments');
+            }}>
+            <span className="min-w-0"><span className="block text-[12px] text-muted">Ближайший платёж</span>
+              <span className="block truncate text-[14px]">{nextBill ? `${ddmm(nextBill.date)} · ${nextBill.events.length === 1 ? nextBill.events[0].title : `Платежей ${nextBill.events.length}`}` : 'В ближайшие 45 дней платежей нет'}</span>
+            </span>
+            {nextBill && <Money value={nextBill.total} approx={nextBill.events.some(event => event.approx)} kopecks className="shrink-0" />}
+          </button>
+          <button type="button" className="flex min-h-12 w-full items-center justify-between gap-3 px-3 py-2 text-left"
+            onClick={() => { ui.set({ payView: 'cover' }); ui.setTab('payments'); }}>
+            <span><span className="block text-[12px] text-muted">{horizon.income ? 'До ожидаемого поступления' : 'Прогноз на 45 дней'}</span>
+              <span className="block text-[14px]">{ddmm(horizon.until)}{horizon.income ? ` · ${horizon.income.title}` : ''}</span>
+            </span>
+            <span className="shrink-0 text-right text-[13px]">
+              {horizon.shortage ? <span className="text-warn">Не хватает <Money value={horizon.shortage.amount} kopecks /></span> : horizon.available == null || horizon.accountRisk ? <span className="text-warn">Нужна сверка</span> :
+                  <span className="text-pos">По плану хватит</span>}
+            </span>
+          </button>
+        </section>
         {visibleSteps.length > 0 && <section aria-label="Следующее действие">
           <NextStep steps={visibleSteps} onLater={id => setLater(prev => new Set([...prev, id]))} />
         </section>}
-        {visibleSteps.length === 0 && cov.shortage && <button type="button" onClick={() => { ui.set({ payView: 'cover' }); ui.setTab('payments'); }}
-          className="min-h-11 w-full rounded-xl bg-warn/10 px-3 text-left text-[13px] text-warn">
-          {ddmm(cov.shortage.date)} возможна нехватка <Money value={cov.shortage.amount} kopecks />
-        </button>}
-        {nextIncome && !incomeToSweep && <button type="button" className="card flex min-h-11 w-full items-center justify-between gap-2 p-3 text-left"
-          onClick={() => ui.set({ workSheet: true })}>
-          <span className="min-w-0"><span className="block text-[12px] text-muted">Ожидается поступление</span>
-            <span className="block font-medium">{ddmm(nextIncome.date)} · {nextIncome.title}</span></span>
-          <Money value={nextIncome.amount} approx className="shrink-0" />
-        </button>}
-        <button type="button" className="min-h-11 text-[13px] text-sea" onClick={() => ui.setTab('payments')}>Открыть календарь</button>
-      </div>
-      <section className="relative z-[1] bg-bg px-4 pt-3">
-        <button className="card flex min-h-11 w-full items-center justify-between gap-2 p-3 text-left text-[14px]" type="button" onClick={() => ui.set({ today: true })}>
-          <span>Сегодня потрачено</span><Money value={today.spentToday} kopecks />
-        </button>
-        {(quick.length > 0 || ySet.length > 0) && <details className="mt-2 text-[13px]">
+        <details className="text-[13px]">
+          <summary className="min-h-11 px-2 py-3 text-sea">Детали бюджета и счетов</summary>
+          <div className="space-y-2 pb-2">
+            <Wallets card={led.lifeAvailable} weekLimit={week.limit} loan={bridgeNow} reserve={led.reserve}
+              onCard={() => ui.set({ card: true })} onLoan={() => ui.set({ loan: true })} onReserve={() => ui.set({ reserve: true })} />
+            <button type="button" className="flex min-h-11 w-full items-center justify-between gap-3 px-2 text-left"
+              onClick={() => ui.set({ week: week.monday })}><span>Лимит недели</span><Money value={week.limit} kopecks /></button>
+            <button type="button" className="flex min-h-11 w-full items-center justify-between gap-3 px-2 text-left"
+              onClick={() => ui.set({ today: true })}><span>Сегодня потрачено</span><Money value={today.spentToday} kopecks /></button>
+          </div>
+        </details>
+        {(quick.length > 0 || ySet.length > 0) && <details className="text-[13px]">
           <summary className="min-h-11 px-2 py-3 text-sea">Быстрые траты</summary>
           <QuickSpends items={quick} yesterday={ySet.length ? { count: ySet.length, sum: ySet.reduce((t, e) => t + e.amount, 0) } : null} onSpend={spendQuick} onYesterday={repeatYesterday} />
         </details>}
-      </section>
+      </div>
 
     </div>
   );

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { SkyHeader } from '../components/Petersburg';
 import { Money, SecondaryButton } from '../components/ui';
+import { rubles } from '../domain/accounts';
 import { ddmmyyyy } from '../domain/dates';
 import { financialJournal } from '../domain/journal';
 import { useStore } from '../store/store';
@@ -27,6 +28,7 @@ export function History() {
     .filter(op => op.status === 'confirmed' && op.date <= today && op.type !== 'allocation')
     .sort((a, b) => b.date.localeCompare(a.date) || (b.at ?? '').localeCompare(a.at ?? '') || a.id.localeCompare(b.id)),
   [accountBook, expenses, oneOff, marks, reserveLog, today]);
+  const statements = (accountBook.importBatches ?? []).slice(-5).reverse().filter(batch => batch.statement);
   const review = new Set(led.reconciliation.map(item => item.operationId));
   const visible = rows.filter(op => {
     if (filter === 'all') return true;
@@ -74,6 +76,20 @@ export function History() {
       </ul>
       {visible.length === 0 && <p className="px-2 text-[14px] text-muted">В этом разделе пока нет операций.</p>}
       {visible.length > limit && <SecondaryButton onClick={() => setLimit(n => n + 40)}>Показать ещё</SecondaryButton>}
+      {filter === 'all' && statements.length > 0 && <details className="card p-3 text-[13px]">
+        <summary className="min-h-10 py-2 font-medium">Сверка импортированных выписок</summary>
+        <ul className="divide-y divide-line">
+          {statements.map(batch => {
+            const check = batch.statement!;
+            const matched = check.status === 'matched' && check.closingMinor != null && check.ledgerClosingMinor === check.closingMinor;
+            return <li key={batch.id} className="space-y-1 py-2">
+              <p>{check.end ? ddmmyyyy(check.end) : 'Дата конца периода неизвестна'} · {matched ? 'Остаток совпал' : 'Нужна сверка'}</p>
+              {check.closingMinor != null && <p className="text-muted">По выписке <Money value={rubles(check.closingMinor)} kopecks />
+                {check.ledgerClosingMinor != null && <> · по учёту <Money value={rubles(check.ledgerClosingMinor)} kopecks /></>}</p>}
+            </li>;
+          })}
+        </ul>
+      </details>}
       {filter === 'all' && !!(accountBook.operationChanges?.length || accountBook.expenseChanges?.length) && <details className="card p-3">
         <summary className="min-h-11 cursor-pointer py-2 text-[14px] font-medium">Журнал исправлений</summary>
         <ul className="divide-y divide-line">

@@ -1,3 +1,4 @@
+import type { StatementCheck } from './bankReconciliation';
 import { monthKey } from './dates';
 import type { CategoryId, Debt, Expense } from './types';
 
@@ -128,6 +129,8 @@ export interface BankImportBatch {
   importedAt: string;
   parserVersion: string;
   rowCount: number;
+  partial?: true;
+  statement?: StatementCheck & { accountId: string; ledgerClosingMinor?: number };
 }
 
 export interface OperationChange {

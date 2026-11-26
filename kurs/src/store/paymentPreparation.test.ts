@@ -6,6 +6,7 @@ import { applyExchange, buildExchange, exchangeRevision, prepareExchange, previe
 import { moscowClock, paymentPreparations, preparationDue, weeklyTopUp } from '../domain/funds';
 import { buildIcs, calendarTest } from '../domain/ics';
 import { ledger } from '../domain/ledger';
+import { MIGRATION_BACKUP_KEY } from './financeStorage';
 import type { CalEvent } from '../domain/types';
 
 const day = '2026-11-30';
@@ -200,7 +201,7 @@ describe('подготовка обязательств и движение ме
 
   it('сохраняет 0.5.2, хранит локальную копию, переносит назначения через JSON 2.7 один раз', async () => {
     const source = await open({ checks: { kept: { done: true, at } } });
-    expect(JSON.parse(storage.get('kurs:before-0.6.0')!).version).toBe(5);
+    expect(JSON.parse(storage.get(MIGRATION_BACKUP_KEY)!).version).toBe(5);
     source.getState().fundPayment('t', 'reserve', [split.key], next, LIFE_ACCOUNT, 5000, day);
     const copy = JSON.parse(source.getState().exportData());
     expect(copy.checks.kept.done).toBe(true);
@@ -209,6 +210,7 @@ describe('подготовка обязательств и движение ме
     vi.resetModules();
     const restored = (await import('./store')).useStore;
     expect(ledger(restored.getState()).heldOnCard).toBe(5000);
+    storage.clear();
     const target = await open();
     const patch = applyExchange(file, target.getState(), day, new Set(['accountBook']), () => 'import');
     target.getState().applySync(patch, 'Помечено');

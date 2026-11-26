@@ -1,11 +1,13 @@
 import { exchangeRevision } from '../domain/exchange';
 import type { BankImportBatch } from '../domain/accounts';
-import { cashAccount } from '../domain/accounts';
+import { cashAccount, cents, LIFE_ACCOUNT, RESERVE_ACCOUNT, rubles } from '../domain/accounts';
 // Выписка и скриншоты из банка → что на них → что обновить: траты по категориям, оплаченные платежи,
 // поступления (премия сразу открывает распределение), остаток на карте. После — итог недели.
 import { AlertTriangle, Camera, Check, ClipboardPaste, FileSpreadsheet, FileText, Loader2 } from 'lucide-react';
 import { useRef, useState, type ReactNode } from 'react';
 import { Chip, Money, PrimaryButton, SecondaryButton, Sheet, Tile } from '../components/ui';
+import { reconcileStatement, type StatementCheck } from '../domain/bankReconciliation';
+import { ledger } from '../domain/ledger';
 import { ddmm, fromKey, today } from '../domain/dates';
 import { CATEGORIES } from '../domain/plan';
 import { fromAi, fromBank, fromDrafts, type AnyProposal } from '../domain/proposals';
@@ -29,7 +31,7 @@ export function ImportSheet() {
   );
 }
 
-type Review = { summary: string; warnings: string[]; items: AnyProposal[]; batch?: BankImportBatch };
+type Review = { summary: string; warnings: string[]; items: AnyProposal[]; batch?: BankImportBatch; statement?: StatementCheck; accountId?: string };
 type Step = { s: 'pick' } | { s: 'text' } | { s: 'busy'; label: string } | { s: 'review'; review: Review } | { s: 'screenshots'; images: ImageOCR[] } | { s: 'error'; text: string };
 
 async function sha256Hex(data: BufferSource) {
@@ -88,11 +90,24 @@ function Flow() {
     setStep({ s: 'busy', label: 'Читаю выписку на телефоне…' });
     try {
       const { pdfText, parseStatementText, isIncomeLine } = await import('../domain/pdf');
+      const fileHash = await sha256Hex(await file.arrayBuffer());
+      if (useStore.getState().accountBook.importBatches?.some(batch => batch.fileHash === fileHash && !batch.partial)) {
+        setStep({ s: 'review', review: { summary: 'Этот файл уже импортирован.', items: [], warnings: [] } });
+        return;
+      }
       const st = parseStatementText(await pdfText(file));
       if (!st.lines.length) { setStep({ s: 'error', text: 'Не нашёл в PDF строк с датой и суммой. Попробуйте скриншоты или CSV.' }); return; }
-      const rows = st.lines.map(l => draft(l.date, l.amount, l.text, { income: isIncomeLine(l) }));
-      const last = st.periodEnd ?? st.lines.map(l => l.date).sort().at(-1)!;
-      setStep({ s: 'review', review: fromDrafts(rows, ctx(), `Выписка: ${rows.length} операций. Разобрано на телефоне — проверьте категории и знаки.`, st.closingBalance != null ? { cardBalance: { amount: st.closingBalance, date: last } } : {}) });
+      const statement = reconcileStatement({ opening: st.openingBalance, closing: st.closingBalance, end: st.periodEnd },
+        st.lines.map(line => line.sign == null ? null : line.sign * line.amount));
+      const rows = st.lines.map((line, index) => {
+        const tx = draft(line.date, line.amount, line.text, { income: isIncomeLine(line) });
+        return { ...tx, structured: true, skip: line.sign == null || tx.skip,
+          fingerprint: JSON.stringify(['csv:file', fileHash, index]) };
+      });
+      const review = fromDrafts(rows, ctx(), `Выписка PDF: ${rows.length} операций.`);
+      setStep({ s: 'review', review: { ...review, statement, accountId: LIFE_ACCOUNT,
+        batch: { id: fileHash, fileHash, bank: /ВТБ|VTB/i.test(st.raw) ? 'vtb' : 'pdf', importedAt: new Date().toISOString(),
+          parserVersion: 'kurs-pdf-2', rowCount: rows.length } } });
     } catch (e) { fail(e); }
   };
 
@@ -103,7 +118,7 @@ function Flow() {
       if (file.size > 10 * 1024 * 1024) throw new Error('Выберите файл размером до 10 МБ.');
       const buf = await file.arrayBuffer();
       const fileHash = await sha256Hex(buf);
-      if (useStore.getState().accountBook.importBatches?.some(batch => batch.fileHash === fileHash)) {
+      if (useStore.getState().accountBook.importBatches?.some(batch => batch.fileHash === fileHash && !batch.partial)) {
         setStep({ s: 'review', review: { summary: 'Этот файл уже импортирован.', items: [], warnings: [] } });
         return;
       }
@@ -123,7 +138,11 @@ function Flow() {
         : row));
       const review = fromDrafts(rows, ctx(), `Выписка: ${rows.length} операций. Столбцы: «${r.columns.date}», «${r.columns.amount}», «${r.columns.merchant}».`);
       const warnings = r.rejected ? [`Пропущено строк: ${r.rejected}. Проверьте статус, валюту и формат данных в исходной таблице.`, ...review.warnings] : review.warnings;
-      setStep({ s: 'review', review: { ...review, warnings, batch: { id: fileHash, fileHash, bank: r.bank, importedAt: new Date().toISOString(),
+      const accountLabels = new Set(rows.flatMap(row => row.bankAccount ? [row.bankAccount] : []));
+      const statement = reconcileStatement(r.bounds, rows.map(row => row.income ? row.amount : -row.amount),
+        r.rejected + (accountLabels.size > 1 ? 1 : 0));
+      const accountId = accountLabels.size > 1 ? undefined : /накопительн|резерв/i.test([...accountLabels][0] ?? '') ? RESERVE_ACCOUNT : LIFE_ACCOUNT;
+      setStep({ s: 'review', review: { ...review, warnings, ...(r.bounds.opening != null || r.bounds.closing != null ? { statement, accountId } : {}), batch: { id: fileHash, fileHash, bank: r.bank, importedAt: new Date().toISOString(),
         parserVersion: xlsx ? 'kurs-xlsx-1' : 'kurs-csv-2', rowCount: rows.length } } });
     } catch (e) {
       fail(e);
@@ -162,7 +181,7 @@ function Flow() {
 
   return (
     <div className="space-y-2.5 pt-1">
-      <input ref={pdf} type="file" accept="application/pdf" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void (apiKey ? runAi([f]) : runPdfLocal(f)); }} />
+      <input ref={pdf} type="file" accept="application/pdf" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void runAi([f]); }} />
       <input ref={pdfLocal} type="file" accept="application/pdf" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; void runPdfLocal(f); }} />
       <input ref={shots} type="file" accept="image/*" multiple hidden onChange={e => { const f = [...(e.target.files ?? [])]; e.target.value = ''; void runScreenshots(f); }} />
       <input ref={csv} type="file" accept=".csv,.xlsx,text/csv,text/plain,.txt" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; void runCsv(f); }} />
@@ -183,11 +202,11 @@ function Flow() {
       <details className="pt-1">
         <summary className="cursor-pointer list-none px-1 py-2 text-[13.5px] font-medium text-sea [&::-webkit-details-marker]:hidden">Другие способы: выписка PDF, скриншоты, таблица</summary>
         <div className="space-y-2.5 pt-1">
-      <Option icon={<FileText size={19} strokeWidth={1.9} />} color="#f0603a" title="Выписка PDF" tag={apiKey ? 'Claude' : 'на телефоне'}
+      <Option icon={<FileText size={19} strokeWidth={1.9} />} color="#f0603a" title="Выписка PDF" tag="на телефоне"
         lead="Файл выписки за неделю — самый точный способ"
         text="В приложении банка: карта → «Выписка» → период «неделя» → поделиться PDF → «Сохранить в Файлы». Затем выберите файл здесь."
-        onClick={() => pdf.current?.click()}>
-        {apiKey && <button type="button" onClick={e => { e.stopPropagation(); pdfLocal.current?.click(); }} className="mt-2 text-[12.5px] font-medium text-sea">Разобрать без Claude, бесплатно</button>}
+        onClick={() => pdfLocal.current?.click()}>
+        {apiKey && <button type="button" onClick={e => { e.stopPropagation(); pdf.current?.click(); }} className="mt-2 text-[12.5px] font-medium text-sea">Отправить в Claude для разбора</button>}
       </Option>
 
       <Option icon={<FileSpreadsheet size={19} strokeWidth={1.9} />} color="#2ba36a" title="Файл CSV или XLSX" tag="на телефоне"
@@ -265,7 +284,7 @@ function ReviewList({ review, onBack }: { review: Review; onBack: () => void }) 
   const [items, setItems] = useState<AnyProposal[]>(review.items);
   const set = useUi(s => s.set);
   const patch = (id: string, p: Partial<AnyProposal>) => setItems(list => list.map(i => (i.id === id ? ({ ...i, ...p } as AnyProposal) : i)));
-  const on = items.filter(i => i.on && (i.type !== 'income' || i.event) && (i.type !== 'tx' || !i.tx.duplicate || i.tx.needsDuplicateReview));
+  const on = items.filter(i => i.on && (i.type !== 'income' || i.event) && (i.type !== 'tx' || (!(i.tx.structured && i.tx.skip) && (!i.tx.duplicate || i.tx.needsDuplicateReview))));
   const spent = on.reduce((s, i) => s + (i.type === 'tx' ? i.tx.amount : 0), 0);
 
   const apply = () => {
@@ -282,10 +301,13 @@ function ReviewList({ review, onBack }: { review: Review; onBack: () => void }) 
       return [i.tx];
     });
     if (!txs.length && on.every(i => i.type === 'tx')) { toast('Новых операций нет'); return; }
-    const applied = store.applyBankImport(revision, `Из банка: ${review.summary}`, review.batch, store => {
+    const unresolved = items.some(item => !on.includes(item) && (item.type === 'posting' || item.type === 'income' ||
+      item.type === 'mark' || item.type === 'tx' && (!item.tx.duplicate || item.tx.needsDuplicateReview)));
+    const batch = review.batch ? { ...review.batch, ...(unresolved ? { partial: true as const } : {}) } : undefined;
+    const applied = store.applyBankImport(revision, `Из банка: ${review.summary}`, batch, (store, current) => {
       const people = on.flatMap(i => (i.type === 'person' && i.choice === 'spend' ? [i] : []));
       if (txs.length || people.length) store.addExpenses([
-        ...txs.map(t => ({ date: t.date, amount: t.amount, category: t.category, note: t.merchant, source: t.source, origin: (t.nameKey ? 'text' : 'ai') as 'text' | 'ai', fingerprint: t.fingerprint, ...(t.occurredAt ? { occurredAt: t.occurredAt } : {}), ...(t.creditCard ? { creditCard: t.creditCard } : {}) })),
+        ...txs.map(t => ({ date: t.date, amount: t.amount, category: t.category, note: t.merchant, source: t.source, origin: t.structured ? ('csv' as const) : t.nameKey ? ('text' as const) : ('ai' as const), fingerprint: t.fingerprint, ...(t.occurredAt ? { occurredAt: t.occurredAt } : {}), ...(t.creditCard ? { creditCard: t.creditCard } : {}) })),
         ...people.map(p => ({ date: p.date, amount: p.amount, category: p.category, note: p.name, source: 'life' as const, origin: 'text' as const, fingerprint: p.fingerprint })),
       ]);
       // память продавцов: сменили категорию — запомнить
@@ -305,6 +327,9 @@ function ReviewList({ review, onBack }: { review: Review; onBack: () => void }) 
               amount: Math.min(i.expense.amount, i.amount), date: i.date, createdAt: new Date().toISOString(), status: 'confirmed', origin: 'bank', fundingSource: 'unknown' });
           }
         }
+        if (i.type === 'posting' && !store.saveOperation({ ...i.op, createdAt: new Date().toISOString() })) {
+          throw new Error('bank row could not be committed');
+        }
         if (i.type === 'interest') store.moveReserve(i.amount, 'Проценты на накопительный');
         if (i.type === 'due') store.setOverride(i.event.key, { amount: i.amount, date: i.date });
         if (i.type === 'debt') {
@@ -321,10 +346,24 @@ function ReviewList({ review, onBack }: { review: Review; onBack: () => void }) 
         if (i.type === 'reserve') store.setReserve(i.balance, 'Сверка по выписке');
         if (i.type === 'card') store.setCardBalance({ amount: i.balance, date: i.date, source: 'statement' });
       }
+      if (batch && review.statement && review.accountId) {
+        const statement = review.statement;
+        const state = current();
+        const position = statement.end ? ledger({ ...state, now: statement.end }) : null;
+        const lastReserveSnapshot = [...state.checkups.map(row => row.date), ...state.reserveLog.filter(row => row.abs).map(row => row.date)].sort().at(-1);
+        const balance = review.accountId === LIFE_ACCOUNT ? position?.cardPosted
+          : lastReserveSnapshot && statement.end && statement.end >= lastReserveSnapshot ? position?.reservePosted : null;
+        batch.statement = { ...statement, accountId: review.accountId,
+          ...(balance != null ? { ledgerClosingMinor: cents(balance) } : {}) };
+      }
     });
     const bonus = result.bonus;
     if (!applied && !bonus) { toast('Данные изменились или операции уже учтены. Откройте выписку заново.'); return; }
-    if (applied) toast(`Обновлено: ${on.length}`);
+    if (applied) {
+      const check = batch?.statement;
+      toast(check?.status === 'mismatch' || check?.ledgerClosingMinor != null && check.ledgerClosingMinor !== check.closingMinor
+        ? 'Операции записаны. Конечный остаток требует сверки.' : `Обновлено: ${on.length}`);
+    }
     if (bonus && bonus.type === 'income' && bonus.event) { set({ scan: false, bonus: { event: { ...bonus.event, amount: bonus.amount } } }); return; }
     // в выходные и в начале недели после выписки — сразу итог недели
     const now = today(), dow = fromKey(now).getDay();
@@ -333,11 +372,19 @@ function ReviewList({ review, onBack }: { review: Review; onBack: () => void }) 
     else set({ scan: false });
   };
 
-  const groups: [string, AnyProposal['type'][]][] = [['Платежи и долги', ['mark', 'debt', 'due']], ['Переводы', ['person', 'transfer']], ['Поступления и возвраты', ['income', 'refund', 'interest']], ['Счета', ['card', 'reserve']], ['Траты', ['tx']], ['Не траты', ['info']]];
+  const groups: [string, AnyProposal['type'][]][] = [['Платежи и долги', ['mark', 'debt', 'due']], ['Переводы', ['person', 'transfer']], ['Поступления и возвраты', ['income', 'refund', 'interest', 'posting']], ['Счета', ['card', 'reserve']], ['Траты', ['tx']], ['Не траты', ['info']]];
 
   return (
     <div className="space-y-4 pt-1">
       <div className="rounded-2xl bg-surface-2 px-4 py-3 text-[13.5px] leading-snug">{review.summary || 'Готово.'}</div>
+      {review.statement && <section aria-label="Сверка выписки" className="card space-y-1 p-3 text-[13px]">
+        <p className="font-medium">{review.statement.status === 'matched' ? 'Строки выписки сходятся с конечным остатком'
+          : review.statement.status === 'mismatch' ? 'Строки выписки расходятся с конечным остатком' : 'В выписке недостаточно данных для сверки'}</p>
+        {review.statement.closingMinor != null && <p>В банке на конец периода <Money value={rubles(review.statement.closingMinor)} kopecks /></p>}
+        {review.statement.differenceMinor != null && review.statement.differenceMinor !== 0 &&
+          <p className="text-warn">Разница <Money value={rubles(review.statement.differenceMinor)} kopecks /></p>}
+        <p className="text-muted">После записи приложение сравнит расчётный остаток с выпиской. Контрольный остаток меняется в разделе сверки.</p>
+      </section>}
       {review.warnings.map((w, k) => (
         <p key={k} className="flex items-start gap-2 rounded-2xl bg-neg/10 px-4 py-3 text-[13px] leading-snug text-neg"><AlertTriangle size={15} className="mt-0.5 shrink-0" />{w}</p>
       ))}
@@ -355,7 +402,7 @@ function ReviewList({ review, onBack }: { review: Review; onBack: () => void }) 
             <div className="card divide-hair overflow-hidden">
               {list.map(i => (
                 <div key={i.id} className={`flex items-start gap-3 px-3.5 py-3 ${i.on || i.type === 'person' ? '' : 'opacity-50'}`}>
-                  {i.type !== 'info' && i.type !== 'person' && (i.type !== 'income' || i.event) && <button type="button" onClick={() => patch(i.id, { on: !i.on })} aria-label={i.on ? 'Не применять' : 'Применить'}
+                  {i.type !== 'info' && i.type !== 'person' && (i.type !== 'income' || i.event) && !(i.type === 'tx' && i.tx.structured && i.tx.skip) && <button type="button" onClick={() => patch(i.id, { on: !i.on })} aria-label={i.on ? 'Не применять' : 'Применить'}
                     className={`mt-0.5 grid size-6 shrink-0 place-items-center rounded-md border ${i.on ? 'border-transparent bg-ink text-bg' : 'border-line text-transparent'}`}><Check size={13} strokeWidth={2.5} /></button>}
                   <div className="min-w-0 flex-1"><ProposalBody p={i} onPatch={p => patch(i.id, p)} /></div>
                 </div>
@@ -398,6 +445,10 @@ function ProposalBody({ p, onPatch }: { p: AnyProposal; onPatch: (x: Partial<Any
         </div>
       );
     }
+    case 'posting':
+      return <div className="text-[13.5px]"><div className="flex justify-between gap-2">
+        <span className="font-medium">{p.text}</span><Money value={p.op.amount} kopecks /></div>
+        <div className="text-muted">{ddmm(p.op.date)} · {p.op.note}</div></div>;
     case 'transfer':
       return (
         <div className="text-[13.5px] leading-snug">
@@ -425,6 +476,7 @@ function ProposalBody({ p, onPatch }: { p: AnyProposal; onPatch: (x: Partial<Any
           </div>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[12px]">
             <span className="text-muted">{ddmm(p.tx.date)}</span>
+            {p.tx.structured && p.tx.skip && <span className="text-warn">Требует сверки</span>}
             <select value={p.tx.category} onChange={e => onPatch({ tx: { ...p.tx, category: e.target.value as CategoryId } } as Partial<AnyProposal>)}
               className="rounded-lg bg-surface-2 px-2 py-1 text-[12px] font-medium">
               {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.short}</option>)}

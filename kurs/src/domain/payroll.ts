@@ -40,6 +40,7 @@ export interface PayrollProfile {
   accountId?: string;
   advancesBy?: 'days' | 'hours';
   cautiousUnit2027?: number;
+  quarterlyBonus?: { from: string; months: number[]; day: number; gross: number };
   workingHours?: Record<string, number>;
   absenceHours?: Record<string, number>;
   attendance?: Record<string, { paidDays: number; firstPaidDays: number }>;
@@ -164,6 +165,11 @@ export function validPayroll(profile: PayrollProfile): boolean {
   if (profile.advancesBy != null && profile.advancesBy !== 'days' && profile.advancesBy !== 'hours') return false;
   if (profile.accountId != null && (typeof profile.accountId !== 'string' || !profile.accountId.trim())) return false;
   if (profile.cautiousUnit2027 != null && (!validAmount(profile.cautiousUnit2027) || profile.cautiousUnit2027 <= 0)) return false;
+  const quarterly = profile.quarterlyBonus;
+  if (quarterly != null && (!validDate(quarterly.from) || !validAmount(quarterly.gross) || quarterly.gross <= 0 ||
+    !Number.isInteger(quarterly.day) || quarterly.day < 1 || quarterly.day > 31 || !Array.isArray(quarterly.months) ||
+    !quarterly.months.length || new Set(quarterly.months).size !== quarterly.months.length ||
+    quarterly.months.some(month => !Number.isInteger(month) || month < 1 || month > 12))) return false;
   if (!profile.rates.every(r => r && validDate(r.from) && validAmount(r.unit) && r.unit > 0 &&
       [r.positionUnits, r.rankUnits, r.seniority, r.conditions, r.monthlyBonus].every(amount => validAmount(amount) && amount >= 0) &&
       (r.confidence === 'confirmed' || r.confidence === 'estimate'))) return false;
@@ -308,6 +314,15 @@ export function workPayments(profile: PayrollProfile, from: string, to: string, 
     lines.push({ key, kind: extra.kind, title: extra.title, accrualPeriod: monthKey(extra.date), nominalDate: extra.date,
       expectedPayDate: profile.payDates?.[key] ?? workdayOnOrBefore(extra.date, off), gross: extra.gross,
       source: 'Сценарная оценка', confidence: 'estimate', provisionalCalendar: !calendarApproved(Number(extra.date.slice(0, 4))) });
+  }
+  const quarterly = profile.quarterlyBonus;
+  if (quarterly) for (let month = firstMonth; month <= monthKey(to); month = addMonths(month, 1)) {
+    const nominalDate = dayIn(month, quarterly.day);
+    const key = `inc:bonusQuarter:${month}`;
+    if (nominalDate < quarterly.from || !quarterly.months.includes(Number(month.slice(5))) || lines.some(p => p.key === key)) continue;
+    lines.push({ key, kind: 'bonusQuarter', title: 'Квартальная премия', accrualPeriod: addMonths(month, -1), nominalDate,
+      expectedPayDate: profile.payDates?.[key] ?? workdayOnOrBefore(nominalDate, off), gross: quarterly.gross,
+      source: 'Параметры квартальной премии', confidence: 'estimate', provisionalCalendar: !calendarApproved(Number(month.slice(0, 4))) });
   }
   for (const [key, actual] of Object.entries(profile.actual ?? {})) {
     if (actual.net == null || !actual.kind || lines.some(p => p.key === key)) continue;

@@ -1,10 +1,10 @@
 // Откуда деньги на трату: свои (карта жизни), в долг (кредитка) или резерв. Одна логика для листа траты, меток в
 // списках и раскладки месяца: что предложить и что будет после записи.
-import { cashAccount, countsWeekly, RESERVE_ACCOUNT } from './accounts';
+import { cashAccount, cents, countsWeekly, LIFE_ACCOUNT, RESERVE_ACCOUNT, rubles } from './accounts';
 import { bridgeState, weekMoney, type Bridge } from './bridge';
 import { weekStart } from './dates';
 import { num } from './money';
-import { dayBudget } from './summary';
+import { availableToday, dayBudget } from './summary';
 import type { Debt, Expense, Source, WeeklyOverride } from './types';
 
 export const SOURCE_LABEL: Record<Source, string> = { life: 'Свои', credit: 'В долг', reserve: 'Резерв' };
@@ -33,7 +33,7 @@ const r = (n: number) => `${num(Math.abs(n))} ₽`;
  * Что будет после записи траты — одной строкой под суммой. amount = 0 — что сейчас. skipId — правим эту трату:
  * её прежняя сумма не считается. reserve — резерв по учёту.
  */
-export function spendEffect(s: SpendState, x: { amount: number; source: Source; date: string; now: string; reserve: number; skipId?: string; creditCard?: string; category?: Expense['category']; budgetScope?: Expense['budgetScope']; accountId?: string }): SpendEffect {
+export function spendEffect(s: SpendState, x: { amount: number; source: Source; date: string; now: string; reserve: number; lifeAvailable?: number | null; liquidityCap?: number | null; skipId?: string; creditCard?: string; category?: Expense['category']; budgetScope?: Expense['budgetScope']; accountId?: string }): SpendEffect {
   const draft: Expense = { id: '~', date: x.date, amount: x.amount, category: x.category ?? 'fun', budgetScope: x.budgetScope, source: x.source, accountId: x.accountId, creditCard: x.creditCard ?? s.bridge?.card, createdAt: '' };
   if (cashAccount(draft) === RESERVE_ACCOUNT) {
     const budget = countsWeekly(draft) ? 'Трата входит в недельный бюджет' : 'Вне недельного лимита';
@@ -61,7 +61,14 @@ export function spendEffect(s: SpendState, x: { amount: number; source: Source; 
   if (thisWeek && x.date === x.now) {
     const day = dayBudget(expenses, s.debts, s.weeklyOverrides, x.now);
     if (day.mode === 'day') return { text: `Сегодня сверх нормы на ${r(day.overDay)}, на неделю останется ${r(week.left)}`, tone: 'warn' };
-    return { text: `На сегодня ${x.amount > 0 ? 'останется' : 'можно ещё'} ${r(day.canSpend)}`, tone: 'ok' };
+    const existing = x.skipId ? s.expenses.find(expense => expense.id === x.skipId && expense.date === x.now && expense.source === 'life') : undefined;
+    const cashDelta = cents(x.amount) - cents(existing?.amount ?? 0);
+    const cardDelta = (cashAccount(draft) === LIFE_ACCOUNT ? cents(x.amount) : 0) -
+      (existing && cashAccount(existing) === LIFE_ACCOUNT ? cents(existing.amount) : 0);
+    const remaining = x.lifeAvailable === undefined ? day.canSpend : availableToday(day,
+      x.lifeAvailable === null ? null : rubles(Math.max(0, cents(x.lifeAvailable) - cardDelta)),
+      x.liquidityCap == null ? null : rubles(Math.max(0, cents(x.liquidityCap) - cashDelta)));
+    return { text: `На сегодня ${x.amount > 0 ? 'останется' : 'можно ещё'} ${r(remaining)}`, tone: 'ok' };
   }
   return { text: `На неделю ${x.amount > 0 ? 'останется' : 'осталось'} ${r(week.left)}`, tone: 'ok' };
 }

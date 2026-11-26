@@ -18,6 +18,7 @@ import { guessCategory, parseSpoken } from '../domain/spoken';
 import type { CategoryId, Expense, Source } from '../domain/types';
 import { useStore } from '../store/store';
 import { toast, useBudgetExpenses, useUi, type AddPrefill } from '../store/ui';
+import { useDailyLiquidityCap } from '../components/Coverage';
 import { useLedger } from './Checkup';
 
 /** Источник денег: свои — Нева, в долг — сиреневая штриховка (чужие деньги), резерв — сумерки */
@@ -53,6 +54,7 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   const [date, setDate] = useState(edit?.date ?? p.date ?? today());
   const suggested = DEFAULT_SPEND_SOURCE;
   const [source, setSource] = useState<Source>(edit?.source ?? p.source ?? suggested);
+  const [advanced, setAdvanced] = useState(!!(edit || p.source || p.date));
   const [picked, setPicked] = useState(!!(edit || p.source));
   const [card, setCard] = useState(edit?.creditCard ?? p.creditCard ?? '');
   const [account, setAccount] = useState(edit?.accountId ?? LIFE_ACCOUNT);
@@ -62,6 +64,7 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   const expenses = useBudgetExpenses();
   const [debts, weeklyOverrides, bridge] = useStore(useShallow(s => [s.debts, s.weeklyOverrides, s.bridge] as const));
   const led = useLedger();
+  const liquidityCap = useDailyLiquidityCap();
   const loan = useMemo(() => (activeBridge(bridge) ? bridgeState(expenses, bridge) : null), [expenses, bridge]);
   const [askPause, setAskPause] = useState(false);
   const dateInput = useRef<HTMLInputElement>(null);
@@ -112,9 +115,9 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   const valid = value > 0 && !!category;
   // что будет после записи — одной строкой под суммой: остаток дня, долг по мосту или остаток резерва
   const effect = useMemo(() => spendEffect({ expenses, debts, weeklyOverrides, bridge }, {
-    amount: value, source, date, now: today(), reserve: led.reserve, skipId: edit?.id, creditCard: card,
+    amount: value, source, date, now: today(), reserve: led.reserve, lifeAvailable: led.lifeAvailable, liquidityCap, skipId: edit?.id, creditCard: card,
     category: category ?? undefined, budgetScope: scope ?? (edit ? undefined : 'weekly'), accountId: source === 'life' ? account : undefined,
-  }), [expenses, debts, weeklyOverrides, bridge, value, source, date, led.reserve, edit?.id, card, category, account, scope]);
+  }), [expenses, debts, weeklyOverrides, bridge, value, source, date, led.reserve, led.lifeAvailable, liquidityCap, edit?.id, card, category, account, scope]);
 
   /** src — источник, если сумму бросили в сосуд: состояние ещё не успело обновиться */
   const save = (src: Source = source) => {
@@ -124,7 +127,7 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
     const item = { date, amount: value, category: category!, note: noteText() || undefined, source: src, origin: 'manual' as const, creditCard: src === 'credit' ? card : undefined, accountId: src === 'life' && account !== LIFE_ACCOUNT ? account : undefined,
       fundingSource: src === 'credit' ? 'borrowed' as const : funding, budgetScope: scope ?? (edit ? undefined : 'weekly' as const) };
     const done = src === source ? effect : spendEffect({ expenses, debts, weeklyOverrides, bridge }, {
-      amount: value, source: src, date, now: today(), reserve: led.reserve, skipId: edit?.id, creditCard: card,
+      amount: value, source: src, date, now: today(), reserve: led.reserve, lifeAvailable: led.lifeAvailable, liquidityCap, skipId: edit?.id, creditCard: card,
       category: item.category, accountId: item.accountId, budgetScope: item.budgetScope,
     });
     if (edit) store.updateExpense(edit.id, item);
@@ -146,7 +149,7 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
     return !!r && x >= r.left - 4 && x <= r.right + 4 && y >= r.top - 14 && y <= r.bottom + 14;
   }) ?? null;
   const dragHandlers = {
-    onPointerDown: (e: ReactPointerEvent<HTMLElement>) => { if (value > 0) { grab.current = { x: e.clientX, y: e.clientY }; e.currentTarget.setPointerCapture?.(e.pointerId); } },
+    onPointerDown: (e: ReactPointerEvent<HTMLElement>) => { if (advanced && value > 0) { grab.current = { x: e.clientX, y: e.clientY }; e.currentTarget.setPointerCapture?.(e.pointerId); } },
     onPointerMove: (e: ReactPointerEvent<HTMLElement>) => {
       const g = grab.current;
       if (!g || (!drag && Math.hypot(e.clientX - g.x, e.clientY - g.y) < 10)) return;
@@ -207,6 +210,12 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
       {/* что будет после записи: остаток дня, долг по мосту, остаток резерва — меняется вместе с суммой и источником */}
       <p className="-mt-1 min-h-[18px] text-center text-[12.5px] leading-snug font-medium" style={{ color: EFFECT_COLOR[effect.tone] }} aria-live="polite">{effect.text}</p>
 
+      <button type="button" aria-expanded={advanced} onClick={() => setAdvanced(value => !value)}
+        className="flex min-h-10 w-full items-center justify-between gap-2 rounded-xl bg-surface-2 px-3 text-left text-[13px]">
+        <span>{date === today() ? 'Сегодня' : dayMonth(date)} · {SOURCE_LABEL[source]}</span>
+        <span className="text-sea">{advanced ? 'Свернуть' : 'Изменить'}</span>
+      </button>
+      {advanced && <div className="space-y-2">
       {/* откуда деньги: свои, в долг или резерв — три кнопки, под каждой — сколько там сейчас */}
       <div role="radiogroup" aria-label="Откуда деньги" className="relative grid grid-cols-3 rounded-[18px] bg-surface-2 p-[3px]">
         <span aria-hidden="true" className="pointer-events-none absolute inset-y-[3px] left-[3px] rounded-[15px] shadow-[0_6px_14px_-8px_rgba(10,36,51,.5),inset_0_1px_0_rgba(255,255,255,.3)] transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none"
@@ -253,8 +262,13 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
           <option value="unknown">Источник требует сверки</option>
         </select>
       </label>}
+        <button type="button" onClick={() => dateInput.current?.showPicker?.() ?? dateInput.current?.focus()} className="relative flex h-10 shrink-0 items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-[13px] font-medium">
+          <CalendarDays size={15} strokeWidth={1.6} className="text-sea" />{date === today() ? 'Сегодня' : `${weekday(date)}, ${dayMonth(date)}`}
+          <input ref={dateInput} type="date" value={date} onChange={e => setDate(e.target.value || today())} className="absolute inset-0 opacity-0" aria-label="Дата" />
+        </button>
+      </div>}
       {/* подсказка не исчезает во время жеста: иначе сосуды съезжали бы из-под пальца */}
-      {value > 0 && !!category && !edit && <p className={`-mt-1.5 text-center text-[11.5px] text-faint ${drag ? 'invisible' : ''}`}>Потяните сумму в «Свои», «В долг» или «Резерв» — запишется сразу</p>}
+      {advanced && value > 0 && !!category && !edit && <p className={`-mt-1.5 text-center text-[11.5px] text-faint ${drag ? 'invisible' : ''}`}>Потяните сумму в «Свои», «В долг» или «Резерв» — запишется сразу</p>}
       {drag && createPortal(
         <div className="pointer-events-none fixed z-[90] -translate-x-1/2 -translate-y-[130%] rounded-full bg-ink px-4 py-2 text-bg shadow-[0_14px_30px_-10px_rgba(4,14,22,.7)]" style={{ left: drag.x, top: drag.y }}>
           <span className="figure text-[20px]"><Money value={value} /></span>
@@ -263,10 +277,6 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
 
       {/* когда и что купили */}
       <div className="flex items-center gap-2">
-        <button type="button" onClick={() => dateInput.current?.showPicker?.() ?? dateInput.current?.focus()} className="relative flex h-10 shrink-0 items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-[13px] font-medium">
-          <CalendarDays size={15} strokeWidth={1.6} className="text-sea" />{date === today() ? 'Сегодня' : `${weekday(date)}, ${dayMonth(date)}`}
-          <input ref={dateInput} type="date" value={date} onChange={e => setDate(e.target.value || today())} className="absolute inset-0 opacity-0" aria-label="Дата" />
-        </button>
         <input value={note} onChange={e => typeNote(e.target.value)} placeholder={edit ? 'Что купили' : 'Что купили — или «обед 340»'} enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }} className="h-10 min-w-0 flex-1 rounded-full border border-line bg-surface px-3.5 text-[16px] outline-none placeholder:text-faint focus:border-sea" />
       </div>
 

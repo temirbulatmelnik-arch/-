@@ -1,12 +1,13 @@
 import { useCoverage } from '../components/Coverage';
 import { annualIncome, INCOME_GROUPS } from '../domain/annualIncome';
+import { auditPayroll } from '../domain/payrollAudit';
 import { payrollRegister } from '../domain/payrollRegister';
 import { compare2027Coverage } from '../domain/coverage';
 import { useMemo, useState } from 'react';
 import { Field, Money, PrimaryButton, SecondaryButton, Segmented, Sheet } from '../components/ui';
 import { accountOptions, cents, LIFE_ACCOUNT, validDate } from '../domain/accounts';
 import { cashIncomeEvent, eventsBetween, incomeStatus, INCOME_STATUS_LABEL } from '../domain/calendar';
-import { addDays, ddmm, ddmmyyyy } from '../domain/dates';
+import { addDays, ddmm, ddmmyyyy, today } from '../domain/dates';
 import { parseAmount } from '../domain/money';
 import { isRegularWork, payComponents, payRateOn, progressiveTax, UNIT_2027, UNIT_REFERENCE, vacationDays, vacationGross, with2027Unit, type PayrollProfile, type PayRate, type Vacation } from '../domain/payroll';
 import { uid, useStore } from '../store/store';
@@ -79,6 +80,7 @@ function Income({ profile, now, calendar }: { profile: PayrollProfile; now: stri
   const [year, setYear] = useState<'2026' | '2027'>(now.startsWith('2026') ? '2026' : '2027');
   const [unit, setUnit] = useState<'proposal' | 'law'>('proposal');
   const law = useMemo(() => ({ ...cal, work: with2027Unit(profile, UNIT_2027[0].unit) }), [cal, profile]);
+  const audit = useMemo(() => auditPayroll(profile, cal.accountBook?.operations ?? [], cal.marks ?? {}, Number(year)), [profile, cal.accountBook, cal.marks, year]);
   const historical = useMemo(() => annualIncome(cal, 2026, now, 'base'), [cal, now]);
   const main = useMemo(() => annualIncome(cal, 2027, now, 'base'), [cal, now]);
   const cautious = useMemo(() => annualIncome(law, 2027, now, 'cautious'), [law, now]);
@@ -137,6 +139,21 @@ function Income({ profile, now, calendar }: { profile: PayrollProfile; now: stri
           </div>
         </details>
       </div>
+      {audit.rows.length > 0 && <details className="card space-y-2 p-3 text-[13px]">
+        <summary className="min-h-8 font-medium">Сверка расчётных листков · {audit.rows.length}</summary>
+        <p className="text-muted">Связано с банком {audit.withBank} · подтверждено отметкой {audit.withMark} · ждёт подтверждения {audit.undocumentedBank}</p>
+        <div className="divide-y divide-line">
+          {audit.rows.map(row => <div key={row.key} className="space-y-1 py-2">
+            <p className="font-medium">{row.date ?? 'Дата не указана'} · {row.title}</p>
+            <p>По листку <Money value={row.net} kopecks />
+              {row.gross != null && <> · начислено <Money value={row.gross} kopecks /></>}
+              {row.tax != null && <> · НДФЛ <Money value={row.tax} kopecks /></>}
+              {row.otherWithheld != null && <> · прочие удержания <Money value={row.otherWithheld} kopecks /></>}</p>
+            {row.plannedNet != null && <p className="text-muted">{row.plannedBasis === 'recorded' ? 'Сохранённый прогноз' : 'Пересчёт по текущей модели'} <Money value={row.plannedNet} kopecks /> · отклонение <Money value={row.plannedDelta!} kopecks /></p>}
+            <p className="text-muted">{row.bank ? <>{row.bank.evidence === 'bank' ? 'Банк' : 'Отметка'} <Money value={row.bank.amount} kopecks />{row.bankDelta ? <> · разница <Money value={row.bankDelta} kopecks /></> : null}</> : 'Банковская выплата не подтверждена'}</p>
+          </div>)}
+        </div>
+      </details>}
       {year === '2026' && firstRate && <RateCard rate={firstRate} label="Полный отработанный месяц" />}
       {year === '2027' && nextRate && <>
         <RateCard rate={nextRate} label="Основной сценарий 2027" />
@@ -226,6 +243,10 @@ function WorkSettings() {
   const [source, setSource] = useState(latest?.source ?? '');
   const [editRateDate, setEditRateDate] = useState(latest?.from);
   const compareRate = work?.rates.find(r => r.from.startsWith('2027-'));
+  const [quarterGross, setQuarterGross] = useState(work?.quarterlyBonus?.gross.toString() ?? '');
+  const [quarterDate, setQuarterDate] = useState(work?.quarterlyBonus?.from ?? today());
+  const [quarterDay, setQuarterDay] = useState(work?.quarterlyBonus?.day.toString() ?? '');
+  const [quarterMonths, setQuarterMonths] = useState(work?.quarterlyBonus?.months.join(', ') ?? '');
   const save = () => {
     const unit = parseAmount(values.unit), positionUnits = parseAmount(values.positionUnits), rankUnits = parseAmount(values.rankUnits);
     const seniority = parseAmount(values.seniority), conditions = parseAmount(values.conditions), monthlyBonus = parseAmount(values.monthlyBonus);
@@ -242,7 +263,9 @@ function WorkSettings() {
     if (h != null) workingHours[specialDate] = h;
     if (absent != null) absenceHours[specialDate] = absent;
     if (base != null) tax[taxDate.slice(0, 4)] = { base, asOf: taxDate };
-    const next = { ...work, from: start, rates, accountId, advancesBy: mode, workingHours, absenceHours, taxBase: tax };
+    const quarterlyBonus = quarterGross.trim() ? { from: quarterDate, months: quarterMonths.trim().split(/[ ,;]+/).map(Number),
+      day: Number(quarterDay), gross: parseAmount(quarterGross) ?? 0 } : undefined;
+    const next = { ...work, from: start, rates, accountId, advancesBy: mode, workingHours, absenceHours, taxBase: tax, quarterlyBonus };
     if (!saveWork(next)) { toast('Проверьте даты действия и значения'); return; }
     setEditRateDate(from); toast('Параметры сохранены');
   };
@@ -288,6 +311,14 @@ function WorkSettings() {
       }} /></Field>
       <Field label="Облагаемый доход по справке"><input className="field" inputMode="decimal" value={taxBase} onChange={e => setTaxBase(e.target.value)} /></Field>
     </div>
+    <details className="card space-y-3 p-4">
+      <summary className="min-h-9 font-medium">Квартальная премия</summary>
+      <p className="text-[13px] text-muted">Если известны сумма и график, приложение будет рассчитывать выплату после НДФЛ и отмечать её как условную.</p>
+      <Field label="Сумма до НДФЛ"><input className="field" inputMode="decimal" value={quarterGross} onChange={e => setQuarterGross(e.target.value)} /></Field>
+      <Field label="Месяцы через запятую"><input className="field" value={quarterMonths} onChange={e => setQuarterMonths(e.target.value)} /></Field>
+      <Field label="День месяца"><input className="field" inputMode="numeric" value={quarterDay} onChange={e => setQuarterDay(e.target.value)} /></Field>
+      <Field label="График действует с"><input className="field" type="date" value={quarterDate} onChange={e => setQuarterDate(e.target.value)} /></Field>
+    </details>
     <PrimaryButton onClick={save}>Сохранить параметры</PrimaryButton>
     {work && <UnitCoverage />}
   </>;

@@ -17,7 +17,6 @@ const expense = () => ({ date: today(), amount: 350, category: 'groceries' as co
 
 describe('остаток карты «Свои»', () => {
   beforeEach(() => {
-    storage.clear();
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 10, 20, 10));
     state().startEmpty();

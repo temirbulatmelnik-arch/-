@@ -47,6 +47,11 @@ export const DEFAULT_PLAN: PlanConfig = {
 let source: () => PlanConfig | null | undefined = () => null;
 /** Хранилище сообщает, откуда брать цифры плана */
 export const setPlanSource = (fn: () => PlanConfig | null | undefined) => { source = fn; };
+export function withPlan<T>(plan: PlanConfig | null, run: () => T): T {
+  const previous = source;
+  source = () => plan;
+  try { return run(); } finally { source = previous; }
+}
 export const planConfig = (): PlanConfig => source() ?? DEFAULT_PLAN;
 const phases = () => planConfig().phases;
 const firstPhase = () => phases().find(p => p.id >= 1) ?? phases()[0];

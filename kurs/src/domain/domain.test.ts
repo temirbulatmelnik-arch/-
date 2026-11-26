@@ -987,3 +987,11 @@ describe('трата одной фразой', () => {
     expect(guessCategory('кофе', mine)).toBe('fun');
   });
 });
+
+it('использует один дневной предел в форме покупки и в виджете', () => {
+  const now = '2026-11-26';
+  const state = { expenses: [], debts: DEBTS, weeklyOverrides: [{ from: '2026-11-23', to: '2026-11-29', amount: 8000 }] };
+  const base = { source: 'life' as const, date: now, now, reserve: 2000, lifeAvailable: 1200, liquidityCap: 371 };
+  expect(spendEffect(state, { ...base, amount: 0 }).text).toContain('можно ещё 371');
+  expect(spendEffect(state, { ...base, amount: 100 }).text).toContain('останется 271');
+});

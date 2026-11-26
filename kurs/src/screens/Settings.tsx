@@ -6,7 +6,8 @@ import { ddmmyyyy, today } from '../domain/dates';
 import { DEFAULT_PREPARATION_TIME } from '../domain/funds';
 import { downloadFile } from '../domain/ics';
 import { INSTALL_URL } from '../install/platform';
-import { useStore } from '../store/store';
+import { migrationBackupFile, useStore } from '../store/store';
+import { MIGRATION_BACKUP_KEY } from '../store/financeStorage';
 import { CATEGORY } from '../domain/plan';
 import { toast, useUi } from '../store/ui';
 import { disablePaymentPush, enablePaymentPush, paymentPushDiagnostics, pushConfigured, pushEnabled, testPaymentPush } from './paymentPush';
@@ -44,6 +45,7 @@ function Section({ title, id, children }: { title: string; id?: string; children
 function Body() {
   const s = useStore();
   const st = s.settings;
+  const hasMigrationBackup = (() => { try { return localStorage.getItem(MIGRATION_BACKUP_KEY) != null; } catch { return false; } })();
   const pwaUpdateReady = useUi(s => s.pwaUpdateReady);
   const [key, setKey] = useState(st.apiKey);
   const file = useRef<HTMLInputElement>(null);
@@ -164,6 +166,12 @@ function Body() {
           <SecondaryButton onClick={backup}><Download size={17} /> Сохранить</SecondaryButton>
           <SecondaryButton onClick={() => file.current?.click()}><Upload size={17} /> Загрузить</SecondaryButton>
         </div>
+        {hasMigrationBackup && <SecondaryButton className="w-full" onClick={() => {
+          try {
+            const backup = migrationBackupFile();
+            if (backup) setPending(JSON.parse(backup));
+          } catch { toast('Копия до обновления не прошла проверку'); }
+        }}>Копия до обновления</SecondaryButton>}
         {pending && <div className="space-y-2 rounded-xl bg-surface-2 p-3 text-[13px]">
           <p className="font-medium">Предпросмотр восстановления</p>
           {([['Покупки', 'expenses'], ['Долги', 'debts'], ['Отметки календаря', 'marks'], ['Отметки чек-листа', 'checks'],

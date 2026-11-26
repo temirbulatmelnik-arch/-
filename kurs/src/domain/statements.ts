@@ -2,6 +2,7 @@
 // (iPhone сам распознаёт текст на фото: «Фото» → удерживать текст → «Скопировать»).
 import { categorize, fingerprint, isNotSpending } from './categorize';
 import { validDate } from './accounts';
+import type { StatementBounds } from './bankReconciliation';
 import { addDays, today } from './dates';
 import type { CategoryId, Source } from './types';
 
@@ -32,6 +33,7 @@ export interface DraftTx {
   fromHeader?: boolean;
   creditCard?: string;
   structured?: boolean;
+  bankAccount?: string;
 }
 
 let seq = 0;
@@ -83,6 +85,7 @@ export interface CsvResult {
   rows: DraftTx[];
   bank: string;
   rejected: number;
+  bounds: StatementBounds;
   /** что поняли про столбцы — показать человеку */
   columns: { date: string; amount: string; merchant: string };
 }
@@ -120,10 +123,24 @@ export function parseBankTable(table: (string | number | boolean | Date | null)[
   const bankTitle = grid.slice(0, header).flat().join(' ');
   const bank = /\bVTB\b|ВТБ/i.test(bankTitle) ? 'vtb' : /Т-Банк|Тинькофф/i.test(bankTitle) ? 'tbank' : 'table';
 
+  const bounds: StatementBounds = { opening: null, closing: null, end: null };
+  const metadata = (row: string[]) => {
+    const label = row[0] ?? '';
+    const amount = row.slice(1).map(num).find(value => value != null);
+    if (/входящ|остаток на начало|начальный остаток|opening balance/i.test(label)) {
+      if (amount != null) bounds.opening = amount;
+    } else if (/исходящ|остаток на конец|конечный остаток|closing balance/i.test(label)) {
+      if (amount != null) bounds.closing = amount;
+    } else if (/период|period/i.test(label)) {
+      bounds.end = row.map(parseDate).filter(validDate).at(-1) ?? null;
+    } else return false;
+    return true;
+  };
+  grid.slice(0, header).forEach(metadata);
   const rows: DraftTx[] = [];
   let rejected = 0;
   for (const [row, c] of grid.slice(header + 1).entries()) {
-    if (!c.some(Boolean)) continue;
+    if (!c.some(Boolean) || metadata(c) || /^(?:итого|оборот|total)(?:\s|$)/i.test(c[0] ?? '')) continue;
     const rawDate = c[iDate] ?? '';
     const date = parseDate(rawDate);
     const time = rawDate.match(/(?:T|\s)([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?(Z|[+-]\d\d:\d\d)?$/i);
@@ -150,11 +167,12 @@ export function parseBankTable(table: (string | number | boolean | Date | null)[
       structured: true, occurredAt };
     const external = iExternal >= 0 ? c[iExternal] : undefined;
     const account = iAccount >= 0 ? c[iAccount] : undefined;
+    if (account) Object.assign(tx, { bankAccount: account });
     if (external && (account || bank !== 'table')) tx.fingerprint = JSON.stringify(['csv:operation', bank, account ?? '', external]);
     else if (fileHash) tx.fingerprint = JSON.stringify(['csv:file', fileHash, row]);
     rows.push(tx);
   }
-  return { rows, bank, rejected, columns: { date: head[iDate], amount: head[iAmount], merchant: iDesc >= 0 ? head[iDesc] : '—' } };
+  return { rows, bank, rejected, bounds, columns: { date: head[iDate], amount: head[iAmount], merchant: iDesc >= 0 ? head[iDesc] : '—' } };
 }
 
 /* ---------- Текст со скриншота ---------- */
