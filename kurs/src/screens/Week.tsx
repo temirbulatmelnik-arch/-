@@ -1,12 +1,11 @@
-// «Сегодня»: сцена с мостом, остаток недели и кольцо дня. Под сценой — быстрые траты, один следующий шаг, строка
-// «Неделя», три сосуда «Где деньги» и плитки-входы «Траты» и «Долги». Плашка о перерасходе появляется при входе.
-import { Settings as Cog } from 'lucide-react';
+// «Сегодня»: мост, остаток недели, кольцо дня и сводка ближайших денежных событий.
+import { ChevronDown, ChevronRight, Settings as Cog, Wallet, Zap } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { flyCoin, NextStep, QuickSpends, type Step } from '../components/Home';
 import { DayRing } from '../components/DayRing';
-import { Wallets } from '../components/Wallets';
+import { TodayOverview } from '../components/TodayOverview';
 import { bridgeControl, lampAt, setSceneHidden, SkyButton, WeekScene } from '../components/Petersburg';
 import { useCoverage } from '../components/Coverage';
 import { haptic } from '../components/haptics';
@@ -37,7 +36,7 @@ export function Week() {
   ] as const));
   const expenses = useBudgetExpenses();
   // только нужное из состояния интерфейса: иначе весь экран перерисовывался бы при каждом переключении вкладки и листе
-  const ui = { set: useUi(s => s.set), setTab: useUi(s => s.setTab), stackOpen: useUi(s => s.stackOpen) };
+  const ui = { set: useUi(s => s.set), setTab: useUi(s => s.setTab) };
   const todayIdx = (fromKey(now).getDay() + 6) % 7;
   // сцена уходит медленнее страницы, сверху проявляется стеклянная полоса с остатком
   // без событий прокрутки (fixing-motion-performance): параллакс — CSS scroll-timeline (.sc-parallax),
@@ -143,6 +142,7 @@ export function Week() {
   const whatIfTomorrow = whatIf && !today.nextWeek && today.morning - today.spentToday - whatIf > 0 ? Math.floor((today.morning - today.spentToday - whatIf) / (today.daysLeft - 1) / 10) * 10 : null;
 
   // быстрые траты: частое — одной кнопкой, «как вчера» — пока сегодня пусто. Источник приложение выбирает само
+  const [showQuick, setShowQuick] = useState(false);
   const quick = useMemo(() => quickSpends(expenses, now), [expenses, now]);
   const ySet = useMemo(() => (expenses.some(e => e.date === now) ? [] : yesterdaySet(expenses, now)), [expenses, now]);
   const spendQuick = (q: QuickSpend, el: Element) => {
@@ -205,53 +205,39 @@ export function Week() {
       </div>
       </div>
 
-      <div className="relative z-[1] space-y-2 bg-bg px-4 pt-2">
-        <section className="card divide-y divide-line" aria-label="Деньги и платежи">
-          <button type="button" className="flex min-h-12 w-full items-center justify-between gap-3 px-3 py-2 text-left"
-            onClick={() => ui.setTab('plan')}>
-            <span>Свои деньги</span>
-            {led.totalCash == null ? <span className="text-[12px] text-warn">Нужна сверка</span> : <Money value={led.totalCash} kopecks className="shrink-0" />}
-          </button>
-          <button type="button" className="flex min-h-12 w-full items-center justify-between gap-3 px-3 py-2 text-left"
-            onClick={() => {
-              if (nextBill?.toFund && preparationDue(nextBill, clock, preparationTime)) ui.set({ transfer: { kind: 'payment', plan: nextBill } });
-              else if (nextBill?.events.length === 1) ui.set({ event: nextBill.events[0] });
-              else ui.setTab('payments');
-            }}>
-            <span className="min-w-0"><span className="block text-[12px] text-muted">Ближайший платёж</span>
-              <span className="block truncate text-[14px]">{nextBill ? `${ddmm(nextBill.date)} · ${nextBill.events.length === 1 ? nextBill.events[0].title : `Платежей ${nextBill.events.length}`}` : 'В ближайшие 45 дней платежей нет'}</span>
-            </span>
-            {nextBill && <Money value={nextBill.total} approx={nextBill.events.some(event => event.approx)} kopecks className="shrink-0" />}
-          </button>
-          <button type="button" className="flex min-h-12 w-full items-center justify-between gap-3 px-3 py-2 text-left"
-            onClick={() => { ui.set({ payView: 'cover' }); ui.setTab('payments'); }}>
-            <span><span className="block text-[12px] text-muted">{horizon.income ? 'До ожидаемого поступления' : 'Прогноз на 45 дней'}</span>
-              <span className="block text-[14px]">{ddmm(horizon.until)}{horizon.income ? ` · ${horizon.income.title}` : ''}</span>
-            </span>
-            <span className="shrink-0 text-right text-[13px]">
-              {horizon.shortage ? <span className="text-warn">Не хватает <Money value={horizon.shortage.amount} kopecks /></span> : horizon.available == null || horizon.accountRisk ? <span className="text-warn">Нужна сверка</span> :
-                  <span className="text-pos">По плану хватит</span>}
-            </span>
-          </button>
-        </section>
+      <div className="relative z-[1] space-y-3 bg-bg px-4 pt-3">
+        <TodayOverview cash={led} payment={nextBill} horizon={horizon}
+          onAccounts={() => ui.set({ finance: true })}
+          onCard={() => ui.set({ card: true })}
+          onReserve={() => ui.set({ reserve: true })}
+          onPayment={() => {
+            if (nextBill?.toFund && preparationDue(nextBill, clock, preparationTime)) ui.set({ transfer: { kind: 'payment', plan: nextBill } });
+            else if (nextBill?.events.length === 1) ui.set({ event: nextBill.events[0] });
+            else if (nextBill) ui.set({ paymentQueue: true });
+            else ui.setTab('payments');
+          }}
+          onForecast={() => { ui.setTab('payments'); ui.set({ payView: 'cover' }); }} />
         {visibleSteps.length > 0 && <section aria-label="Следующее действие">
           <NextStep steps={visibleSteps} onLater={id => setLater(prev => new Set([...prev, id]))} />
         </section>}
-        <details className="text-[13px]">
-          <summary className="min-h-11 px-2 py-3 text-sea">Детали бюджета и счетов</summary>
-          <div className="space-y-2 pb-2">
-            <Wallets card={led.lifeAvailable} weekLimit={week.limit} loan={bridgeNow} reserve={led.reserve}
-              onCard={() => ui.set({ card: true })} onLoan={() => ui.set({ loan: true })} onReserve={() => ui.set({ reserve: true })} />
-            <button type="button" className="flex min-h-11 w-full items-center justify-between gap-3 px-2 text-left"
-              onClick={() => ui.set({ week: week.monday })}><span>Лимит недели</span><Money value={week.limit} kopecks /></button>
-            <button type="button" className="flex min-h-11 w-full items-center justify-between gap-3 px-2 text-left"
-              onClick={() => ui.set({ today: true })}><span>Сегодня потрачено</span><Money value={today.spentToday} kopecks /></button>
-          </div>
-        </details>
-        {(quick.length > 0 || ySet.length > 0) && <details className="text-[13px]">
-          <summary className="min-h-11 px-2 py-3 text-sea">Быстрые траты</summary>
-          <QuickSpends items={quick} yesterday={ySet.length ? { count: ySet.length, sum: ySet.reduce((t, e) => t + e.amount, 0) } : null} onSpend={spendQuick} onYesterday={repeatYesterday} />
-        </details>}
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => ui.set({ week: week.monday })} className="today-action today-shortcut flex-[1_1_9rem]">
+            <Wallet size={17} strokeWidth={1.8} aria-hidden="true" /><span>Бюджет недели</span><ChevronRight size={15} aria-hidden="true" />
+          </button>
+          {(quick.length > 0 || ySet.length > 0) && <button type="button" aria-expanded={showQuick} aria-controls="today-quick-spends"
+            className="today-action today-shortcut flex-[1_1_9rem]" onClick={() => setShowQuick(value => !value)}>
+            <Zap size={17} strokeWidth={1.8} aria-hidden="true" /><span>Быстрые траты</span>
+            <ChevronDown size={15} className={showQuick ? 'rotate-180' : undefined} aria-hidden="true" />
+          </button>}
+        </div>
+        {(quick.length > 0 || ySet.length > 0) && <div id="today-quick-spends" hidden={!showQuick} className="-mx-4">
+          <QuickSpends items={quick} yesterday={ySet.length ? { count: ySet.length, sum: ySet.reduce((t, e) => t + e.amount, 0) } : null}
+            onSpend={spendQuick} onYesterday={repeatYesterday} />
+        </div>}
+        {bridgeNow && bridgeNow.used > 0 && <button type="button" onClick={() => ui.set({ loan: true })}
+          className="today-action flex min-h-11 w-full items-center justify-between gap-2 rounded-xl px-2 text-start text-[13px] text-muted">
+          <span>Использовано с кредитного моста</span><Money value={bridgeNow.used} kopecks />
+        </button>}
       </div>
 
     </div>

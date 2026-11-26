@@ -87,9 +87,9 @@ interface Ui {
 
 export const useUi = create<Ui>()(set => ({
   tab: 'week', add: null, scan: false, settings: false, event: null, bonus: null, debt: null, reserve: false,
-  paymentQueue: false, week: null, savings: false, sync: false, fixed: false, card: false, loan: false, transfer: null, unlock: false, planView: 'debts', focus: null, settingsFocus: null, inbox: null, checkup: null, hub: false, finance: false, workSheet: false, tour: false, payView: 'list', scenario: 'base', today: false, stackOpen: null, pwaUpdateReady: false, toast: null, undo: null,
+  paymentQueue: false, week: null, savings: false, sync: false, fixed: false, card: false, loan: false, transfer: null, unlock: false, planView: 'debts', focus: null, settingsFocus: null, inbox: null, checkup: null, hub: false, finance: false, workSheet: false, tour: false, payView: 'month', scenario: 'base', today: false, stackOpen: null, pwaUpdateReady: false, toast: null, undo: null,
   // прокрутку каждой вкладки помнит App (useTabScroll)
-  setTab: tab => set({ tab }),
+  setTab: tab => set(s => tab === 'payments' && s.tab !== tab ? { tab, payView: 'month' } : { tab }),
   set: p => set(p),
 }));
 

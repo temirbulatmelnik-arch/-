@@ -87,7 +87,7 @@ export function Payments() {
   // стрелки листают ту же ленту, что и палец; лента скрыта (другой вид) — месяц меняется сразу
   const flip = useRef<((dir: 1 | -1) => boolean) | null>(null);
   const [cover, setCover] = useState(false);
-  const arrow = (n: 1 | -1) => { if (!(view === 'month' && flip.current?.(n))) shift(n); };
+  const arrow = (n: 1 | -1) => { if (!(view !== 'list' && flip.current?.(n))) shift(n); };
 
   return (
     <CalendarFunding.Provider value={statuses}><div>
@@ -111,11 +111,11 @@ export function Payments() {
         <button type="button" className="min-h-11 rounded-xl bg-surface px-2 text-sea" onClick={() => set({ paymentQueue: true })}>Все платежи</button>
         <button type="button" className="min-h-11 rounded-xl bg-surface px-2 text-sea" onClick={() => set({ workSheet: true })}>Работа и доходы</button>
       </div>
-      <Pager<PayView> className="mt-3" value={view === 'month' ? 'month' : 'list'} onChange={v => set({ payView: v })} pages={[
-        { id: 'list', label: 'Лента', render: () => <ListView month={month} events={events} total={total} incomes={incomes} /> },
+      <Pager<PayView> className="mt-3" value={view === 'list' ? 'list' : 'month'} onChange={v => set({ payView: v })} pages={[
         { id: 'month', label: 'Месяц', render: () => <MonthView months={[prev, cur, next]} selected={selected} onSelect={setPicked} onShift={shift} flip={flip} /> },
+        { id: 'list', label: 'Лента', render: () => <ListView month={month} events={events} total={total} incomes={incomes} /> },
       ]} />
-      <Sheet open={cover || view === 'cover'} onClose={() => { setCover(false); if (view === 'cover') set({ payView: 'list' }); }} title="Хватит ли резерва" subtitle="Прогноз по дням до премии">
+      <Sheet open={cover || view === 'cover'} onClose={() => { setCover(false); if (view === 'cover') set({ payView: 'month' }); }} title="Хватит ли резерва" subtitle="Прогноз по дням до премии">
         {(cover || view === 'cover') && <div className="-mx-5"><CoverView /></div>}
       </Sheet>
     </div></CalendarFunding.Provider>
