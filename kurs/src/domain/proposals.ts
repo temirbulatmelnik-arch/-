@@ -10,12 +10,14 @@ import { rub } from './money';
 import { draft, type DraftTx } from './statements';
 import type { CalEvent, CategoryId, Debt, EventMark, Expense, MemoryRule, Source } from './types';
 
+type BankEvidence = { bankAt?: string; externalId?: string };
+
 export type Proposal =
   | { id: string; type: 'tx'; on: boolean; tx: DraftTx }
   | { id: string; type: 'debt'; on: boolean; debt: Debt; balance: number; minPayment: number; dueDate: string; event: CalEvent | null }
   /** selfKey — перевод на своё имя закрыл платёж: запомнить, что это я */
-  | { id: string; type: 'mark'; on: boolean; event: CalEvent; amount: number; date?: string; selfKey?: string }
-  | { id: string; type: 'income'; on: boolean; event: CalEvent | null; amount: number; date: string; bonus: boolean }
+  | ({ id: string; type: 'mark'; on: boolean; event: CalEvent; amount: number; date?: string; selfKey?: string } & BankEvidence)
+  | ({ id: string; type: 'income'; on: boolean; event: CalEvent | null; amount: number; date: string; bonus: boolean } & BankEvidence)
   | { id: string; type: 'reserve'; on: boolean; balance: number }
   | { id: string; type: 'card'; on: boolean; balance: number; date: string };
 
@@ -48,7 +50,7 @@ export function markDuplicates(txs: DraftTx[], expenses: Expense[]): DraftTx[] {
     const strong = tx.fingerprint.startsWith('["csv:');
     if (strong && seen.has(tx.fingerprint)) return { ...tx, duplicate: true };
     if (strong) seen.add(tx.fingerprint);
-    const match = expenses.some(e => e.date === tx.date && e.source === tx.source && cents(e.amount) === cents(tx.amount) &&
+    const match = !tx.income && expenses.some(e => e.date === tx.date && e.source === tx.source && cents(e.amount) === cents(tx.amount) &&
       (!strong || !e.fingerprint?.startsWith('["csv:operation') || !tx.fingerprint.startsWith('["csv:operation')));
     return { ...tx, duplicate: match, needsDuplicateReview: match };
   });
@@ -56,6 +58,11 @@ export function markDuplicates(txs: DraftTx[], expenses: Expense[]): DraftTx[] {
 
 let n = 0;
 const pid = () => `p${n++}`;
+
+const bankEvidence = (tx: DraftTx): BankEvidence => tx.structured ? {
+  bankAt: tx.occurredAt,
+  externalId: tx.fingerprint.startsWith('["csv:') ? tx.fingerprint : undefined,
+} : {};
 
 /** Платёж по долгу или обязательный платёж в выписке → отметка «оплачено» в календаре */
 function paymentMarks(txs: DraftTx[], ctx: Ctx, items: Proposal[]) {
@@ -90,7 +97,7 @@ export function fromDrafts(txs: DraftTx[], ctx: Ctx, summary: string, extra: { c
     const event = candidates[0];
     structuredPayments.add(tx.id);
     if (!ctx.marks[event.key]?.done && !items.some(item => item.type === 'mark' && item.event.key === event.key)) {
-      items.push({ id: pid(), type: 'mark', on: true, event, amount: tx.amount, date: tx.date });
+      items.push({ id: pid(), type: 'mark', on: true, event, amount: tx.amount, date: tx.date, ...bankEvidence(tx) });
     }
   }
   for (const tx of checked.filter(t => !t.income && !structuredPayments.has(t.id))) {
@@ -108,7 +115,7 @@ export function fromDrafts(txs: DraftTx[], ctx: Ctx, summary: string, extra: { c
       matchesKind(e) && cents(e.amount) === cents(t.amount) && !ctx.marks[e.key]?.done &&
       !items.some(item => item.type === 'income' && item.event?.key === e.key)) : [];
     const ev = t.structured ? (exactCandidates.length === 1 ? exactCandidates[0] : null) : matchEvent(ctx, t.date, matchesKind);
-    items.push({ id: pid(), type: 'income', on: !!ev, event: ev, amount: t.amount, date: t.date, bonus: !t.structured && !!ev?.incomeKind && BONUS.includes(ev.incomeKind) });
+    items.push({ id: pid(), type: 'income', on: !!ev, event: ev, amount: t.amount, date: t.date, bonus: !t.structured && !!ev?.incomeKind && BONUS.includes(ev.incomeKind), ...bankEvidence(t) });
   }
   return { summary, warnings: [], items };
 }
