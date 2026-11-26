@@ -1,5 +1,6 @@
 // Откуда деньги на трату: свои (карта жизни), в долг (кредитка) или резерв. Одна логика для листа траты, меток в
 // списках и раскладки месяца: что предложить и что будет после записи.
+import { cashAccount, countsWeekly, RESERVE_ACCOUNT } from './accounts';
 import { bridgeState, weekMoney, type Bridge } from './bridge';
 import { weekStart } from './dates';
 import { num } from './money';
@@ -32,18 +33,18 @@ const r = (n: number) => `${num(Math.abs(n))} ₽`;
  * Что будет после записи траты — одной строкой под суммой. amount = 0 — что сейчас. skipId — правим эту трату:
  * её прежняя сумма не считается. reserve — резерв по учёту.
  */
-export function spendEffect(s: SpendState, x: { amount: number; source: Source; date: string; now: string; reserve: number; skipId?: string; creditCard?: string }): SpendEffect {
+export function spendEffect(s: SpendState, x: { amount: number; source: Source; date: string; now: string; reserve: number; skipId?: string; creditCard?: string; category?: Expense['category']; accountId?: string }): SpendEffect {
+  const draft: Expense = { id: '~', date: x.date, amount: x.amount, category: x.category ?? 'fun', source: x.source, accountId: x.accountId, creditCard: x.creditCard ?? s.bridge?.card, createdAt: '' };
+  if (cashAccount(draft) === RESERVE_ACCOUNT) {
+    const budget = countsWeekly(draft) ? 'Трата входит в недельный бюджет' : 'Вне недельного лимита';
+    return { text: `Из резерва: останется ${r(x.reserve - x.amount)}. ${budget}`, tone: 'rsv' };
+  }
   const base = x.skipId ? s.expenses.filter(e => e.id !== x.skipId) : s.expenses;
-  const expenses: Expense[] = x.amount > 0
-    ? [...base, { id: '~', date: x.date, amount: x.amount, category: 'fun', source: x.source, creditCard: x.creditCard ?? s.bridge?.card, createdAt: '' }]
-    : base;
+  const expenses = x.amount > 0 ? [...base, draft] : base;
   const monday = weekStart(x.date);
   const week = weekMoney(expenses, s.debts, s.weeklyOverrides, s.bridge, monday);
   const thisWeek = monday === weekStart(x.now);
 
-  if (x.source === 'reserve') {
-    return { text: `Из резерва: останется ${r(x.reserve - x.amount)}. Трата входит в недельный бюджет`, tone: 'rsv' };
-  }
   if (week.left < 0) {
     const text = x.source === 'credit'
       ? `Сверх лимита недели на ${r(week.left)} — это уже новый долг`

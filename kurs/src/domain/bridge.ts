@@ -3,7 +3,7 @@
 // и кредитка до лимита моста на эту неделю. Сначала тратится карта, кредитка — когда карта пуста.
 import { addDays } from './dates';
 import { weeklyLimit } from './plan';
-import { cashAccount, LIFE_ACCOUNT } from './accounts';
+import { cashAccount, countsWeekly, LIFE_ACCOUNT } from './accounts';
 import type { Debt, Expense, WeeklyOverride } from './types';
 
 export interface BridgeWeek {
@@ -52,7 +52,7 @@ export interface WeekMoney {
 /** Деньги недели по источникам. Остаток прошлой недели на карте уменьшает траты с кредитки, а не пополнение. */
 export function weekMoney(expenses: Expense[], debts: Debt[], overrides: WeeklyOverride[], bridge: Bridge | null | undefined, monday: string): WeekMoney {
   const sunday = addDays(monday, 6);
-  const list = expenses.filter(e => e.date >= monday && e.date <= sunday);
+  const list = expenses.filter(e => e.date >= monday && e.date <= sunday && countsWeekly(e));
   const spentCredit = list.filter(e => e.source === 'credit').reduce((s, e) => s + e.amount, 0);
   const spent = list.reduce((s, e) => s + e.amount, 0);
   const spentLife = spent - spentCredit;

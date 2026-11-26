@@ -1,7 +1,7 @@
 // Итог недели: сколько потрачено из лимита, по категориям, и сколько долить на карту жизни из резерва в воскресенье.
 // Остаток недели остаётся на карте и уменьшает пополнение: долить = лимит следующей недели − остаток.
 // В недели моста на кредитке из резерва доливают по плану моста, а остаток уменьшает траты с кредитки.
-import { cashAccount, LIFE_ACCOUNT } from './accounts';
+import { cashAccount, countsWeekly, LIFE_ACCOUNT } from './accounts';
 import { bridgeWeek, weekMoney, type Bridge } from './bridge';
 import { addDays, fromKey, weekStart } from './dates';
 import { CATEGORIES, weeklyLimit } from './plan';
@@ -37,7 +37,7 @@ export interface WeekReport {
 export function weekReport(expenses: Expense[], debts: Debt[], overrides: WeeklyOverride[], monday: string, bridge?: Bridge | null): WeekReport {
   const sunday = addDays(monday, 6);
   const list = expenses.filter(e => e.date >= monday && e.date <= sunday);
-  const counted = list;
+  const counted = list.filter(countsWeekly);
   const spent = counted.reduce((s, e) => s + e.amount, 0);
   const limit = weeklyLimit(debts, monday, overrides);
   const nextLimit = weeklyLimit(debts, addDays(monday, 7), overrides);

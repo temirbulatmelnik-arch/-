@@ -1,4 +1,5 @@
 // Сводки для экранов: неделя, месяц по категориям, что требует внимания сегодня.
+import { countsWeekly } from './accounts';
 import { bridgeWeek, onBridgeCard, type Bridge } from './bridge';
 import { addDays, daysBetween, ddmm, monthKey, weekStart } from './dates';
 import { actionableEvent, eventsBetween, urgency, type CalendarInput } from './calendar';
@@ -24,7 +25,7 @@ export interface WeekSummary {
 export function weekSummary(expenses: Expense[], debts: Debt[], overrides: WeeklyOverride[], now: string): WeekSummary {
   const monday = weekStart(now), sunday = addDays(monday, 6);
   const list = expenses.filter(e => e.date >= monday && e.date <= sunday);
-  const spent = list.reduce((s, e) => s + e.amount, 0);
+  const spent = list.filter(countsWeekly).reduce((s, e) => s + e.amount, 0);
   const limit = weeklyLimit(debts, now, overrides);
   const left = limit - spent;
   const daysLeft = daysBetween(now, sunday) + 1;
@@ -51,7 +52,7 @@ export interface DayBudget {
   /** остаток недели на утро и сколько дней до воскресенья, включая сегодня — из них считается day */
   morning: number;
   daysLeft: number;
-  /** итог недели после сегодняшних трат: лимит минус все траты недели; меньше нуля — перерасход недели */
+  /** итог недели после сегодняшних трат в рамках лимита; меньше нуля — перерасход недели */
   weekLeft: number;
   /** сколько ещё можно сегодня — число в кольце; меньше нуля не бывает: второго «минуса» рядом с итогом недели нет */
   canSpend: number;
@@ -69,7 +70,7 @@ const floor10 = (n: number) => Math.max(0, Math.floor(n / 10) * 10);
 /** Кольцо дня: сколько можно потратить сегодня и каким станет лимит на день после сегодняшних трат */
 export function dayBudget(expenses: Expense[], debts: Debt[], overrides: WeeklyOverride[], now: string): DayBudget {
   const monday = weekStart(now), sunday = addDays(monday, 6);
-  const counted = expenses.filter(e => e.date >= monday && e.date <= now);
+  const counted = expenses.filter(e => e.date >= monday && e.date <= now && countsWeekly(e));
   const before = counted.filter(e => e.date < now).reduce((s, e) => s + e.amount, 0);
   const todays = counted.filter(e => e.date === now);
   const spentToday = todays.reduce((s, e) => s + e.amount, 0);

@@ -12,6 +12,7 @@ import { haptic } from '../components/haptics';
 import { Roll, spring } from '../components/motion';
 import { QUICK_COLOR, runQuick } from '../components/TabBar';
 import { CAT_COLOR, Money } from '../components/ui';
+import { countsWeekly } from '../domain/accounts';
 import { cashIncomeEvent, eventsBetween } from '../domain/calendar';
 import { activeBridge, bridgeState } from '../domain/bridge';
 import { addDays, dayMonth, ddmm, fromKey, monthKey, plural, weekdayFull, weekRange } from '../domain/dates';
@@ -278,13 +279,13 @@ export function Week() {
 
 /** Фонари набережной — дни недели. Нажмите на фонарь или ведите пальцем вдоль набережной — подпись следует за пальцем */
 function Lamps({ monday, todayIdx, limit, dayNorm }: { monday: string; todayIdx: number; limit: number; dayNorm: number }) {
-  const expenses = useStore(s => s.expenses);
+  const expenses = useBudgetExpenses();
   const [open, setOpen] = useState<number | null>(null);
   const [scrub, setScrub] = useState(false);
   const strip = useRef<HTMLDivElement>(null);
   const spent = useMemo(() => [0, 1, 2, 3, 4, 5, 6].map(i => {
     const d = addDays(monday, i);
-    return expenses.filter(e => e.date === d).reduce((s, e) => s + e.amount, 0);
+    return expenses.filter(e => e.date === d && countsWeekly(e)).reduce((s, e) => s + e.amount, 0);
   }), [expenses, monday]);
   useEffect(() => {
     if (open == null || scrub) return;

@@ -213,7 +213,10 @@ export function appendOperations(existing: AccountOperation[], incoming: Account
   return added.length || confirmed.size ? [...existing.map(op => confirmed.get(op.id) ?? op), ...added] : existing;
 }
 
-export const cashAccount = (e: Expense) => e.source === 'credit' ? undefined : e.accountId ?? (e.source === 'reserve' ? RESERVE_ACCOUNT : LIFE_ACCOUNT);
+export const cashAccount = (e: Pick<Expense, 'source' | 'accountId'>) => e.source === 'credit' ? undefined : e.accountId ?? (e.source === 'reserve' ? RESERVE_ACCOUNT : LIFE_ACCOUNT);
+
+/** Обязательные платежи из резерва учитываются в банковских остатках, но идут вне недельного бюджета. */
+export const countsWeekly = (e: Pick<Expense, 'source' | 'accountId' | 'category'>) => e.category !== 'fixed' || cashAccount(e) !== RESERVE_ACCOUNT;
 
 export function recordedAfter(op: { id: string; date: string; at?: string }, anchor: BankBalance): boolean {
   if (anchor.includedIds?.includes(op.id) || op.date < anchor.date) return false;

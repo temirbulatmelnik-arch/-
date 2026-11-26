@@ -11,9 +11,9 @@ import { SkyButton, SkyHeader } from '../components/Petersburg';
 import { ExpenseRow } from '../components/rows';
 import { CAT_COLOR, CatIcon, Empty, Money } from '../components/ui';
 import { addDays, addMonths, ddmm, monthKey, monthName, weekday, weekStart } from '../domain/dates';
-import { CATEGORY, currentPhase, weeklyLimit } from '../domain/plan';
+import { CATEGORY, currentPhase } from '../domain/plan';
 import { bySource } from '../domain/sources';
-import { monthByCategory } from '../domain/summary';
+import { monthByCategory, weekSummary } from '../domain/summary';
 import type { CategoryId, Expense, Source } from '../domain/types';
 import { useStore } from '../store/store';
 import { toast, useBudgetExpenses, useToday, useUi } from '../store/ui';
@@ -58,8 +58,8 @@ export function Budget() {
     const out: { monday: string; spent: number; limit: number }[] = [];
     for (let m = weekStart(`${month}-01`); monthKey(m) <= month && m <= now; m = addDays(m, 7)) {
       if (monthKey(addDays(m, 6)) < month) continue;
-      const list = expenses.filter(e => e.date >= m && e.date <= addDays(m, 6));
-      out.push({ monday: m, spent: list.reduce((s, e) => s + e.amount, 0), limit: weeklyLimit(debts, m, overrides) });
+      const { spent, limit } = weekSummary(expenses, debts, overrides, m);
+      out.push({ monday: m, spent, limit });
     }
     return out.reverse();
   }, [expenses, debts, overrides, month, now]);

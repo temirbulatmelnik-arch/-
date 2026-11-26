@@ -364,6 +364,24 @@ describe('неделя', () => {
     expect(weekSummary(list, DEBTS, ov, '2026-11-10').left).toBeCloseTo(-3062.96, 2);
     expect(dayBudget(list, DEBTS, ov, '2026-11-10').spentToday).toBe(9680);
   });
+  it('обязательный платёж из резерва остаётся в истории и не уменьшает недельный и дневной бюджеты', () => {
+    const monday = '2026-11-23';
+    const paidOn = '2026-11-25';
+    const now = '2026-11-26';
+    const overrides = [{ from: monday, to: '2026-11-29', amount: 7000 }];
+    const purchases: Expense = { id: 'purchases', date: '2026-11-24', amount: 4816.99, category: 'groceries', source: 'life', createdAt: '' };
+    const payment: Expense = { id: 'phone', date: paidOn, amount: 1270, category: 'fixed', source: 'reserve', createdAt: '' };
+    const expenses = [purchases, payment];
+    const week = weekSummary(expenses, DEBTS, overrides, now);
+    expect(week).toMatchObject({ spent: 4816.99, expenses });
+    expect(week.left).toBeCloseTo(2183.01, 2);
+    expect(dayBudget(expenses, DEBTS, overrides, paidOn).spentToday).toBe(0);
+    expect(dayBudget(expenses, DEBTS, overrides, now)).toMatchObject({ day: 540, canSpend: 540 });
+    expect(weekMoney(expenses, DEBTS, overrides, null, monday).left).toBeCloseTo(2183.01, 2);
+    expect(weekReport(expenses, DEBTS, overrides, monday).byCategory).toEqual([{ id: 'groceries', spent: 4816.99 }]);
+    expect(dayBudget([purchases, { ...payment, source: 'life', accountId: 'reserve' }], DEBTS, overrides, paidOn).spentToday).toBe(0);
+    expect(spendEffect({ expenses: [purchases], debts: DEBTS, weeklyOverrides: overrides }, { ...payment, now, reserve: 2000 }).text).toContain('Вне недельного лимита');
+  });
   it('подписи банка: «Транспорт», «Супермаркеты»; разовая правка категорий из выписок', () => {
     expect(categorize('Транспорт · Транспорт')).toBe('transport');
     expect(categorize('Іранспорт')).toBe('transport');
@@ -475,6 +493,17 @@ describe('файл обмена с чатом', () => {
   };
   let n = 0;
   const id = () => `new${++n}`;
+
+  it('обмен сохраняет платёж из резерва и отражает его только в банковском остатке', () => {
+    const payment: Expense = { id: 'phone', date: NOW, amount: 1270, category: 'fixed', source: 'reserve', createdAt: '' };
+    const withReserveAnchor = { ...base, reserveLog: [{ id: 'reserve-check', date: '2026-11-01', at: '2026-11-01T12:00:00Z', abs: true, amount: base.reserve, note: 'Сверка с банком' }] };
+    const before = buildExchange(withReserveAnchor, NOW);
+    const after = buildExchange({ ...withReserveAnchor, expenses: [...base.expenses, payment] }, NOW);
+    expect(after.status!.week).toEqual(before.status!.week);
+    expect(after.status!.today).toEqual(before.status!.today);
+    expect(after.status!.ledger).toMatchObject({ card: before.status!.ledger!.card, reserve: before.status!.ledger!.reserve - payment.amount });
+    expect(after.expenses).toContainEqual(expect.objectContaining({ id: payment.id, amount: payment.amount, source: 'reserve' }));
+  });
 
   it('выгрузка и тот же файл обратно — ничего не меняется', () => {
     const file = buildExchange(base, NOW);

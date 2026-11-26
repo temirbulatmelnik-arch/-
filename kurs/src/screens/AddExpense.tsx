@@ -109,8 +109,10 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   const value = parseAmount(amount) ?? 0;
   const valid = value > 0 && !!category;
   // что будет после записи — одной строкой под суммой: остаток дня, долг по мосту или остаток резерва
-  const effect = useMemo(() => spendEffect({ expenses, debts, weeklyOverrides, bridge }, { amount: value, source, date, now: today(), reserve: led.reserve, skipId: edit?.id, creditCard: card }),
-    [expenses, debts, weeklyOverrides, bridge, value, source, date, led.reserve, edit?.id, card]);
+  const effect = useMemo(() => spendEffect({ expenses, debts, weeklyOverrides, bridge }, {
+    amount: value, source, date, now: today(), reserve: led.reserve, skipId: edit?.id, creditCard: card,
+    category: category ?? undefined, accountId: source === 'life' ? account : undefined,
+  }), [expenses, debts, weeklyOverrides, bridge, value, source, date, led.reserve, edit?.id, card, category, account]);
 
   /** src — источник, если сумму бросили в сосуд: состояние ещё не успело обновиться */
   const save = (src: Source = source) => {
@@ -119,7 +121,10 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
     if (!edit && !p.wishId && value > BIG_PURCHASE && src === 'life' && !askPause) { setAskPause(true); return; }
     const item = { date, amount: value, category: category!, note: noteText() || undefined, source: src, origin: 'manual' as const, creditCard: src === 'credit' ? card : undefined, accountId: src === 'life' && account !== LIFE_ACCOUNT ? account : undefined,
       fundingSource: src === 'credit' ? 'borrowed' as const : funding };
-    const done = src === source ? effect : spendEffect({ expenses, debts, weeklyOverrides, bridge }, { amount: value, source: src, date, now: today(), reserve: led.reserve, skipId: edit?.id, creditCard: card });
+    const done = src === source ? effect : spendEffect({ expenses, debts, weeklyOverrides, bridge }, {
+      amount: value, source: src, date, now: today(), reserve: led.reserve, skipId: edit?.id, creditCard: card,
+      category: item.category, accountId: item.accountId,
+    });
     if (edit) store.updateExpense(edit.id, item);
     else store.addExpenses([item]);
     haptic('success');
