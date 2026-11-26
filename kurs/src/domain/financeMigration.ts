@@ -28,10 +28,10 @@ export function migrationProjection(state: ExchangeState, date: string) {
 }
 
 /** Изолированная репетиция переноса. Не выполняет запись в хранилище. */
-export function dryRunFinanceMigration<T extends ExchangeState>(source: T, date: string) {
+export function dryRunFinanceMigration<T extends ExchangeState>(source: T, date: string, candidate?: T) {
   const snapshot = structuredClone(source);
   const book = snapshot.accountBook ?? EMPTY_BOOK;
-  const state = { ...snapshot, accountBook: canonicalBook(book, snapshot.expenses) };
+  const state = { ...(candidate ?? snapshot), accountBook: candidate?.accountBook ?? canonicalBook(book, snapshot.expenses) };
   const existing = new Set(state.accountBook.operations.map(row => row.id));
   const duplicateIds = state.accountBook.operations.length - existing.size;
   const lostOperations = book.operations.filter(row => !existing.has(row.id)).length;

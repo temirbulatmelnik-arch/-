@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { EMPTY_BOOK, expenseOperation, type AccountBook } from '../domain/accounts';
 import type { Expense } from '../domain/types';
-import { createFinanceStorage, digest, FINANCE_KEY, FINANCE_SCHEMA, LEGACY_KEY, MIGRATION_BACKUP_KEY,
+import { createFinanceStorage, digest, FINANCE_KEY, FINANCE_SCHEMA, LEGACY_KEY, MIGRATION_BACKUP_KEY, PREVIOUS_FINANCE_KEY,
   migrationProblem, packFinanceState, readMigrationBackup, stableJson, unpackFinanceState } from './financeStorage';
 
 const expense: Expense = { id: 'purchase', amount: 120.25, date: '2026-11-26', source: 'life', category: 'groceries', createdAt: '2026-11-26T11:00:00Z' };
@@ -92,4 +92,23 @@ describe('двухфазный перенос локального журнал�
     expect(JSON.parse(packed).accountBook.operations).toMatchObject([{ id: 'original', cashBooked: true }, { expenseRef: expense.id }]);
     expect(stableJson(unpackFinanceState(packed))).toBe(stableJson({ ...state, accountBook: book }));
   });
+});
+
+it('переносит архив alpha.3 с изменениями после обновления и сохраняет его байт в байт', () => {
+  const memoryStore = memory();
+  const original = { ...state, marks: { paid: false } };
+  const payload = packFinanceState(original);
+  const archive = JSON.stringify({ version: 10, payload, checksum: digest(payload), legacyChecksum: digest(memoryStore.legacy) });
+  memoryStore.map.set(PREVIOUS_FINANCE_KEY, archive);
+  memoryStore.refuse(FINANCE_KEY);
+  expect(() => memoryStore.open().getItem(FINANCE_KEY)).toThrow();
+  expect(memoryStore.map.get(PREVIOUS_FINANCE_KEY)).toBe(archive);
+  expect(memoryStore.map.has(FINANCE_KEY)).toBe(false);
+  memoryStore.refuse(null);
+  expect(memoryStore.open().getItem(FINANCE_KEY)).toMatchObject({ version: FINANCE_SCHEMA, state: original });
+  expect(readMigrationBackup(memoryStore.storage)).toEqual({ version: 10, state: JSON.parse(JSON.stringify(original)) });
+  expect(memoryStore.map.get(PREVIOUS_FINANCE_KEY)).toBe(archive);
+  const active = memoryStore.map.get(FINANCE_KEY);
+  memoryStore.open().getItem(FINANCE_KEY);
+  expect(memoryStore.map.get(FINANCE_KEY)).toBe(active);
 });

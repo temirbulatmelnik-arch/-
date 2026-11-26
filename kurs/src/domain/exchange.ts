@@ -1,5 +1,5 @@
 import { payrollReceiptParts } from './payrollReceipts';
-import { accountOptions, appendOperations, bookOperationAllowed, budgetExpenses, canonicalBook, cents, EMPTY_BOOK, LIFE_ACCOUNT, linkedExpenseId, monthDebtActivity, RESERVE_ACCOUNT, reviseOperations, rubles, validAmount, validBankBalance, validDate, validLoanReview, validPayoffTerms, validSplitDebit, validSplitPlan, type AccountBook, type CashAccount } from './accounts';
+import { accountOptions, appendOperations, bookOperationAllowed, budgetExpenses, canonicalBook, cents, EMPTY_BOOK, LIFE_ACCOUNT, linkedExpenseId, kopecks, monthDebtActivity, RESERVE_ACCOUNT, reviseOperations, rubles, validAmount, validBankBalance, validDate, validLoanReview, validPayoffTerms, validSplitDebit, validSplitPlan, type AccountBook, type CashAccount } from './accounts';
 import { validPayroll, with2027Unit, type PayrollProfile, type PayRate, type Vacation } from './payroll';
 import { payrollRegister } from './payrollRegister';
 import { annualIncome } from './annualIncome';
@@ -117,7 +117,6 @@ export interface ExchangeFile {
   ruleEdits?: { find: string; replace: string }[];
 }
 
-const r0 = (n: number) => Math.round(n);
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const isDate = validDate;
 const isNum = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
@@ -137,7 +136,10 @@ function canonical(value: unknown): string {
 
 export function exchangeRevision(s: ExchangeState): string {
   const { debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, marks, plan, expenses,
-    reserve, reserveLog, savings, cardBalance, checklist, checks, strategy, rules, closures, checkups, work, accountBook, bridge } = s;
+    reserve, reserveLog, savings, cardBalance, checklist, checks, strategy, rules, closures, checkups, work, bridge } = s;
+  const accountBook = s.accountBook?.journalVersion
+    ? { ...s.accountBook, journalVersion: undefined, historicalPaymentKeys: undefined, operations: s.accountBook.operations.filter(op => !op.legacy) }
+    : s.accountBook;
   const data = canonical({ debts, incomes, fixed, oneOff, templateFrom, weeklyOverrides, overrides, marks, plan, expenses,
     reserve, reserveLog, savings, cardBalance, checklist, checks, strategy, rules, closures, checkups, work, accountBook, bridge });
   let a = 2166136261, b = 2246822519;
@@ -156,8 +158,8 @@ export function exchangeRevision(s: ExchangeState): string {
 function weekFields(s: ExchangeState, expenses: Expense[], monday: string, cardLeft: number | null) {
   const m = weekMoney(expenses, s.debts, s.weeklyOverrides, s.bridge, monday);
   return {
-    limit: r0(m.limit), spent: r0(m.spent), left: r0(m.left), spentLife: r0(m.spentLife), spentCredit: r0(m.spentCredit), spentReserve: r0(m.spentReserve),
-    cardLeft: cardLeft == null ? null : r0(cardLeft), creditLeft: r0(m.creditLeft),
+    limit: kopecks(m.limit), spent: kopecks(m.spent), left: kopecks(m.left), spentLife: kopecks(m.spentLife), spentCredit: kopecks(m.spentCredit), spentReserve: kopecks(m.spentReserve),
+    cardLeft: cardLeft == null ? null : kopecks(cardLeft), creditLeft: kopecks(m.creditLeft),
   };
 }
 
@@ -169,7 +171,7 @@ function cardAfterWeek(s: ExchangeState, input: LedgerInput, monday: string): nu
 function bridgeOut(s: ExchangeState) {
   const st = bridgeState(s.expenses, s.bridge);
   if (!st) return null;
-  return { ...st.bridge, weeks: st.weeks.map(w => ({ ...w, used: r0(w.used) })), used: r0(st.used), left: r0(st.left) };
+  return { ...st.bridge, weeks: st.weeks.map(w => ({ ...w, used: kopecks(w.used) })), used: kopecks(st.used), left: kopecks(st.left) };
 }
 
 /** short — для еженедельной сверки: календарь −14…+45 дней, траты за 14 дней, 4 недели, без шаблонов и стратегии */
@@ -255,15 +257,15 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
       week: { from: week.monday, to: week.sunday, ...weekFields(s, expenses, week.monday, led.card) },
       // сегодняшний день: норма, траты по источникам и сколько ещё можно — то же число, что в кольце на «Сегодня»
       today: {
-        date: now, allowance: r0(day.day), spent: r0(day.spentToday), spentLife: r0(day.spentLife), spentCredit: r0(day.spentCredit),
-        ...(day.spentReserve ? { spentReserve: r0(day.spentReserve) } : {}), canSpend: r0(availableToday(day, led.lifeAvailable, discretionaryLiquidityCap(input, now))),
+        date: now, allowance: kopecks(day.day), spent: kopecks(day.spentToday), spentLife: kopecks(day.spentLife), spentCredit: kopecks(day.spentCredit),
+        ...(day.spentReserve ? { spentReserve: kopecks(day.spentReserve) } : {}), canSpend: kopecks(availableToday(day, led.lifeAvailable, discretionaryLiquidityCap(input, now))),
       },
-      reserveNeed: { amount: r0(need.need), untilBonus: need.next },
+      reserveNeed: { amount: kopecks(need.need), untilBonus: need.next },
       coverage: {
         to: cov.to, maxShortfall: cov.maxShortfall, ...(cov.min ? { min: cov.min.balance, minDate: cov.min.date, minTitle: cov.min.title } : {}),
         ...(s.accountBook ? { scenario: 'base', accountRisk: cov.accountRisk, bufferRisk: cov.bufferRisk } : {}),
         ...(cov.shortage ? { shortage: cov.shortage } : {}),
-        narrow: cov.narrow.map(n => ({ date: n.date, title: n.title, left: r0(n.balance) })),
+        narrow: cov.narrow.map(n => ({ date: n.date, title: n.title, left: kopecks(n.balance) })),
       },
       ...(s.accountBook ? {
         accounts: [{ id: LIFE_ACCOUNT, expected: led.card, posted: led.cardPosted, confirmed: s.cardBalance?.amount ?? null, date: led.cardFrom?.date },
@@ -296,7 +298,7 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
         lifeAvailable: led.lifeAvailable, heldForPayments: led.heldForPayments,
         pendingSweepToReserve: led.pendingSweepToReserve, unassignedOnCard: led.unassignedOnCard,
         allocationShortfall: led.allocationShortfall,
-        incomeOnCard: r0(led.incomeOnCard), ...(led.heldOnCard ? { heldOnCard: r0(led.heldOnCard) } : {}), ...(led.creditInterest ? { creditInterest: r0(led.creditInterest) } : {}),
+        incomeOnCard: kopecks(led.incomeOnCard), ...(led.heldOnCard ? { heldOnCard: kopecks(led.heldOnCard) } : {}), ...(led.creditInterest ? { creditInterest: kopecks(led.creditInterest) } : {}),
         ...(led.cardFrom ? { since: led.cardFrom.date } : {}),
       },
     },
@@ -310,7 +312,8 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
     ...(s.accountBook ? { accountBook: short ? {
       operations: s.accountBook.operations.filter(op => op.date >= from && op.type === 'loan_disbursement'),
       splitDebits: s.accountBook.splitDebits.filter(d => d.date >= now && d.date <= addDays(now, 45)),
-    } : s.accountBook } : {}),
+    } : { ...s.accountBook, journalVersion: undefined, historicalPaymentKeys: undefined,
+      operations: s.accountBook.operations.filter(op => !op.legacy) } } : {}),
     ...(!short && s.work ? { work: s.work } : {}),
     ...(short ? {} : { incomes: s.incomes }),
     calendar: calendar.map(e => {
@@ -341,16 +344,16 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
       };
     }),
     ...(short ? {} : { events: s.oneOff.filter(e => e.date >= addDays(now, -45)).map(e => ({
-      key: e.key, date: e.date, title: e.title, amount: r0(e.amount), kind: e.kind === 'income' ? 'income' : 'payment',
+      key: e.key, date: e.date, title: e.title, amount: kopecks(e.amount), kind: e.kind === 'income' ? 'income' : 'payment',
       ...(e.dateMode !== 'exact' ? { dateMode: e.dateMode } : {}), ...(e.note ? { note: e.note } : {}), ...(e.debtId ? { debtId: e.debtId } : {}),
     })) }),
     expensesFrom: from,
     expenses: s.expenses.filter(e => e.date >= from).map(e => ({ id: e.id, date: e.date, amount: e.amount, category: e.category, ...(e.note ? { note: e.note } : {}), source: e.source, ...(e.creditCard ? { creditCard: e.creditCard } : {}), ...(e.accountId ? { accountId: e.accountId } : {}), ...(e.fundingSource ? { fundingSource: e.fundingSource } : {}), ...(e.budgetScope ? { budgetScope: e.budgetScope } : {}), ...(e.bankRoutePending ? { bankRoutePending: true } : {}), ...(e.occurredAt ? { occurredAt: e.occurredAt } : {}), ...(e.fingerprint ? { fingerprint: e.fingerprint } : {}) })),
-    reserve: r0(s.reserve),
-    ...(short ? {} : { savings: r0(s.savings) }),
-    card: s.cardBalance ? { amount: r0(s.cardBalance.amount), date: s.cardBalance.date } : null,
+    reserve: kopecks(s.reserve),
+    ...(short ? {} : { savings: kopecks(s.savings) }),
+    card: s.cardBalance ? { amount: kopecks(s.cardBalance.amount), date: s.cardBalance.date } : null,
     weeks: Object.values(s.closures).sort((a, b) => b.monday.localeCompare(a.monday)).slice(0, short ? 4 : 8)
-      .map(w => ({ monday: w.monday, ...weekFields(s, expenses, w.monday, w.monday === week.monday ? led.card : cardAfterWeek(s, ledIn, w.monday)), ...(w.topUp ? { topUp: r0(w.topUp) } : {}), ...(w.transferred ? { transferred: r0(w.transferred) } : {}) })),
+      .map(w => ({ monday: w.monday, ...weekFields(s, expenses, w.monday, w.monday === week.monday ? led.card : cardAfterWeek(s, ledIn, w.monday)), ...(w.topUp ? { topUp: kopecks(w.topUp) } : {}), ...(w.transferred ? { transferred: kopecks(w.transferred) } : {}) })),
     bridge: bridgeOut(s),
     ...((s.checkups ?? []).length ? { checkups: s.checkups!.slice(-4).map(c => ({ date: c.date, monday: c.monday, expected: c.expected, actual: c.actual, topUp: c.topUp, toReserve: c.toReserve })) } : {}),
     checklist: s.checklist.map(c => ({ ...c, done: s.checks[c.id]?.done ?? !!c.done })),
@@ -987,7 +990,7 @@ const stepAccountBook: Step = (f, s, ctx) => {
       }
       const event = s.oneOff.find(e => e.key === loan.eventKey && e.kind === 'income');
       const mark = s.marks[loan.eventKey];
-      const recorded = book.operations.find(op => op.eventKey === loan.eventKey);
+      const recorded = book.operations.find(op => !op.legacy && op.eventKey === loan.eventKey);
       if (recorded || !event || !mark?.done || paidOn(event, mark) !== loan.date ||
           cents(mark.amount ?? event.amount) !== cents(loan.amount)) {
         if (strict) errors.push(`accountBook.historicalLoans.${loan.eventKey}: запись не совпадает с фактической отметкой`);
@@ -1071,7 +1074,7 @@ const stepAccountBook: Step = (f, s, ctx) => {
       if (strict) errors.push('Связь расчётного листка с банком подтверждается в приложении');
       continue;
     }
-    if (op.legacyExpense) {
+    if (op.legacyExpense || op.legacy) {
       if (strict) errors.push('accountBook.operations: записи расходов из истории меняются через expenses');
       continue;
     }

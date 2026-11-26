@@ -76,3 +76,39 @@ it('учитывает дебетовую и кредитовую стороны
     { type: 'posting', op: { type: 'transfer', accountId: 'life', toAccountId: 'reserve', amount: 222 } },
   ]);
 });
+
+it('читает проводки ВТБ из колонок счёта и проверяет остаток по дате обработки', async () => {
+  const { parseStatementText } = await import('./pdf');
+  const text = [
+    'Период выписки 01.01.2026 - 03.01.2026',
+    'Баланс на начало периода 1000.00 RUB Поступления 125.25 RUB',
+    'Баланс на конец периода 1100.00 RUB Расходные операции 25.25 RUB',
+    'Дата обработки Сумма операции в валюте счета/карты',
+    '01.01.2026 02.01.2026 -1.00 USD 0 RUB -25.25 RUB Покупка',
+    '14:01',
+    '03.01.2026 03.01.2026 125.25 RUB 125.25 RUB 0 RUB Возврат средств',
+    '11:25',
+  ].join('\n');
+  const statement = parseStatementText(text);
+  expect(statement.lines.map(({ date, occurredAt, amount, sign }) => [date, occurredAt, amount, sign])).toEqual([
+    ['2026-01-02', undefined, 25.25, -1], ['2026-01-03', '2026-01-03T11:25:00+03:00', 125.25, 1],
+  ]);
+  expect(reconcileStatement({ opening: statement.openingBalance, closing: statement.closingBalance, end: statement.periodEnd },
+    statement.lines.map(row => row.amount * row.sign!), statement.rejected)).toMatchObject({ status: 'matched', differenceMinor: 0 });
+});
+
+it('распознаёт оригинальный CSV ВТБ и сохраняет одинаковые покупки и ключи между выгрузками', async () => {
+  const { parseCsv } = await import('./statements');
+  const header = ['Название продукта', 'Карта', 'Номер счёта/Кредитного договора', 'Дата и время операции',
+    'Списание/Зачисление', 'Сумма в валюте операции', 'Валюта операции', 'Сумма в валюте счёта',
+    'Валюта счёта', 'Наименование операции', 'Тип операции', 'Статус операции'].join(';');
+  const purchase = 'Карта для жизни;;*0001;02.01.2026 15:32;Списание;-9,99;USD;-990,43;RUB;Покупка;Оплата товаров и услуг;Выполнено';
+  const pending = purchase.replace('Выполнено', 'В обработке');
+  const receipt = 'Карта для жизни;;*0001;02.01.2026 15:40;Зачисление;450,12;RUB;;;СБП;Входящий перевод СБП;Выполнено';
+  const full = parseCsv([header, receipt, purchase, purchase, pending].join('\n'), 'full')!;
+  const overlap = parseCsv([header, purchase, purchase].join('\n'), 'other')!;
+  expect(full).toMatchObject({ bank: 'vtb', rejected: 0 });
+  expect(full.rows.map(row => [row.amount, row.income])).toEqual([[450.12, true], [990.43, false], [990.43, false]]);
+  expect(full.rows.slice(1).map(row => row.fingerprint)).toEqual(overlap.rows.map(row => row.fingerprint));
+  expect(new Set(overlap.rows.map(row => row.fingerprint)).size).toBe(2);
+});

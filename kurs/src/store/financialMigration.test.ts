@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EMPTY_BOOK, RESERVE_ACCOUNT, type AccountOperation } from '../domain/accounts';
 import { applyExchange, buildExchange, exchangeRevision, prepareExchange, previewExchange, type ExchangeFile } from '../domain/exchange';
 import { ledger } from '../domain/ledger';
-import { FINANCE_KEY, MIGRATION_BACKUP_KEY } from './financeStorage';
+import { FINANCE_KEY, FINANCE_SCHEMA, MIGRATION_BACKUP_KEY } from './financeStorage';
 import type { Debt } from '../domain/types';
 
 const storage = new Map<string, string>();
@@ -59,7 +59,7 @@ describe('обратная совместимость и подтвержден�
   it('открывает прежнее хранилище и полный JSON с отметками, журналом и сверкой', async () => {
     const store = await reopen(4, old);
     expect(store.getState()).toMatchObject(old);
-    expect(store.getState().accountBook).toEqual({ ...EMPTY_BOOK, paymentRouting: 'life' });
+    expect(store.getState().accountBook).toMatchObject({ ...EMPTY_BOOK, paymentRouting: 'life', journalVersion: 1 });
     expect(ledger(store.getState()).card).toBe(3000);
     const copy = JSON.parse(store.getState().exportData());
     store.getState().startEmpty();
@@ -77,7 +77,7 @@ describe('обратная совместимость и подтвержден�
     const file = exchange({ accountBook: { operations: [op] }, status: { totalDebt: 1 } });
     const apply = (f: ExchangeFile) => store.getState().applySync(applyExchange(f, store.getState(), date, new Set(['accountBook']), () => 'a'), 'Журнал');
     expect(previewExchange(file, store.getState(), date)[0].lines).toHaveLength(1);
-    expect(store.getState().accountBook.operations).toHaveLength(0);
+    expect(store.getState().accountBook.operations.filter(row => !row.legacy)).toHaveLength(0);
     apply(file);
     expect(previewExchange(file, store.getState(), date)).toEqual([]);
     expect(ledger({ ...store.getState(), now: date }).debtBalances[debt.id].estimated).toBe(debt.balance);
@@ -85,7 +85,7 @@ describe('обратная совместимость и подтвержден�
     expect(store.getState().accountBook.operations).toHaveLength(1);
     store.getState().rollbackImport(store.getState().imports[0].id);
     expect(store.getState()).toMatchObject(old);
-    expect(store.getState().accountBook.operations).toHaveLength(0);
+    expect(store.getState().accountBook.operations.filter(row => !row.legacy)).toHaveLength(0);
   });
 
   it('повторное применение 2.6 и 2.7 сохраняет независимые покупки с равными суммами', async () => {
@@ -140,7 +140,7 @@ it('classifies historical loans and card fees without moving balances or repeati
   expect(actual.reserve).toBe(original.reserve);
   expect(after.marks).toEqual(before.marks);
   expect(after.expenses).toEqual(before.expenses);
-  expect(after.accountBook.operations).toEqual([]);
+  expect(after.accountBook.operations.filter(row => !row.legacy && !row.legacyExpense)).toEqual([]);
   expect(previewExchange(patch, after, date)).toEqual([]);
 });
 
@@ -312,7 +312,7 @@ it.each([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])('открывает историческ
   expect(current.marks).toEqual(old.marks);
   expect(ledger({ ...current, now: expense.date }).card).toBe(2845.65);
   const active = storage.get(FINANCE_KEY);
-  expect(JSON.parse(active!).version).toBe(10);
+  expect(JSON.parse(active!).version).toBe(FINANCE_SCHEMA);
   await store.persist.rehydrate();
   expect(storage.get(FINANCE_KEY)).toBe(active);
 });

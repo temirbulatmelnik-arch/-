@@ -35,6 +35,8 @@ export interface DraftTx {
   structured?: boolean;
   unknownDirection?: true;
   bankAccount?: string;
+  bankType?: string;
+  accountId?: string;
 }
 
 let seq = 0;
@@ -107,22 +109,30 @@ const cellText = (cell: string | number | boolean | Date | null) => cell instanc
 export function parseBankTable(table: (string | number | boolean | Date | null)[][], fileHash?: string): CsvResult | null {
   const grid = table.map(row => row.map(cellText));
   const find = (head: string[], ...keys: string[]) => keys.map(key => head.findIndex(h => h.includes(key))).find(index => index >= 0) ?? -1;
-  const dateIndex = (head: string[]) => find(head, 'дата операции', 'дата и время', 'дата', 'transaction date', 'date');
-  const amountIndex = (head: string[]) => find(head, 'сумма операции', 'transaction amount', 'сумма', 'amount');
+  const dateIndex = (head: string[]) => find(head, 'дата и время операции', 'дата операции', 'дата и время', 'дата', 'transaction date', 'date');
+  const amountIndex = (head: string[]) => find(head, 'сумма в валюте счёта', 'сумма в валюте счета', 'сумма операции', 'transaction amount', 'сумма', 'amount');
   const header = grid.findIndex((row, index) => index < 30 && row.length > 1 && dateIndex(row.map(h => h.toLowerCase())) >= 0 && amountIndex(row.map(h => h.toLowerCase())) >= 0);
   if (header < 0) return null;
   const head = grid[header].map(h => h.toLowerCase());
+  const vtb = head.includes('название продукта') && head.includes('списание/зачисление') &&
+    head.some(h => /^сумма в валюте сч[её]та$/.test(h));
+  const iForeignAmount = vtb ? head.indexOf('сумма в валюте операции') : -1;
+  const iForeignCurrency = vtb ? head.indexOf('валюта операции') : -1;
   const iDate = dateIndex(head);
   const iAmount = amountIndex(head);
-  const iDesc = find(head, 'описание операции', 'описание', 'назначение', 'контрагент', 'получатель', 'description', 'merchant');
+  const iDesc = find(head, 'наименование операции', 'описание операции', 'описание', 'назначение', 'контрагент', 'получатель', 'description', 'merchant');
   const iCat = find(head, 'категория', 'category');
   const iStatus = find(head, 'статус', 'status');
-  const iDirection = find(head, 'направление', 'приход/расход', 'дебет/кредит', 'тип операции', 'direction');
-  const iCurrency = find(head, 'валюта операции', 'валюта', 'currency');
+  const iDirection = find(head, 'направление', 'списание/зачисление', 'приход/расход', 'дебет/кредит', 'тип операции', 'direction');
+  const iCurrency = find(head, ...(vtb ? ['валюта счёта', 'валюта счета'] : []), 'валюта операции', 'валюта', 'currency');
   const iExternal = find(head, 'id операции', 'идентификатор операции', 'transaction id', 'operation id');
   const iAccount = find(head, 'номер счёта', 'номер счета', 'account', 'номер карты', 'card', 'счёт', 'счет', 'карта');
+  const productIndex = vtb ? head.indexOf('название продукта') : -1;
+  const typeIndex = vtb ? head.indexOf('тип операции') : -1;
+  const merchantIndex = vtb ? head.indexOf('наименование тсп') : -1;
+  const occurrences = new Map<string, number>();
   const bankTitle = grid.slice(0, header).flat().join(' ');
-  const bank = /\bVTB\b|ВТБ/i.test(bankTitle) ? 'vtb' : /Т-Банк|Тинькофф/i.test(bankTitle) ? 'tbank' : 'table';
+  const bank = vtb || /\bVTB\b|ВТБ/i.test(bankTitle) ? 'vtb' : /Т-Банк|Тинькофф/i.test(bankTitle) ? 'tbank' : 'table';
 
   const bounds: StatementBounds = { opening: null, closing: null, end: null };
   const metadata = (row: string[]) => {
@@ -146,11 +156,15 @@ export function parseBankTable(table: (string | number | boolean | Date | null)[
     const date = parseDate(rawDate);
     const time = rawDate.match(/(?:T|\s)([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?(Z|[+-]\d\d:\d\d)?$/i);
     const occurredAt = time ? `${date}T${time[1]}:${time[2]}:${time[3] ?? '00'}${time[4] ?? '+03:00'}` : undefined;
-    const rawAmount = c[iAmount] ?? '';
+    const rubleSbpCredit = vtb && !c[iAmount] && /^входящий перевод СБП$/i.test(c[typeIndex] ?? '') &&
+      /^зачисление$/i.test(c[iDirection] ?? '') && c[iForeignCurrency] === 'RUB';
+    const rawAmount = (rubleSbpCredit ? c[iForeignAmount] : c[iAmount]) ?? '';
     const amount = num(rawAmount);
     const direction = c[iDirection]?.toLowerCase() ?? '';
     const currency = c[iCurrency] ?? '';
     const status = c[iStatus] ?? '';
+    // ВТБ excludes declined and pending authorizations from the posted statement.
+    if (vtb && /^(?:в обработке|операция отклонена)$/i.test(status)) continue;
     if (!validDate(date) || (occurredAt && !Number.isFinite(Date.parse(occurredAt))) || amount == null || amount === 0 ||
       (currency && !/^(?:[₽р]|руб\.?|рубл[ьи]|RUB|RUR|643)$/i.test(currency)) ||
       /fail|pending|reject|reversed|declined|отклон|отмен|в обработке|ожида|заблок/i.test(status)) {
@@ -163,14 +177,22 @@ export function parseBankTable(table: (string | number | boolean | Date | null)[
       rejected++;
       continue;
     }
-    const merchant = [c[iDesc], iCat >= 0 ? c[iCat] : ''].filter(Boolean).join(' · ');
+    const bankType = c[typeIndex];
+    const merchant = [...new Set([c[iDesc], c[merchantIndex], bankType, iCat >= 0 ? c[iCat] : ''].filter(Boolean))].join(' · ');
     const tx = { ...draft(occurredAt ? today(new Date(occurredAt)) : date, amount, merchant, { income: credit || (!debit && amount > 0) }),
       structured: true, occurredAt };
     const external = iExternal >= 0 ? c[iExternal] : undefined;
     const account = iAccount >= 0 ? c[iAccount] : undefined;
-    if (account) Object.assign(tx, { bankAccount: account });
+    const product = c[productIndex];
+    if (product || account) tx.bankAccount = product && account ? product + ' · …' + account.slice(-4) : product || account;
+    if (bankType) tx.bankType = bankType;
     if (external && (account || bank !== 'table')) tx.fingerprint = JSON.stringify(['csv:operation', bank, account ?? '', external]);
-    else if (fileHash) tx.fingerprint = JSON.stringify(['csv:file', fileHash, row]);
+    else if (vtb && account) {
+      const key = JSON.stringify([account, occurredAt ?? date, tx.income ? tx.amount : -tx.amount, c[iDesc], c[merchantIndex], bankType]);
+      const index = occurrences.get(key) ?? 0;
+      occurrences.set(key, index + 1);
+      tx.fingerprint = JSON.stringify(['csv:vtb', key, index]);
+    } else if (fileHash) tx.fingerprint = JSON.stringify(['csv:file', fileHash, row]);
     rows.push(tx);
   }
   return { rows, bank, rejected, bounds, columns: { date: head[iDate], amount: head[iAmount], merchant: iDesc >= 0 ? head[iDesc] : '—' } };

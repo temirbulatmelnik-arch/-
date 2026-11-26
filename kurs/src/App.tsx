@@ -10,20 +10,14 @@ import { PaymentQueueSheet } from './screens/PaymentQueue';
 import { TransferSheet } from './screens/TransferSheet';
 import { AddExpenseSheet } from './screens/AddExpense';
 import { BonusSheet } from './screens/BonusSheet';
-import { History } from './screens/History';
 import { CheckupSheet } from './screens/Checkup';
 import { DebtSheet } from './screens/DebtSheet';
 import { EventSheet } from './screens/EventSheet';
 import { FixedSheet } from './screens/FixedSheet';
-import { HubSheet } from './screens/Hub';
-import { ImportSheet } from './screens/Import';
 import { Onboarding } from './screens/Onboarding';
-import { Payments } from './screens/Payments';
-import { Plan } from './screens/Plan';
 import { updateBadge } from './screens/reminders';
 import { openPaymentReminder, pushConfigured, syncPaymentPush } from './screens/paymentPush';
 import { ReserveSheet } from './screens/ReserveSheet';
-import { SettingsSheet } from './screens/Settings';
 import { SyncSheet, UnlockSheet } from './screens/Sync';
 import { TodaySheet } from './screens/TodaySheet';
 import { Tour, TOUR_VERSION } from './screens/Tour';
@@ -34,8 +28,25 @@ import { migrationProblem, subscribeMigration } from './store/financeStorage';
 import { downloadFile } from './domain/ics';
 import { useUi, type Tab } from './store/ui';
 
+const History = lazy(() => import('./screens/History').then(m => ({ default: m.History })));
+const Payments = lazy(() => import('./screens/Payments').then(m => ({ default: m.Payments })));
+const Plan = lazy(() => import('./screens/Plan').then(m => ({ default: m.Plan })));
+const ImportSheet = lazy(() => import('./screens/Import').then(m => ({ default: m.ImportSheet })));
+const SettingsSheet = lazy(() => import('./screens/Settings').then(m => ({ default: m.SettingsSheet })));
+const HubSheet = lazy(() => import('./screens/Hub').then(m => ({ default: m.HubSheet })));
 const FinanceSheet = lazy(() => import('./screens/FinanceSheet').then(m => ({ default: m.FinanceSheet })));
 const WorkSheet = lazy(() => import('./screens/WorkSheet').then(m => ({ default: m.WorkSheet })));
+
+function DeferredSheets() {
+  const scan = useUi(s => s.scan);
+  const settings = useUi(s => s.settings);
+  const hub = useUi(s => s.hub);
+  return <Suspense fallback={null}>
+    {scan && <ImportSheet />}
+    {settings && <SettingsSheet />}
+    {hub && <HubSheet />}
+  </Suspense>;
+}
 
 function FinanceSheets() {
   const finance = useUi(s => s.finance);
@@ -67,12 +78,11 @@ const SHEETS = (
   <>
     <CheckupSheet />
     <AddExpenseSheet />
-    <ImportSheet />
+    <DeferredSheets />
     <EventSheet />
     <BonusSheet />
     <DebtSheet />
     <ReserveSheet />
-    <SettingsSheet />
     <WeekSheet />
     <TodaySheet />
     <SavingsSheet />
@@ -83,7 +93,6 @@ const SHEETS = (
     <FixedSheet />
     <SyncSheet />
     <UnlockSheet />
-    <HubSheet />
     <FinanceSheets />
     <Tour />
   </>
@@ -219,7 +228,7 @@ export default function App() {
         {/* Все вкладки живут сразу, скрытые — блоками с hidden: переключение только показывает готовое, без
             пересборки и без перезапуска эффектов. Мгновенно, как у вкладок iOS: без въезда — частое действие
             не должно ждать анимацию */}
-        {ORDER.map(t => (mounted.has(t) || t === tab) && <main key={t} hidden={t !== tab}>{SCREENS[t]}</main>)}
+        {ORDER.map(t => (mounted.has(t) || t === tab) && <main key={t} hidden={t !== tab}>{t === 'week' ? SCREENS[t] : <Suspense fallback={null}>{SCREENS[t]}</Suspense>}</main>)}
 
         <TabBar />
 

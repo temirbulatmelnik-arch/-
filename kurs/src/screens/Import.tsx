@@ -1,6 +1,6 @@
 import { exchangeRevision } from '../domain/exchange';
 import type { BankImportBatch } from '../domain/accounts';
-import { cashAccount, cents, LIFE_ACCOUNT, RESERVE_ACCOUNT, rubles } from '../domain/accounts';
+import { accountOptions, cashAccount, cents, LIFE_ACCOUNT, RESERVE_ACCOUNT, rubles } from '../domain/accounts';
 // Выписка и скриншоты из банка → что на них → что обновить: траты по категориям, оплаченные платежи,
 // поступления (премия сразу открывает распределение), остаток на карте. После — итог недели.
 import { AlertTriangle, Camera, Check, ClipboardPaste, FileSpreadsheet, FileText, Loader2 } from 'lucide-react';
@@ -15,7 +15,7 @@ import { ScreenshotFlow } from './ScreenshotImport';
 import type { ImageOCR } from '../domain/imageText';
 import { moscowClock } from '../domain/funds';
 import { parseBankText } from '../domain/bankText';
-import { draft, parseBankTable, parseCsv, parseText } from '../domain/statements';
+import { draft, parseBankTable, parseCsv, parseText, type DraftTx } from '../domain/statements';
 import type { CategoryId, Source } from '../domain/types';
 import { weekToClose } from '../domain/weekly';
 import { uid, useStore } from '../store/store';
@@ -32,7 +32,7 @@ export function ImportSheet() {
 }
 
 type Review = { summary: string; warnings: string[]; items: AnyProposal[]; batch?: BankImportBatch; statement?: StatementCheck; accountId?: string };
-type Step = { s: 'pick' } | { s: 'text' } | { s: 'busy'; label: string } | { s: 'review'; review: Review } | { s: 'screenshots'; images: ImageOCR[] } | { s: 'error'; text: string };
+type Step = { s: 'pick' } | { s: 'text' } | { s: 'busy'; label: string } | { s: 'review'; review: Review } | { s: 'routes'; labels: string[]; done: (routes: Record<string, string>) => void } | { s: 'screenshots'; images: ImageOCR[] } | { s: 'error'; text: string };
 
 async function sha256Hex(data: BufferSource) {
   const digest = await crypto.subtle.digest('SHA-256', data);
@@ -42,6 +42,26 @@ async function sha256Hex(data: BufferSource) {
 function ctx() {
   const st = useStore.getState();
   return { cal: st, marks: st.marks, expenses: st.expenses, reserve: st.reserve, now: today(), memory: st.merchantMemory };
+}
+
+function BankRoutes({ labels, onBack, onContinue }: {
+  labels: string[]; onBack: () => void; onContinue: (routes: Record<string, string>) => void;
+}) {
+  const book = useStore(s => s.accountBook);
+  const [routes, setRoutes] = useState<Record<string, string>>({});
+  return <div className="space-y-3 pt-2">
+    <h3 className="font-medium">Счета из выписки</h3>
+    <p className="text-sm text-muted">Укажите, с каким счётом в «Курсе» совпадает каждый счёт ВТБ.</p>
+    {labels.map(label => <label key={label} className="block space-y-1 text-sm">
+      <span>{label}</span>
+      <select className="field" value={routes[label] ?? ''} onChange={event => setRoutes({ ...routes, [label]: event.target.value })}>
+        <option value="">Выберите счёт</option>
+        {accountOptions(book).map(account => <option key={account.id} value={account.id}>{account.name}</option>)}
+      </select>
+    </label>)}
+    <PrimaryButton className="w-full" disabled={labels.some(label => !routes[label])} onClick={() => onContinue(routes)}>Проверить операции</PrimaryButton>
+    <SecondaryButton className="w-full" onClick={onBack}>Назад</SecondaryButton>
+  </div>;
 }
 
 function Flow() {
@@ -98,7 +118,7 @@ function Flow() {
       const st = parseStatementText(await pdfText(file));
       if (!st.lines.length) { setStep({ s: 'error', text: 'Не нашёл в PDF строк с датой и суммой. Попробуйте скриншоты или CSV.' }); return; }
       const statement = reconcileStatement({ opening: st.openingBalance, closing: st.closingBalance, end: st.periodEnd },
-        st.lines.map(line => line.sign == null ? null : line.sign * line.amount));
+        st.lines.map(line => line.sign == null ? null : line.sign * line.amount), st.rejected);
       const rows = st.lines.map((line, index) => {
         const tx = draft(line.date, line.amount, line.text, { income: line.sign === 1 });
         return { ...tx, structured: true, occurredAt: line.occurredAt, skip: line.sign == null || tx.skip,
@@ -134,17 +154,29 @@ function Flow() {
         r = parseCsv(body, fileHash);
       }
       if (!r) throw new Error('Не нашёл в файле столбцы «Дата» и «Сумма».');
-      const rows = await Promise.all(r.rows.map(async row => row.fingerprint.startsWith('["csv:operation')
-        ? { ...row, fingerprint: JSON.stringify(['csv:operation', await sha256Hex(new TextEncoder().encode(row.fingerprint))]) }
+      const rows = await Promise.all(r.rows.map(async row => /^\["csv:(operation|vtb)"/.test(row.fingerprint)
+        ? { ...row, fingerprint: JSON.stringify([r.bank === 'vtb' && row.fingerprint.startsWith('["csv:vtb') ? 'csv:vtb' : 'csv:operation', await sha256Hex(new TextEncoder().encode(row.fingerprint))]) }
         : row));
-      const review = fromDrafts(rows, ctx(), `Выписка: ${rows.length} операций. Столбцы: «${r.columns.date}», «${r.columns.amount}», «${r.columns.merchant}».`);
-      const warnings = r.rejected ? [`Пропущено строк: ${r.rejected}. Проверьте статус, валюту и формат данных в исходной таблице.`, ...review.warnings] : review.warnings;
-      const accountLabels = new Set(rows.flatMap(row => row.bankAccount ? [row.bankAccount] : []));
-      const statement = reconcileStatement(r.bounds, rows.map(row => row.income ? row.amount : -row.amount),
-        r.rejected + (accountLabels.size > 1 ? 1 : 0));
-      const accountId = accountLabels.size > 1 ? undefined : /накопительн|резерв/i.test([...accountLabels][0] ?? '') ? RESERVE_ACCOUNT : LIFE_ACCOUNT;
-      setStep({ s: 'review', review: { ...review, warnings, ...(r.bounds.opening != null || r.bounds.closing != null ? { statement, accountId } : {}), batch: { id: fileHash, fileHash, bank: r.bank, importedAt: new Date().toISOString(),
-        parserVersion: xlsx ? 'kurs-xlsx-1' : 'kurs-csv-2', rowCount: rows.length } } });
+      const accountLabels = [...new Set(rows.flatMap(row => row.bankAccount ? [row.bankAccount] : []))];
+      const done = (routes?: Record<string, string>) => {
+        const routed = rows.map((row): DraftTx => {
+          const accountId = row.bankAccount && routes?.[row.bankAccount];
+          return accountId ? { ...row, accountId, source: accountId === RESERVE_ACCOUNT ? 'reserve' : 'life' } : row;
+        });
+        const summary = 'Выписка: ' + routed.length + ' операций. Столбцы: «' + r.columns.date + '», «' + r.columns.amount + '», «' + r.columns.merchant + '».';
+        const review = fromDrafts(routed, ctx(), summary);
+        const warnings = r.rejected ? ['Пропущено строк: ' + r.rejected + '. Проверьте статус, валюту и формат данных в таблице.', ...review.warnings] : review.warnings;
+        const statement = reconcileStatement(r.bounds, rows.map(row => row.income ? row.amount : -row.amount),
+          r.rejected + (accountLabels.length > 1 ? 1 : 0));
+        const accountId = accountLabels.length > 1 ? undefined : routes?.[accountLabels[0]] ??
+          (/накопительн|резерв/i.test(accountLabels[0] ?? '') ? RESERVE_ACCOUNT : LIFE_ACCOUNT);
+        setStep({ s: 'review', review: { ...review, warnings,
+          ...(r.bounds.opening != null || r.bounds.closing != null ? { statement, accountId } : {}),
+          batch: { id: fileHash, fileHash, bank: r.bank, importedAt: new Date().toISOString(),
+            parserVersion: xlsx ? 'kurs-xlsx-1' : 'kurs-csv-2', rowCount: routed.length } } });
+      };
+      if (r.bank === 'vtb' && accountLabels.length > 1) setStep({ s: 'routes', labels: accountLabels, done });
+      else done();
     } catch (e) {
       fail(e);
     }
@@ -168,6 +200,7 @@ function Flow() {
     );
   }
   if (step.s === 'screenshots') return <ScreenshotFlow images={step.images} onBack={() => setStep({ s: 'pick' })} />;
+  if (step.s === 'routes') return <BankRoutes labels={step.labels} onBack={() => setStep({ s: 'pick' })} onContinue={step.done} />;
   if (step.s === 'review') return <ReviewList review={step.review} onBack={() => setStep({ s: 'pick' })} />;
   // одно касание: прочитать буфер (iPhone спросит «Вставить») и сразу показать, что нашлось
   const pasteBank = async () => {
@@ -308,7 +341,7 @@ function ReviewList({ review, onBack }: { review: Review; onBack: () => void }) 
     const applied = store.applyBankImport(revision, `Из банка: ${review.summary}`, batch, (store, current) => {
       const people = on.flatMap(i => (i.type === 'person' && i.choice === 'spend' ? [i] : []));
       if (txs.length || people.length) store.addExpenses([
-        ...txs.map(t => ({ date: t.date, amount: t.amount, category: t.category, note: t.merchant, source: t.source, origin: t.structured ? ('csv' as const) : t.nameKey ? ('text' as const) : ('ai' as const), fingerprint: t.fingerprint, ...(t.occurredAt ? { occurredAt: t.occurredAt } : {}), ...(t.creditCard ? { creditCard: t.creditCard } : {}) })),
+        ...txs.map(t => ({ date: t.date, amount: t.amount, category: t.category, note: t.merchant, source: t.source, accountId: t.accountId, origin: t.structured ? ('csv' as const) : t.nameKey ? ('text' as const) : ('ai' as const), fingerprint: t.fingerprint, ...(t.occurredAt ? { occurredAt: t.occurredAt } : {}), ...(t.creditCard ? { creditCard: t.creditCard } : {}) })),
         ...people.map(p => ({ date: p.date, amount: p.amount, category: p.category, note: p.name, source: 'life' as const, origin: 'text' as const, fingerprint: p.fingerprint })),
       ]);
       // память продавцов: сменили категорию — запомнить
@@ -482,7 +515,7 @@ function ProposalBody({ p, onPatch }: { p: AnyProposal; onPatch: (x: Partial<Any
               className="rounded-lg bg-surface-2 px-2 py-1 text-[12px] font-medium">
               {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.short}</option>)}
             </select>
-            <button type="button" onClick={() => onPatch({ tx: { ...p.tx, source: NEXT_SOURCE[p.tx.source] } } as Partial<AnyProposal>)}
+            <button type="button" onClick={() => onPatch({ tx: { ...p.tx, accountId: undefined, source: NEXT_SOURCE[p.tx.source] } } as Partial<AnyProposal>)}
               className={`rounded-lg px-2 py-1 font-medium ${p.tx.source === 'credit' ? 'bg-neg/12 text-neg' : 'bg-surface-2'}`}>{SOURCE_LABEL[p.tx.source]}</button>
             {p.tx.duplicate && <Chip tone="warn">{p.tx.needsDuplicateReview ? 'Возможное совпадение' : 'Уже есть'}</Chip>}
             {p.tx.skip && <Chip>не трата?</Chip>}

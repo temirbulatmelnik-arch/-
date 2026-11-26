@@ -19,6 +19,7 @@ export interface PdfStatement {
   /** дата конца периода выписки */
   periodEnd: string | null;
   raw: string;
+  rejected?: number;
 }
 
 /** Текст PDF построчно: элементы с одной высотой собираются в строку слева направо */
@@ -51,6 +52,8 @@ export function parseStatementText(raw: string): PdfStatement {
   let closingBalance: number | null = null;
   let openingBalance: number | null = null;
   let periodEnd: string | null = null;
+  if (/Период выписки/i.test(raw) && /Сумма операции в валюте счета\/карты/i.test(raw) &&
+      /Дата обработки/.test(raw)) return parseVtbStatement(raw);
   const period = raw.match(/по\s+(\d{2}[./]\d{2}[./]\d{4})/i);
   if (period) periodEnd = parseDate(period[1]);
   let current: PdfLine | null = null;
@@ -85,4 +88,63 @@ export function parseStatementText(raw: string): PdfStatement {
     }
   }
   return { lines, openingBalance, closingBalance, periodEnd, raw };
+}
+
+const VTB_ROW = /^(\d{2}\.\d{2}\.\d{4})(?:\s+(\d{2}:\d{2}(?::\d{2})?))?\s+(\d{2}\.\d{2}\.\d{4})\s+/;
+const VTB_CELL = /([+−-]?\d+(?:[.,]\d{2})?)\s+[A-Z]{3}\b/g;
+const vtbNumber = (raw: string) => Number(raw.replace(',', '.').replace('−', '-'));
+
+function parseVtbStatement(raw: string): PdfStatement {
+  const lines: PdfLine[] = [];
+  let openingBalance = null, closingBalance = null, periodEnd = null;
+  let rejected = 0;
+  let current: PdfLine | undefined;
+  let sameDay = false;
+  for (const rawLine of raw.split('\n')) {
+    const line = rawLine.trim();
+    if (/^Период выписки/i.test(line)) {
+      periodEnd = parseDate([...line.matchAll(new RegExp(DATE.source, 'g'))].at(-1)?.[0] ?? '');
+      continue;
+    }
+    if (/^Баланс на (начало|конец) периода/i.test(line)) {
+      const first = [...line.matchAll(VTB_CELL)][0];
+      if (first) {
+        if (/начало/i.test(line)) openingBalance = vtbNumber(first[1]);
+        else closingBalance = vtbNumber(first[1]);
+      }
+      continue;
+    }
+    const row = line.match(VTB_ROW);
+    if (row) {
+      current = undefined;
+      const tail = line.slice(row[0].length);
+      const [source, credit, debit] = [...tail.matchAll(VTB_CELL)];
+      if (!source || !credit || !debit || !credit[0].endsWith('RUB') || !debit[0].endsWith('RUB') ||
+          vtbNumber(credit[1]) < 0 || (vtbNumber(credit[1]) !== 0 && vtbNumber(debit[1]) !== 0)) {
+        rejected++;
+        continue;
+      }
+      const amount = vtbNumber(credit[1]) - Math.abs(vtbNumber(debit[1]));
+      if (!amount) continue;
+      // The statement closes by bank booking date. Preserve the operation clock only when both dates agree.
+      const date = parseDate(row[3])!;
+      sameDay = row[1] === row[3];
+      const time = sameDay ? row[2] : undefined;
+      const occurredAt = time ? date + 'T' + (time.length === 5 ? time + ':00' : time) + '+03:00' : undefined;
+      current = { date, occurredAt, amount: Math.abs(amount), sign: amount < 0 ? -1 : 1,
+        text: tail.slice(debit.index! + debit[0].length).trim() };
+      lines.push(current);
+    } else if (/^(?:Дата и время|Сумма операции|Операции по сч[её]ту|Итого|Страница|Выписка)/i.test(line)) {
+      current = undefined;
+    } else if (current && line && current.text.length < 500) {
+      const time = line.match(/^(\d{2}:\d{2}(?::\d{2})?)\b\s*/);
+      if (time && sameDay && current.occurredAt == null) {
+        const clock = time[1].length === 5 ? time[1] + ':00' : time[1];
+        current.occurredAt = current.date + 'T' + clock + '+03:00';
+      }
+      const detail = line.slice(time?.[0].length ?? 0);
+      if (detail) current.text = (current.text + ' ' + detail).trim();
+    }
+  }
+  return { lines, closingBalance, openingBalance, periodEnd, raw, rejected };
 }

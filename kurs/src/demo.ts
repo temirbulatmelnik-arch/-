@@ -1,5 +1,6 @@
 // Демо для показа нового вида: вымышленный план и траты относительно сегодняшней даты — без кода и без личных данных.
 // Собирается с VITE_DEMO=1 (и VITE_NO_SW=1): так макет открывается где угодно, ничего не скачивая.
+import { canonicalBook } from './domain/accounts';
 import { addDays, monthKey, today, weekStart } from './domain/dates';
 import type { Debt, Expense, PlanSeed } from './domain/types';
 import { useStore } from './store/store';
@@ -80,6 +81,7 @@ export function startDemo() {
   expenses.push({ id: 'demo-t2', date: now, amount: 340, category: 'work', note: 'Обед', source: 'life', origin: 'manual', createdAt: `${now}T13:20:00.000Z` });
   useStore.setState({
     expenses,
+    accountBook: canonicalBook(useStore.getState().accountBook, expenses),
     cardBalance: { amount: 6200, date: now, source: 'manual', at: `${now}T07:00:00.000Z` },
     bridge: { card: 'sber', cap: 8000, repayBy: addDays(now, 75), repayNote: 'годовой премией', weeks: [
       { monday: mon, fromReserve: 5000, fromCredit: 4000 }, { monday: addDays(mon, 7), fromReserve: 5500, fromCredit: 3500 },

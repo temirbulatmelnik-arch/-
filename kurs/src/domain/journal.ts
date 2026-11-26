@@ -13,7 +13,7 @@ interface JournalInput {
   reserveLog: ReserveMove[];
 }
 
-type JournalEntry = AccountOperation & { legacy?: 'mark' | 'reserve'; reserveIncluded?: true };
+type JournalEntry = AccountOperation;
 
 export interface JournalReview {
   kind: 'possible_duplicate' | 'snapshot_order' | 'unknown_funding' | 'unknown_route';
@@ -26,8 +26,14 @@ export interface JournalReview {
 
 /** Older marks and reserve logs are read in one place. New commands write explicit book operations. */
 export function financialJournal(s: JournalInput) {
-  const book = canonicalBook(s.accountBook ?? EMPTY_BOOK, s.expenses);
-  const entries: JournalEntry[] = [...book.operations];
+  const saved = s.accountBook ?? EMPTY_BOOK;
+  if (saved.journalVersion) return { book: saved, entries: saved.operations };
+  const book = canonicalBook(saved, s.expenses);
+  return { book, entries: legacyEntries(s, book.operations) };
+}
+
+function legacyEntries(s: JournalInput, explicit: AccountOperation[]) {
+  const entries = [...explicit];
   const linked = new Set([...entries.flatMap(op => op.eventKey ? [op.eventKey] : []), ...payrollReceiptParts(entries).keys()]);
   for (const [key, mark] of Object.entries(s.marks)) {
     if (!mark.done || linked.has(key) || !(mark.amount && mark.amount > 0)) continue;
@@ -46,12 +52,24 @@ export function financialJournal(s: JournalInput) {
     }
   }
   for (const move of s.reserveLog) {
-    if (!move.card || !move.at) continue;
+    if (!move.card) continue;
     entries.push({ id: `reserve:${move.id}`, legacy: 'reserve', reserveIncluded: true, type: 'transfer',
       accountId: move.card > 0 ? RESERVE_ACCOUNT : LIFE_ACCOUNT, toAccountId: move.card > 0 ? LIFE_ACCOUNT : RESERVE_ACCOUNT,
-      amount: Math.abs(move.card), date: move.date, at: move.at, origin: 'exchange', status: 'confirmed', fundingSource: 'own' });
+      amount: Math.abs(move.card), date: move.date, at: move.at, legacyForKeys: move.forKeys,
+      cashBooked: !move.at || undefined, origin: 'exchange', status: 'confirmed', fundingSource: 'own' });
   }
-  return { book, entries };
+  return entries;
+}
+
+/** Convert source records on migration and on writes coming from a legacy import. */
+export function materializeJournal<T extends JournalInput>(state: T, refresh = false): T {
+  const book = state.accountBook ?? EMPTY_BOOK;
+  if (book.journalVersion && !refresh) return state;
+  const normalized = canonicalBook(book, state.expenses);
+  const explicit = normalized.operations.filter(op => !op.legacy);
+  return { ...state, accountBook: { ...normalized, journalVersion: 1,
+    historicalPaymentKeys: [...new Set(state.reserveLog.flatMap(move => move.forKeys ?? []))],
+    operations: legacyEntries(state, explicit) } };
 }
 
 export interface JournalAnchor extends BankBalance {
@@ -65,6 +83,7 @@ export function journalEntryAfter(op: JournalEntry, anchor: JournalAnchor) {
   const id = linkedExpenseId(op);
   if (op.date === anchor.date && (anchor.excludedIds?.includes(op.id) || id && anchor.excludedIds?.includes(id))) return true;
   if (anchor.includedIds?.includes(op.id) || id && anchor.includedExpenseIds?.includes(id)) return false;
+  if (op.legacy === 'reserve' && !op.at) return false;
   if (op.legacy) return op.date !== anchor.date ? op.date > anchor.date
     : !!op.at && !!anchor.at && Date.parse(op.at) > Date.parse(anchor.at);
   if (op.legacyExpense) {

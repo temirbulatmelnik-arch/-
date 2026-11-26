@@ -43,7 +43,7 @@ describe('остаток карты «Свои»', () => {
 
   it('сравнивает моменты сверки и покупки с разными смещениями', () => {
     state().setCardBalance({ amount: 2000, date: today(), source: 'manual', at: today() + 'T13:00:00+03:00' });
-    useStore.setState({ expenses: [{ ...expense(), id: 'purchase', createdAt: today() + 'T11:00:00.000Z' }] });
+    state().addExpenses([{ ...expense(), occurredAt: today() + 'T11:00:00.000Z' }]);
     expect(balance()).toBe(1650);
   });
 

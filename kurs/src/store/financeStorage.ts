@@ -3,9 +3,10 @@ import type { PersistStorage, StorageValue } from 'zustand/middleware';
 import { expenseOperation, linkedExpenseId, type AccountBook, type AccountOperation } from '../domain/accounts';
 import type { Expense } from '../domain/types';
 
-export const FINANCE_SCHEMA = 10;
+export const FINANCE_SCHEMA = 11;
 export const LEGACY_KEY = 'kurs';
-export const FINANCE_KEY = 'kurs:journal-v10';
+export const FINANCE_KEY = 'kurs:journal-v11';
+export const PREVIOUS_FINANCE_KEY = 'kurs:journal-v10';
 export const MIGRATION_BACKUP_KEY = 'kurs:before-1.0';
 
 type Storage = Pick<globalThis.Storage, 'getItem' | 'setItem' | 'removeItem'>;
@@ -85,10 +86,22 @@ export function unpackFinanceState<T extends WithSnapshots>(payload: string): T 
   } as T;
 }
 
-type Archive = { version: number; payload: string; checksum: string; legacyChecksum: string | null };
+type Archive = { version: number; payload: string; checksum: string; legacyChecksum: string | null; previousChecksum?: string | null };
 type Backup = { version: number; createdAt: string; payload: string; checksum: string };
 
-export function readMigrationBackup(storage: Storage): StorageValue<unknown> | null {
+export function readMigrationBackup(storage: Storage, allowChangedPrior = false): StorageValue<unknown> | null {
+  const previous = storage.getItem(PREVIOUS_FINANCE_KEY);
+  const current = storage.getItem(FINANCE_KEY);
+  if (previous) {
+    const old = JSON.parse(previous) as Archive;
+    if (old.version !== 10 || typeof old.payload !== 'string' || digest(old.payload) !== old.checksum) throw new Error('invalid prior archive');
+    if (current) {
+      let expected: string | null | undefined;
+      try { expected = (JSON.parse(current) as Archive).previousChecksum; } catch { /* The source archive is verified independently. */ }
+      if (!allowChangedPrior && expected && expected !== digest(previous)) throw new Error('prior archive changed');
+    }
+    return { version: 10, state: unpackFinanceState(old.payload) };
+  }
   const raw = storage.getItem(MIGRATION_BACKUP_KEY);
   if (!raw) return null;
   const backup = JSON.parse(raw) as Backup;
@@ -99,10 +112,12 @@ export function readMigrationBackup(storage: Storage): StorageValue<unknown> | n
 }
 
 export function createFinanceStorage<T extends WithSnapshots>(getStorage: () => Storage,
-  prepare: (state: unknown, version: number) => T, verify: (before: T, after: T) => boolean,
+  prepare: (state: unknown, version: number) => T, verify: (before: T, after: T) => boolean, normalize: (state: T) => T = state => state,
 ): PersistStorage<T> {
   let activeRaw: string | null = null;
   let sourceRaw: string | null = null;
+  let previousRaw: string | null = null;
+  let previousChecksum: string | null = null;
   let sourceChecksum: string | null = null;
   let blocked = false;
 
@@ -113,7 +128,7 @@ export function createFinanceStorage<T extends WithSnapshots>(getStorage: () => 
   };
   const archive = (state: T) => {
     const payload = packFinanceState(state);
-    return JSON.stringify({ version: FINANCE_SCHEMA, payload, checksum: digest(payload), legacyChecksum: sourceChecksum });
+    return JSON.stringify({ version: FINANCE_SCHEMA, payload, checksum: digest(payload), legacyChecksum: sourceChecksum, previousChecksum });
   };
   const storageOrFail = () => {
     try { return getStorage(); } catch { return fail('storage'); }
@@ -130,6 +145,8 @@ export function createFinanceStorage<T extends WithSnapshots>(getStorage: () => 
       const storage = storageOrFail();
       const current = storage.getItem(FINANCE_KEY);
       const original = storage.getItem(LEGACY_KEY);
+      previousRaw = storage.getItem(PREVIOUS_FINANCE_KEY);
+      previousChecksum = previousRaw == null ? null : digest(previousRaw);
       blocked = false;
       activeRaw = current;
       sourceRaw = original;
@@ -140,11 +157,32 @@ export function createFinanceStorage<T extends WithSnapshots>(getStorage: () => 
           if (row.version !== FINANCE_SCHEMA) fail('other-version');
           if (typeof row.payload !== 'string' || digest(row.payload) !== row.checksum) fail('verification');
           const state = unpackFinanceState<T>(row.payload);
-          if (row.legacyChecksum !== sourceChecksum) {
+          if (row.legacyChecksum !== sourceChecksum || (row.previousChecksum ?? null) !== previousChecksum) {
             blocked = true;
             updateProblem('changed');
           } else updateProblem(null);
           return { version: FINANCE_SCHEMA, state };
+        } catch {
+          if (blocked) throw new Error('finance storage unavailable');
+          fail('verification');
+        }
+      }
+      if (previousRaw != null) {
+        try {
+          const prior = JSON.parse(previousRaw) as Archive;
+          if (prior.version !== 10 || typeof prior.payload !== 'string' || digest(prior.payload) !== prior.checksum) fail('verification');
+          if (prior.legacyChecksum !== sourceChecksum) fail('changed');
+          const before = unpackFinanceState<T>(prior.payload);
+          const after = normalize(before);
+          const candidate = archive(after);
+          const decoded = unpackFinanceState<T>((JSON.parse(candidate) as Archive).payload);
+          if (stableJson(after) !== stableJson(decoded) || !verify(before, decoded)) fail('verification');
+          if (storage.getItem(LEGACY_KEY) !== original || storage.getItem(PREVIOUS_FINANCE_KEY) !== previousRaw ||
+              storage.getItem(FINANCE_KEY) !== null) fail('changed');
+          verifiedWrite(storage, FINANCE_KEY, candidate);
+          activeRaw = candidate;
+          updateProblem(null);
+          return { version: FINANCE_SCHEMA, state: after };
         } catch {
           if (blocked) throw new Error('finance storage unavailable');
           fail('verification');
@@ -159,17 +197,18 @@ export function createFinanceStorage<T extends WithSnapshots>(getStorage: () => 
         legacy = JSON.parse(original) as StorageValue<unknown>;
         const version = legacy.version ?? 0;
         if (!Number.isInteger(version) || version < 0 || version >= FINANCE_SCHEMA) fail('other-version');
-        prepared = prepare(legacy.state, version);
+        const before = prepare(legacy.state, version);
+        prepared = normalize(before);
         candidate = archive(prepared);
         const decoded = unpackFinanceState<T>((JSON.parse(candidate) as Archive).payload);
-        if (stableJson(prepared) !== stableJson(decoded) || !verify(prepared, decoded)) fail('verification');
+        if (stableJson(prepared) !== stableJson(decoded) || !verify(before, decoded)) fail('verification');
       } catch {
         if (blocked) throw new Error('finance storage unavailable');
         return fail('verification');
       }
 
       // Фаза 1 закончена. Ниже записываем и проверяем точную копию, старый ключ остаётся доступен старой PWA.
-      if (storage.getItem(LEGACY_KEY) !== original || storage.getItem(FINANCE_KEY) !== null) fail('changed');
+      if (storage.getItem(LEGACY_KEY) !== original || storage.getItem(PREVIOUS_FINANCE_KEY) !== previousRaw || storage.getItem(FINANCE_KEY) !== null) fail('changed');
       try {
         const backup = storage.getItem(MIGRATION_BACKUP_KEY);
         if (backup == null) {
@@ -183,7 +222,7 @@ export function createFinanceStorage<T extends WithSnapshots>(getStorage: () => 
       }
 
       // Фаза 2. Единственная атомарная запись указывает на новое состояние.
-      if (storage.getItem(LEGACY_KEY) !== original || storage.getItem(FINANCE_KEY) !== null) fail('changed');
+      if (storage.getItem(LEGACY_KEY) !== original || storage.getItem(PREVIOUS_FINANCE_KEY) !== previousRaw || storage.getItem(FINANCE_KEY) !== null) fail('changed');
       verifiedWrite(storage, FINANCE_KEY, candidate);
       activeRaw = candidate;
       updateProblem(null);
@@ -192,7 +231,7 @@ export function createFinanceStorage<T extends WithSnapshots>(getStorage: () => 
     setItem(_key, value) {
       if (blocked) return;
       const storage = storageOrFail();
-      if (storage.getItem(LEGACY_KEY) !== sourceRaw || (storage.getItem(FINANCE_KEY) ?? null) !== activeRaw) {
+      if (storage.getItem(LEGACY_KEY) !== sourceRaw || storage.getItem(PREVIOUS_FINANCE_KEY) !== previousRaw || (storage.getItem(FINANCE_KEY) ?? null) !== activeRaw) {
         blocked = true;
         updateProblem('changed');
         return;

@@ -105,7 +105,7 @@ export default defineConfig({
         ],
       },
       // seed.enc.json кешируется тоже: план открывается и без интернета
-      workbox: { maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, importScripts: ['./payment-push.js'], skipWaiting: true, clientsClaim: true, globPatterns: ['**/*.{js,css,html,svg,png,woff2,json,gz}'], globIgnores: ['**/assets/main-{' + OLD_TONUS_SCRIPTS.join(',') + '}.js'] },
+      workbox: { maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, importScripts: ['./payment-push.js'], skipWaiting: true, clientsClaim: true, globPatterns: ['**/*.{js,mjs,css,html,svg,png,woff2,json,gz}'], globIgnores: ['**/assets/main-{' + OLD_TONUS_SCRIPTS.join(',') + '}.js'] },
     }),
   ],
   test: { environment: 'node' },

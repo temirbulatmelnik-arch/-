@@ -147,3 +147,22 @@ it.skipIf(!backup || !expected)('репетирует перенос полно�
     setPlanSource(() => null);
   }
 }, 20000);
+
+it.skipIf(!backup || !expected)('переносит старые денежные отметки и движения в сохранённый журнал без повторного чтения', async () => {
+  const { materializeJournal, financialJournal } = await import('../../src/domain/journal');
+  const { migrationProjection } = await import('../../src/domain/financeMigration');
+  const source = JSON.parse(readFileSync(backup!, 'utf8'));
+  const reference = JSON.parse(readFileSync(expected!, 'utf8'));
+  const date = reference.date;
+  const historical = financialJournal(source).entries.filter(row => row.legacy);
+  expect(historical.length).toBeGreaterThan(0);
+  const current = materializeJournal(source);
+  expect(current.accountBook.operations.filter((row: { legacy?: string }) => row.legacy)).toHaveLength(historical.length);
+  expect(migrationProjection(current, date)).toEqual(migrationProjection(source, date));
+  expect(financialJournal({ ...current, marks: {}, reserveLog: [] }).entries).toBe(current.accountBook.operations);
+  expect(materializeJournal(current)).toBe(current);
+  expect(exchangeRevision(current)).toBe(exchangeRevision(source));
+  const out = buildExchange(current, date);
+  expect(out.status?.week).toMatchObject({ spent: reference.week.spent / 100, left: reference.week.left / 100, cardLeft: reference.balances.life / 100 });
+  expect(out.reserve).toBe(source.reserve);
+});

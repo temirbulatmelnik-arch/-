@@ -1,10 +1,11 @@
+import { materializeJournal } from '../domain/journal';
 import { allocatePayrollReceipt, payrollReceiptParts } from '../domain/payrollReceipts';
 // Всё хранится только на телефоне (localStorage). Никаких аккаунтов и серверов.
 // Резервная копия — файл JSON (Настройки → Данные), календарь — файл .ics.
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { createFinanceStorage, FINANCE_KEY, FINANCE_SCHEMA, LEGACY_KEY, readMigrationBackup, stableJson } from './financeStorage';
-import { dryRunFinanceMigration, migrationProjection } from '../domain/financeMigration';
+import { createFinanceStorage, FINANCE_KEY, FINANCE_SCHEMA, LEGACY_KEY, PREVIOUS_FINANCE_KEY, readMigrationBackup } from './financeStorage';
+import { dryRunFinanceMigration } from '../domain/financeMigration';
 import { accountOptions, appendOperations, cents, kopecks, bookOperationAllowed, canonicalBook, cashAccount, linkedExpenseId, expenseOperation, EMPTY_BOOK, LIFE_ACCOUNT, RESERVE_ACCOUNT, reversibleOperation, reviseOperations, validAmount, validDate, validSplitDebit, validSplitPlan, validPayoffTerms, type PayoffTerms, type AccountBook, type AccountOperation, type BankBalance, type BankImportBatch, type CashAccount, type SplitDebit, type SplitPlan } from '../domain/accounts';
 import { DEFAULT_MODEL } from '../domain/models';
 import { DEFAULT_PREPARATION_TIME, moscowClock, paymentBudget, paymentShares, partialPayments, weeklyTopUp, type FundingMode } from '../domain/funds';
@@ -200,7 +201,7 @@ const EMPTY: Data = {
   ready: false, asOf: today(), debts: [], incomes: [], fixed: [], oneOff: [], templateFrom: monthKey(today()),
   weeklyOverrides: [], planTrajectory: [], baselineTrajectory: [], reserve: 0, reserveLog: [], expenses: [], marks: {}, wishes: [], snapshots: [], overrides: {}, plan: null,
   planRev: 0, planCode: '', checklist: [], strategy: [], rules: [], checks: {}, savings: 0, savingsLog: [], closures: {}, cardBalance: null, bridge: null, checkups: [], merchantMemory: {}, imports: [],
-  settings: DEFAULT_SETTINGS, accountBook: { ...EMPTY_BOOK, paymentRouting: 'life' }, work: null, exchangePatchIds: [],
+  settings: DEFAULT_SETTINGS, accountBook: { ...EMPTY_BOOK, paymentRouting: 'life', journalVersion: 1 }, work: null, exchangePatchIds: [],
 };
 
 /** Снимок общего долга за текущий месяц — для графика «план против факта» */
@@ -245,8 +246,21 @@ export const useStore = create<State>()(
       let staged: State | undefined;
       const get = () => staged ?? read();
       const set = (change: Partial<State> | ((state: State) => Partial<State>)) => {
-        if (staged) staged = { ...staged, ...(typeof change === 'function' ? change(staged) : change) };
-        else commit(change);
+        const apply = (state: State) => {
+          const patch = typeof change === 'function' ? change(state) : change;
+          if (!patch.marks && !patch.reserveLog && !patch.oneOff && !patch.accountBook) return patch;
+          const next = { ...state, ...patch };
+          if (!next.accountBook.journalVersion && !state.accountBook.journalVersion) return patch;
+          const historicalKeys = new Set(state.accountBook.operations.filter(op => op.legacy).map(op => op.eventKey));
+          const replacesHistory = patch.accountBook && next.accountBook.operations.some(op => !op.legacy && op.eventKey && historicalKeys.has(op.eventKey));
+          const legacyChanged = !!(patch.marks || patch.reserveLog || patch.oneOff || replacesHistory);
+          if (legacyChanged || !next.accountBook.journalVersion) {
+            return { ...patch, accountBook: materializeJournal(next, legacyChanged).accountBook };
+          }
+          return patch;
+        };
+        if (staged) staged = { ...staged, ...apply(staged) };
+        else commit(apply);
       };
       return {
       ...EMPTY,
@@ -407,6 +421,10 @@ export const useStore = create<State>()(
         const s = get();
         if (!bookOperationAllowed(op, s.accountBook, s.debts, s.expenses)) return false;
         if (op.status === 'confirmed' && op.date > moscowClock().date) return false;
+        if (op.type === 'income' && op.payrollParts) {
+          if (!allocatePayrollReceipt([...s.accountBook.operations, { ...op, payrollParts: undefined }],
+            s.work?.actual, op.id, op.payrollParts)) return false;
+        }
         if (op.eventKey && op.type === 'loan_disbursement' && !s.marks[op.eventKey]?.done) return false;
         const operations = appendOperations(s.accountBook.operations, [op]);
         if (operations === s.accountBook.operations) return false;
@@ -414,6 +432,9 @@ export const useStore = create<State>()(
         if (op.eventKey && op.status === 'confirmed' && !('authorization' in op && op.authorization) && !marks[op.eventKey]?.done) {
           marks[op.eventKey] = { done: true, at: op.createdAt ?? nowIso(), paidDate: op.date, amount: op.amount,
             ...(op.type === 'expense' || op.type === 'debt_payment' ? { paidFrom: op.accountId === LIFE_ACCOUNT ? 'card' : 'reserve' } : {}) };
+        }
+        if (op.type === 'income' && op.payrollParts) for (const part of op.payrollParts) {
+          marks[part.key] ??= { done: true, at: nowIso(), paidDate: op.date, amount: part.amount };
         }
         set({ accountBook: reviseOperations(s.accountBook, operations, nowIso(), 'Уточнение операции'), marks });
         return true;
@@ -495,7 +516,7 @@ export const useStore = create<State>()(
       closeWeek: c => set(s => {
         // воскресное пополнение: из резерва на карту жизни; в календаре отмечается пополнение следующей недели
         const key = `wk:${addDays(c.monday, 7)}`;
-        const top = s.accountBook.operations.some(op => op.eventKey === key) ? 0 : c.topUp ?? 0;
+        const top = s.accountBook.operations.some(op => !op.legacy && op.eventKey === key) ? 0 : c.topUp ?? 0;
         // резерв уже пришёл из банка в воскресенье или позже — пополнение в нём есть, второй раз не вычитаем
         const fresh = freshReserve(s.reserveLog, addDays(c.monday, 6)) && !s.marks[key]?.done;
         return {
@@ -557,7 +578,7 @@ export const useStore = create<State>()(
         return {
           closures,
           ...(c.transferred > 0 ? { savings: s.savings - c.transferred, savingsLog: [...s.savingsLog, { id: uid(), date: today(), amount: -c.transferred, note: 'Неделя открыта заново' }] } : {}),
-          ...(s.marks[key]?.done && !s.accountBook.operations.some(op => op.eventKey === key) ? { marks, ...topUpMove(s, key, 0, 'Неделя открыта заново: пополнение отменено') } : {}),
+          ...(s.marks[key]?.done && !s.accountBook.operations.some(op => !op.legacy && op.eventKey === key) ? { marks, ...topUpMove(s, key, 0, 'Неделя открыта заново: пополнение отменено') } : {}),
         };
       }),
       moveSavings: (amount, note) => set(s => ({ savings: s.savings + amount, savingsLog: [...s.savingsLog, { id: uid(), date: today(), amount, note }] })),
@@ -632,11 +653,11 @@ export const useStore = create<State>()(
           state.confirmWeeklyTransfer(e.key, amount ?? e.amount, details?.paidDate);
           return;
         }
-        const payment = state.accountBook.operations.find(op => op.eventKey === e.key && op.status === 'confirmed');
+        const payment = state.accountBook.operations.find(op => !op.legacy && op.eventKey === e.key && op.status === 'confirmed');
         if (!done && payment && reversibleOperation(payment)) { state.voidOperation(payment.id); return; }
         set(s => {
           const prev = s.marks[e.key];
-          const linked = s.accountBook.operations.find(op => op.eventKey === e.key && op.status === 'confirmed');
+          const linked = s.accountBook.operations.find(op => !op.legacy && op.eventKey === e.key && op.status === 'confirmed');
           if (linked?.type === 'loan_disbursement' || (linked?.type === 'transfer' && linked.purpose === 'weekly') || s.accountBook.historicalLoans?.some(loan => loan.eventKey === e.key) ||
               (done && (e.payroll?.documented && !details?.bankVerified || e.projection === 'internal_transfer'))) return {};
           const singleCard = s.accountBook.paymentRouting === 'life';
@@ -809,10 +830,8 @@ export const useStore = create<State>()(
       version: FINANCE_SCHEMA,
       partialize: s => pickData(s),
       storage: typeof window === 'undefined' ? undefined : createFinanceStorage<Data>(() => window.localStorage, prepareLegacyData, (before, after) => {
-        const date = today();
-        const result = dryRunFinanceMigration(before, date);
-        return result.canCommit && stableJson(result.before) === stableJson(migrationProjection(after, date));
-      }),
+        return dryRunFinanceMigration(before, today(), after).canCommit;
+      }, normalizeJournalData),
       merge: (persisted, current) => {
         const p = persisted as Partial<Data> | undefined;
         return { ...current, ...p, cardBalance: restoreCardTime(p?.cardBalance ?? null, p?.imports ?? []), settings: { ...DEFAULT_SETTINGS, ...p?.settings } };
@@ -826,7 +845,7 @@ setPlanSource(() => useStore.getState().plan);
 
 if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener('storage', event => {
-    if (event.key === FINANCE_KEY || event.key === LEGACY_KEY) void useStore.persist.rehydrate();
+    if (event.key === FINANCE_KEY || event.key === PREVIOUS_FINANCE_KEY || event.key === LEGACY_KEY) void useStore.persist.rehydrate();
   });
 }
 
@@ -852,6 +871,11 @@ function prepareLegacyData(value: unknown, version: number): Data {
     settings: { ...DEFAULT_SETTINGS, ...data.settings } });
 }
 
+function normalizeJournalData(state: Data): Data {
+  const current = materializeJournal(state);
+  return { ...current, imports: current.imports.map(row => ({ ...row, snapshot: materializeJournal(row.snapshot) })) };
+}
+
 function exportBackup(data: Data) {
   const { settings, planCode: _code, ...rest } = data;
   return JSON.stringify({ app: 'kurs', version: 2, exportedAt: nowIso(), ...rest, settings: { ...settings, apiKey: '' } }, null, 1);
@@ -863,7 +887,12 @@ export function migrationBackupFile(): string | null {
 }
 
 export function currentLegacyFile(): string | null {
-  const raw = window.localStorage.getItem(LEGACY_KEY);
+  const storage = window.localStorage;
+  if (storage.getItem(PREVIOUS_FINANCE_KEY)) {
+    const source = readMigrationBackup(storage, true);
+    return source ? exportBackup(prepareLegacyData(source.state, source.version ?? 0)) : null;
+  }
+  const raw = storage.getItem(LEGACY_KEY);
   if (!raw) return null;
   const { state, version = 0 } = JSON.parse(raw) as { state: unknown; version?: number };
   if (!Number.isInteger(version) || version < 0 || version >= FINANCE_SCHEMA) return null;

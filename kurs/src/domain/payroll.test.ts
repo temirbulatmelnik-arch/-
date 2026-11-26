@@ -137,3 +137,20 @@ it('сверяет листок отдельно с прогнозом, банк
     .toMatchObject({ withMark: 1, withBank: 0, rows: [{ bank: { evidence: 'marked' } }] });
   expect(auditPayroll(profile, [], {}, 2026)).toMatchObject({ undocumentedBank: 1, rows: [{ bank: null }] });
 });
+
+it('сопоставляет одно банковское зачисление с документами и отдельно отмечает отличие даты', async () => {
+  const { matchPayrollReceipt } = await import('./payrollReceipts');
+  const date = '2026-04-03';
+  const actual = {
+    content: { asOf: date, payDate: date, net: 43.21 },
+    grant: { asOf: date, payDate: date, net: 100.79 },
+  };
+  expect(matchPayrollReceipt(actual, date, 144)).toEqual({
+    parts: [{ key: 'content', amount: 43.21 }, { key: 'grant', amount: 100.79 }], adjacent: false,
+  });
+  expect(matchPayrollReceipt(actual, '2026-04-04', 43.21)).toEqual({
+    parts: [{ key: 'content', amount: 43.21 }], adjacent: true,
+  });
+  expect(matchPayrollReceipt({ ...actual, another: actual.content }, date, 144)).toBeNull();
+  expect(matchPayrollReceipt(actual, date, 144, new Set(['grant']))).toBeNull();
+});

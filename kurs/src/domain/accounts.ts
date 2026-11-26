@@ -37,6 +37,10 @@ interface OperationBase {
   fundingSource: 'own' | 'borrowed' | 'unknown';
   /** Импорт старого расхода с сохранением ссылки на историю. */
   legacyExpense?: true;
+  /** Provenance and booking policy of a migrated calendar mark or reserve movement. */
+  legacy?: 'mark' | 'reserve';
+  reserveIncluded?: true;
+  legacyForKeys?: string[];
 }
 
 export interface PaymentShare { key: string; amount: number }
@@ -141,6 +145,8 @@ export interface OperationChange {
 }
 
 export interface AccountBook {
+  journalVersion?: 1;
+  historicalPaymentKeys?: string[];
   payoffTerms?: Record<string, PayoffTerms>;
   paymentRouting?: 'life';
   accounts: CashAccount[];
@@ -248,7 +254,7 @@ export function reversibleOperation(op: AccountOperation) {
 
 export function appendOperations(existing: AccountOperation[], incoming: AccountOperation[]): AccountOperation[] {
   const ids = new Set(existing.map(op => op.id));
-  const eventKeys = new Set(existing.flatMap(op => op.eventKey && op.status !== 'voided' ? [op.eventKey] : []));
+  const eventKeys = new Set(existing.flatMap(op => op.eventKey && !op.legacy && op.status !== 'voided' ? [op.eventKey] : []));
   const externalKey = (op: AccountOperation) => op.externalId ? JSON.stringify([op.accountId, op.externalId]) : null;
   const external = new Set(existing.map(externalKey).filter(k => k != null));
   const linkedExpenses = new Set(existing.filter(op => !op.legacyExpense).map(linkedExpenseId).filter(Boolean));
@@ -364,12 +370,16 @@ export function canonicalBook(book: AccountBook, expenses: Expense[]): AccountBo
   return { ...book, operations: [...explicit, ...entries] };
 }
 
+export function journalOperations(book: AccountBook, expenses: Expense[]) {
+  return book.journalVersion ? book.operations : canonicalBook(book, expenses).operations;
+}
+
 export function accountOptions(book: AccountBook): { id: string; name: string }[] {
   return [{ id: LIFE_ACCOUNT, name: 'Карта жизни' }, { id: RESERVE_ACCOUNT, name: 'Резерв' }, ...book.accounts];
 }
 
 export function accountProjection(book: AccountBook, expenses: Expense[], now: string) {
-  const confirmed = canonicalBook(book, expenses).operations.filter(op => op.status === 'confirmed' && op.date <= now);
+  const confirmed = journalOperations(book, expenses).filter(op => op.status === 'confirmed' && op.date <= now);
   return book.accounts.map(account => {
     const anchor = account.balance;
     if (!anchor) return { ...account, expected: null };
@@ -394,7 +404,7 @@ export function debtProjection(debt: Debt, expenses: Expense[], book: AccountBoo
     return inBase;
   };
   let unknown = 0, unallocated = 0;
-  const operations = canonicalBook(book, expenses).operations;
+  const operations = journalOperations(book, expenses);
   for (const op of operations) {
     if (op.status !== 'confirmed' || op.date > now || !('debtId' in op) || op.debtId !== debt.id) continue;
     const entry = op.legacyExpense ? { ...op, id: linkedExpenseId(op) ?? op.id, at: op.at ?? op.createdAt } : op;
@@ -430,7 +440,7 @@ export function debtProjection(debt: Debt, expenses: Expense[], book: AccountBoo
 export function debtActivity(book: AccountBook, expenses: Expense[], from: string, to: string) {
   const totals = { borrowed: 0, loanDisbursements: 0, creditPurchases: 0, principal: 0, interest: 0, fees: 0, interestAndFees: 0, unknownPrincipal: 0 };
   const linked = new Set(book.operations.filter(op => op.type === 'loan_disbursement' && op.status === 'confirmed').map(op => op.eventKey));
-  for (const op of canonicalBook(book, expenses).operations) {
+  for (const op of journalOperations(book, expenses)) {
     if (op.status !== 'confirmed' || op.date < from || op.date > to) continue;
     if (op.type === 'loan_disbursement') {
       totals.loanDisbursements += cents(op.amount);
@@ -494,7 +504,7 @@ export function bookOperationAllowed(op: AccountOperation, book: AccountBook, de
 
 /** Возврат приглашает пересчитать потребительскую покупку, банковское движение остаётся отдельным. */
 export function budgetExpenses(expenses: Expense[], book: AccountBook): Expense[] {
-  const spending = canonicalBook(book, expenses).operations.filter(op => op.type === 'expense' || op.type === 'credit_purchase' || op.type === 'debt_payment');
+  const spending = journalOperations(book, expenses).filter(op => op.type === 'expense' || op.type === 'credit_purchase' || op.type === 'debt_payment');
   const linked = new Map(spending.filter(op => linkedExpenseId(op)).map(op => [linkedExpenseId(op), op]));
   const refunds = new Map<string, number>();
   for (const op of book.operations) if (op.type === 'refund' && op.status === 'confirmed') {

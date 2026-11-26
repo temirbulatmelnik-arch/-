@@ -189,7 +189,9 @@ export function heldKeys(log: ReserveMove[], marks: Record<string, EventMark>): 
 export function ledger(s: LedgerInput): Ledger {
   const now = s.now ?? today();
   const { book, entries } = financialJournal(s);
-  const operations = book.operations.filter(op => op.status === 'confirmed' && op.date <= now);
+  const operations = book.operations.filter(op => !op.legacy && op.status === 'confirmed' && op.date <= now);
+  const preparedTransfers = entries.flatMap(op => op.legacy === 'reserve' && op.type === 'transfer' && op.toAccountId === LIFE_ACCOUNT && op.legacyForKeys?.length
+    ? [{ id: op.id, date: op.date, at: op.at, amount: -op.amount, card: op.amount, forKeys: op.legacyForKeys, note: op.note ?? '' }] : []);
   const last = s.checkups.filter(row => row.date <= now).at(-1);
   const cb = s.cardBalance && s.cardBalance.date <= now ? fromBalance(s.cardBalance) : null;
   const lc = last ? fromCheckup(last) : null;
@@ -200,7 +202,7 @@ export function ledger(s: LedgerInput): Ledger {
   let pool = 0;
   let unclassified = cents(ref?.unmatchedOnCard ?? 0);
   const classified = new Set(book.historicalLoans?.map(loan => loan.eventKey));
-  const earmarked = new Set(s.reserveLog.flatMap(r => r.forKeys ?? []));
+  const earmarked = new Set(book.journalVersion ? book.historicalPaymentKeys : s.reserveLog.flatMap(r => r.forKeys ?? []));
   if (cardAnchor) for (const op of entries) {
     if (op.status !== 'confirmed' || op.date > now || !journalEntryAfter(op, cardAnchor)) continue;
     const amount = accountMovement(op, LIFE_ACCOUNT);
@@ -210,10 +212,10 @@ export function ledger(s: LedgerInput): Ledger {
     else if ((op.type === 'income' && !op.pendingSweep) ||
         (op.type === 'transfer' && !op.purpose && op.toAccountId === RESERVE_ACCOUNT) ||
         (op.eventKey && earmarked.has(op.eventKey) && (op.type === 'expense' || op.type === 'debt_payment'))) pool += amount;
-    if (op.legacy === 'reserve' && amount > 0 && s.reserveLog.some(r => `reserve:${r.id}` === op.id && r.forKeys)) pool += amount;
+    if (op.legacy === 'reserve' && amount > 0 && op.legacyForKeys?.length) pool += amount;
   }
   let held = 0;
-  for (const r of s.reserveLog) {
+  for (const r of preparedTransfers) {
     if (r.date > now || !r.card || r.card <= 0 || !openKeys(r, s.marks).length) continue;
     held += cents(r.card);
     // перевод сделан до точки отсчёта (сверка прошла между переводом и платежом): в остатке карты он уже есть
@@ -222,7 +224,7 @@ export function ledger(s: LedgerInput): Ledger {
   pool = Math.max(0, pool);
   held = Math.min(held, pool);
 
-  const relevantMoves = s.reserveLog.filter(r => r.date <= now && r.card && r.card > 0 && r.forKeys?.length);
+  const relevantMoves = preparedTransfers.filter(r => r.date <= now);
   const legacyEvents = relevantMoves.length && s.fixed && s.incomes && s.templateFrom
     ? eventsBetween({ ...s, incomes: s.incomes, fixed: s.fixed, templateFrom: s.templateFrom, weeklyOverrides: s.weeklyOverrides ?? [] },
       addDays(relevantMoves[0].date, -45), addDays(now, 45)) : s.oneOff;
