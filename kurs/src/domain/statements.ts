@@ -1,7 +1,8 @@
 // Разбор выписок без интернета: CSV из банка и текст, скопированный со скриншота
 // (iPhone сам распознаёт текст на фото: «Фото» → удерживать текст → «Скопировать»).
 import { categorize, fingerprint, isNotSpending } from './categorize';
-import { addDays } from './dates';
+import { validDate } from './accounts';
+import { addDays, today } from './dates';
 import type { CategoryId, Source } from './types';
 
 export interface DraftTx {
@@ -125,12 +126,14 @@ export function parseBankTable(table: (string | number | boolean | Date | null)[
     if (!c.some(Boolean)) continue;
     const rawDate = c[iDate] ?? '';
     const date = parseDate(rawDate);
+    const time = rawDate.match(/(?:T|\s)([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?(Z|[+-]\d\d:\d\d)?$/i);
+    const occurredAt = time ? `${date}T${time[1]}:${time[2]}:${time[3] ?? '00'}${time[4] ?? '+03:00'}` : undefined;
     const rawAmount = c[iAmount] ?? '';
     const amount = num(rawAmount);
     const direction = c[iDirection]?.toLowerCase() ?? '';
     const currency = c[iCurrency] ?? '';
     const status = c[iStatus] ?? '';
-    if (!date || amount == null || amount === 0 ||
+    if (!validDate(date) || (occurredAt && !Number.isFinite(Date.parse(occurredAt))) || amount == null || amount === 0 ||
       (currency && !/^(?:[₽р]|руб\.?|рубл[ьи]|RUB|RUR|643)$/i.test(currency)) ||
       /fail|pending|reject|reversed|declined|отклон|отмен|в обработке|ожида|заблок/i.test(status)) {
       rejected++;
@@ -143,13 +146,12 @@ export function parseBankTable(table: (string | number | boolean | Date | null)[
       continue;
     }
     const merchant = [c[iDesc], iCat >= 0 ? c[iCat] : ''].filter(Boolean).join(' · ');
-    const tx = { ...draft(date, amount, merchant, { income: credit || (!debit && amount > 0) }), structured: true };
+    const tx = { ...draft(occurredAt ? today(new Date(occurredAt)) : date, amount, merchant, { income: credit || (!debit && amount > 0) }),
+      structured: true, occurredAt };
     const external = iExternal >= 0 ? c[iExternal] : undefined;
     const account = iAccount >= 0 ? c[iAccount] : undefined;
     if (external && (account || bank !== 'table')) tx.fingerprint = JSON.stringify(['csv:operation', bank, account ?? '', external]);
     else if (fileHash) tx.fingerprint = JSON.stringify(['csv:file', fileHash, row]);
-    const time = rawDate.match(/(?:T|\s)([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?(Z|[+-]\d\d:\d\d)?$/i);
-    if (time) tx.occurredAt = `${date}T${time[1]}:${time[2]}:${time[3] ?? '00'}${time[4] ?? '+03:00'}`;
     rows.push(tx);
   }
   return { rows, bank, rejected, columns: { date: head[iDate], amount: head[iAmount], merchant: iDesc >= 0 ? head[iDesc] : '—' } };
