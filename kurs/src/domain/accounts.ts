@@ -59,7 +59,7 @@ export type AccountOperation = OperationBase & (
   | { type: 'loan_disbursement'; debtId: string; splitPlanId?: string; debtBooked?: boolean; auditId?: string }
   | { type: 'debt_payment'; debtId?: string; principal?: number; interest?: number; fee?: number; debtBooked?: boolean; budget?: PaymentBudget }
   | { type: 'interest' | 'fee'; debtId?: string; expenseId?: string }
-  | { type: 'income'; pendingSweep?: boolean }
+  | { type: 'income'; pendingSweep?: boolean; payrollParts?: PaymentShare[] }
   | { type: 'adjustment' }
   | ({ type: 'expense'; expenseId?: string; category?: CategoryId; budget?: PaymentBudget } & Authorization)
   | ({ type: 'credit_purchase'; expenseId: string; debtId?: string; category?: CategoryId; budget?: PaymentBudget } & Authorization)
@@ -121,12 +121,30 @@ export function validPayoffTerms(terms: PayoffTerms): boolean {
     (terms.loanModes == null || Array.isArray(terms.loanModes) && terms.loanModes.every(mode => mode === 'term' || mode === 'payment'));
 }
 
+export interface BankImportBatch {
+  id: string;
+  fileHash: string;
+  bank: string;
+  importedAt: string;
+  parserVersion: string;
+  rowCount: number;
+}
+
+export interface OperationChange {
+  at: string;
+  reason: string;
+  before: AccountOperation;
+  after?: AccountOperation;
+}
+
 export interface AccountBook {
   payoffTerms?: Record<string, PayoffTerms>;
   paymentRouting?: 'life';
   accounts: CashAccount[];
   operations: AccountOperation[];
+  importBatches?: BankImportBatch[];
   expenseChanges?: { at: string; before: Expense; after?: Expense }[];
+  operationChanges?: OperationChange[];
   paymentAccounts: Record<string, string>;
   splitPlans: SplitPlan[];
   splitDebits: SplitDebit[];
@@ -137,6 +155,17 @@ export interface AccountBook {
 }
 
 export const EMPTY_BOOK: AccountBook = { accounts: [], operations: [], paymentAccounts: {}, splitPlans: [], splitDebits: [] };
+
+/** Corrections keep the prior record while only the current revision affects money. */
+export function reviseOperations(book: AccountBook, operations: AccountOperation[], at: string, reason: string): AccountBook {
+  if (operations === book.operations) return book;
+  const current = new Map(operations.map(op => [op.id, op]));
+  const changes = book.operations.filter(op => !op.legacyExpense).flatMap(before => {
+    const after = current.get(before.id);
+    return before === after ? [] : [{ at, reason, before, ...(after ? { after } : {}) }];
+  });
+  return { ...book, operations, ...(changes.length ? { operationChanges: [...book.operationChanges ?? [], ...changes] } : {}) };
+}
 
 export const cents = (amount: number) => Math.round(amount * 100);
 export const rubles = (amount: number) => amount / 100;
@@ -202,7 +231,8 @@ export function validOperation(op: AccountOperation): boolean {
       (op.authorization == null || op.authorization === true && op.status !== 'planned') &&
       (op.authorizationBase == null || !op.authorization && validAmount(op.authorizationBase.amount) && op.authorizationBase.amount > 0 &&
         validDate(op.authorizationBase.date) && (op.authorizationBase.at == null || Number.isFinite(Date.parse(op.authorizationBase.at))));
-    case 'income': case 'interest': case 'fee': case 'adjustment': return true;
+    case 'income': return op.payrollParts == null || !op.eventKey && op.fundingSource !== 'borrowed' && validShares(op.payrollParts);
+    case 'interest': case 'fee': case 'adjustment': return true;
     default: return false;
   }
 }

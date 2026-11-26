@@ -4,7 +4,7 @@ import { payrollRegister } from '../domain/payrollRegister';
 import { compare2027Coverage } from '../domain/coverage';
 import { useMemo, useState } from 'react';
 import { Field, Money, PrimaryButton, SecondaryButton, Segmented, Sheet } from '../components/ui';
-import { accountOptions, LIFE_ACCOUNT, validDate } from '../domain/accounts';
+import { accountOptions, cents, LIFE_ACCOUNT, validDate } from '../domain/accounts';
 import { cashIncomeEvent, eventsBetween, incomeStatus, INCOME_STATUS_LABEL } from '../domain/calendar';
 import { addDays, ddmm, ddmmyyyy } from '../domain/dates';
 import { parseAmount } from '../domain/money';
@@ -43,6 +43,36 @@ function UnitCoverage() {
   </div>;
 }
 
+function PayrollReceiptLink({ profile }: { profile: PayrollProfile }) {
+  const { accountBook, marks, linkPayrollReceipt } = useStore();
+  const [receiptId, setReceipt] = useState('');
+  const [keys, setKeys] = useState<string[]>([]);
+  const documents = Object.entries(profile.actual ?? {}).filter(([key, doc]) => doc.payDate && doc.net && !marks[key]?.done);
+  const receipts = accountBook.operations.filter(op => op.type === 'income' && op.status === 'confirmed' && op.origin === 'bank' &&
+    !op.eventKey && !op.payrollParts && op.fundingSource !== 'borrowed' && documents.some(([, doc]) => doc.payDate === op.date));
+  if (!receipts.length) return null;
+  const receipt = receipts.find(op => op.id === receiptId);
+  const choices = documents.filter(([, doc]) => doc.payDate === receipt?.date);
+  const total = choices.reduce((sum, [key, doc]) => sum + (keys.includes(key) ? cents(doc.net!) : 0), 0);
+  return <details className="card space-y-2 p-4 text-[13px]">
+    <summary className="min-h-8 font-medium">Связать зачисление с расчётным листком</summary>
+    <label className="block">Зачисление
+      <select className="field mt-1" value={receiptId} onChange={event => { setReceipt(event.target.value); setKeys([]); }}>
+        <option value="">Выберите запись из банка</option>
+        {receipts.map(op => <option key={op.id} value={op.id}>{ddmmyyyy(op.date)} · {op.amount.toLocaleString('ru-RU')} ₽ · {op.note ?? 'Зачисление'}</option>)}
+      </select>
+    </label>
+    {choices.map(([key, doc]) => <label className="flex min-h-11 items-center gap-2" key={key}>
+      <input type="checkbox" checked={keys.includes(key)} onChange={event => setKeys(list => event.target.checked ? [...list, key] : list.filter(id => id !== key))} />
+      <span>{doc.title ?? 'Начисление по документу'} · <Money value={doc.net!} kopecks /></span>
+    </label>)}
+    {receipt && <SecondaryButton disabled={!keys.length || total !== cents(receipt.amount)} onClick={() => {
+      if (linkPayrollReceipt(receiptId, keys)) { setReceipt(''); setKeys([]); toast('Расчётный листок связан с зачислением'); }
+      else toast('Проверьте состояние зачисления и документа');
+    }}>Подтвердить состав зачисления</SecondaryButton>}
+  </details>;
+}
+
 function Income({ profile, now, calendar }: { profile: PayrollProfile; now: string; calendar: boolean }) {
   const set = useUi(s => s.set);
   const cal = useCal();
@@ -75,6 +105,7 @@ function Income({ profile, now, calendar }: { profile: PayrollProfile; now: stri
         <Money value={e.amount} approx kopecks className="shrink-0" />
       </button>)}
     </section>}
+    {!calendar && <PayrollReceiptLink profile={profile} />}
     <Segmented value={year} onChange={setYear} options={[{ id: '2026', label: '2026' }, { id: '2027', label: '2027' }]} />
     {calendar && year === '2027' && <Segmented value={unit} onChange={setUnit} options={[
       { id: 'proposal', label: 'Основной' }, { id: 'law', label: 'По закону' },

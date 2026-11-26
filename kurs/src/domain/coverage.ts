@@ -150,9 +150,9 @@ function run(input: CoverageInput, from: string, to: string, shift?: { key: stri
   });
   const list: CoverageStep[] = [...due.map(e => step(e, from)), ...ahead.map(e => step(e, e.date)), ...extra]
     .sort((a, b) => a.date.localeCompare(b.date) || b.delta - a.delta);
-  let balance = input.reserve;
+  let balance = cents(input.reserve);
   const byDay: Record<string, number> = {};
-  for (const s of list) { balance += s.delta; s.balance = balance; byDay[s.date] = balance; }
+  for (const s of list) { balance += cents(s.delta); s.balance = rubles(balance); byDay[s.date] = s.balance; }
   const min = list.reduce<CoverageStep | null>((m, s) => (!m || s.balance < m.balance ? s : m), null);
   return { start: input.reserve, from, to, steps: list, byDay, min };
 }
@@ -449,6 +449,12 @@ export function safePrepayment(input: CoverageInput, from: string, accountId: st
   return rubles(low);
 }
 
+export function prepaymentReadiness(input: CoverageInput, from: string, accountId: string) {
+  if (input.unresolvedCash) return { amount: null, reason: 'Сначала сверить операции, влияющие на остатки' };
+  if (input.cash?.[accountId] == null) return { amount: null, reason: 'Уточнить банковский остаток' };
+  return { amount: safePrepayment(input, from, accountId), reason: null };
+}
+
 /** Прогноз резерва от сегодня: не меньше 150 дней и до первой крупной премии после самого тонкого места */
 export function coverage(input: CoverageInput, from: string, scenario: Scenario = 'base', until?: string, projection?: CashProjection): Coverage {
   const model = scenarioInput(input, scenario);
@@ -482,6 +488,26 @@ export function coverage(input: CoverageInput, from: string, scenario: Scenario 
   const firstNeg = base.start < 0 ? { balance: base.start, date: from, title: 'Остатки на начало прогноза' } : steps.find(s => s.balance < 0);
   const shortage = firstNeg ? { date: firstNeg.date, title: firstNeg.title, amount: -firstNeg.balance } : null;
   return { ...base, narrow, months: [...months.values()], shortage, maxShortfall: Math.max(0, -Math.min(base.start, min?.balance ?? base.start)), to, min };
+}
+
+/** Сколько можно забрать из свободных денег до первой надёжной выплаты. Платежи в её день идут раньше зачисления. */
+export function discretionaryLiquidityCap(input: CoverageInput, from: string): number | null {
+  if (!input.cash || input.cash[LIFE_ACCOUNT] == null || input.cash[RESERVE_ACCOUNT] == null) return null;
+  const horizon = addDays(from, 45);
+  const model = scenarioInput(input, 'cautious');
+  const candidates = eventsBetween(model.cal, addDays(from, -45), horizon);
+  const next = candidates.find(e => e.kind === 'income' && e.date >= from && !model.marks[e.key]?.done &&
+    !e.payroll?.documented && !e.payroll?.bankConfirmed && incomeStatus(e) !== 'conditional' &&
+    (e.confidence === 'confirmed' || e.confidence === 'regular' || e.incomeKind && REGULAR.has(e.incomeKind)));
+  const until = next?.date ?? horizon;
+  const events = candidates.flatMap(event => {
+    if (event.kind === 'income') return [];
+    const projected = projectedEvent(event, 'cautious');
+    return projected && projected.date <= until ? [projected] : [];
+  });
+  const cov = coverage(model, from, 'cautious', until, { events, prepayments: [] });
+  if (cov.shortage || cov.accountRisk?.reason === 'insufficient') return 0;
+  return rubles(Math.max(0, Math.min(cents(cov.start), cents(cov.min?.balance ?? cov.start))));
 }
 
 export const COVERAGE_SCENARIOS = ['base', 'cautious', 'stress'] as const;

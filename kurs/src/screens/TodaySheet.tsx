@@ -1,3 +1,4 @@
+import { useDailyLiquidityCap } from '../components/Coverage';
 // Траты за сегодня: окно по нажатию на кольцо дня и тело карточки «Сегодня» на «Неделе».
 // Сверху — сколько потрачено из лимита, ниже — покупки дня по всем источникам.
 import { Copy, Pencil, Plus, Trash2 } from 'lucide-react';
@@ -9,7 +10,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { ExpenseRow } from '../components/rows';
 import { Money, PrimaryButton, Sheet } from '../components/ui';
 import { dayMonth, plural, weekdayFull } from '../domain/dates';
-import { dayBudget, type DayBudget } from '../domain/summary';
+import { dayBudget, explainDailySpending, type DayBudget } from '../domain/summary';
 import type { Expense } from '../domain/types';
 import { useStore } from '../store/store';
 import { toast, useBudgetExpenses, useToday, useUi } from '../store/ui';
@@ -50,8 +51,12 @@ export function TodayDetails({ summary }: { summary?: boolean }) {
   const { budget: b, counted } = useTodaySpends();
   const set = useUi(s => s.set);
   const { lifeAvailable } = useLedger();
+  const liquidityCap = useDailyLiquidityCap();
+  const explanation = explainDailySpending(b, lifeAvailable, liquidityCap);
   const note = lifeAvailable == null && b.mode === 'ok'
     ? { text: 'Для суммы, доступной сегодня, нужен остаток карты по банку.', over: false }
+    : liquidityCap != null && liquidityCap < b.canSpend && b.mode === 'ok'
+      ? { text: 'Доступная сумма уменьшена с учётом ближайших платежей.', over: false }
     : lifeAvailable != null && b.mode === 'ok' && lifeAvailable < b.canSpend
     ? { text: `На неделю на карте свободно ${lifeAvailable.toLocaleString('ru-RU')} ₽.`, over: false }
     : dayNote(b);
@@ -62,7 +67,7 @@ export function TodayDetails({ summary }: { summary?: boolean }) {
       {summary ? (
         <div className="mx-4 rounded-2xl bg-surface-2 p-3.5">
           <div className="flex items-baseline justify-between gap-3">
-            <Money value={b.spentToday} className={`figure text-[24px] leading-none ${note.over ? 'text-neg' : ''}`} />
+            <Money value={b.spentToday} kopecks className={`figure text-[24px] leading-none ${note.over ? 'text-neg' : ''}`} />
             <span className="text-[13px] text-muted">из <Money value={b.day} /> на день</span>
           </div>
           <div className="mt-3 h-2 overflow-hidden rounded-full bg-line">
@@ -73,6 +78,17 @@ export function TodayDetails({ summary }: { summary?: boolean }) {
       ) : (
         <p className={`px-4 text-[13px] leading-snug ${note.over ? 'text-neg' : 'text-muted'}`}>{note.text}</p>
       )}
+      <details className="card mx-4 my-2 p-3 text-[13px]">
+        <summary className="min-h-8 font-medium">Как рассчитано</summary>
+        <dl className="space-y-1">
+          <div className="flex justify-between gap-2"><dt>Можно сегодня</dt><dd><Money value={explanation.value / 100} kopecks /></dd></div>
+          <div className="flex justify-between gap-2"><dt>Норма на день</dt><dd><Money value={b.day} kopecks /></dd></div>
+          <div className="flex justify-between gap-2"><dt>Потрачено сегодня</dt><dd><Money value={b.spentToday} kopecks /></dd></div>
+          <div className="flex justify-between gap-2"><dt>Остаток недели</dt><dd><Money value={b.weekLeft} kopecks /></dd></div>
+          <div className="flex justify-between gap-2"><dt>Свободно на карте</dt><dd>{lifeAvailable == null ? 'Нужна сверка' : <Money value={lifeAvailable} kopecks />}</dd></div>
+          {liquidityCap != null && <div className="flex justify-between gap-2"><dt>Доступно с учётом платежей</dt><dd><Money value={liquidityCap} kopecks /></dd></div>}
+        </dl>
+      </details>
       {counted.length > 0 && !summary && <div className="divide-hair mt-1">{counted.map(e => <ExpenseRow key={e.id} e={e} onClick={() => edit(e)} />)}</div>}
       {counted.length > 0 && summary
         ? (

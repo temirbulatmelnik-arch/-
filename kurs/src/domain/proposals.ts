@@ -1,3 +1,4 @@
+import { cents } from './accounts';
 // Ответ разбора (Claude, CSV или текст) → список предложений «что обновить в приложении».
 // Человек смотрит список, снимает лишние галочки и нажимает «Применить».
 import type { AiResult } from './ai';
@@ -42,10 +43,15 @@ function matchEvent(ctx: Ctx, date: string, pred: (e: CalEvent) => boolean): Cal
 }
 
 export function markDuplicates(txs: DraftTx[], expenses: Expense[]): DraftTx[] {
-  const known = new Set(expenses.map(e => e.fingerprint ?? fingerprint(e.date, e.amount, e.note ?? '')));
-  // совпадение даты и суммы при другом написании продавца — тоже вероятный дубль
-  const loose = new Set(expenses.map(e => `${e.date}|${Math.round(e.amount * 100)}`));
-  return txs.map(t => ({ ...t, duplicate: known.has(t.fingerprint) || loose.has(`${t.date}|${Math.round(t.amount * 100)}`) }));
+  const seen = new Set(expenses.flatMap(e => e.fingerprint ? [e.fingerprint] : []));
+  return txs.map(tx => {
+    const strong = tx.fingerprint.startsWith('["csv:');
+    if (strong && seen.has(tx.fingerprint)) return { ...tx, duplicate: true };
+    if (strong) seen.add(tx.fingerprint);
+    const match = expenses.some(e => e.date === tx.date && e.source === tx.source && cents(e.amount) === cents(tx.amount) &&
+      (!strong || !e.fingerprint?.startsWith('["csv:operation') || !tx.fingerprint.startsWith('["csv:operation')));
+    return { ...tx, duplicate: match, needsDuplicateReview: match };
+  });
 }
 
 let n = 0;
@@ -54,7 +60,7 @@ const pid = () => `p${n++}`;
 /** Платёж по долгу или обязательный платёж в выписке → отметка «оплачено» в календаре */
 function paymentMarks(txs: DraftTx[], ctx: Ctx, items: Proposal[]) {
   for (const t of txs) {
-    if (t.income) continue;
+    if (t.income || (t.structured && t.duplicate)) continue;
     const upper = t.merchant.toUpperCase();
     let ev: CalEvent | null = null;
     const debtId = /ПОГАШ|ПЛАТ[ЕЁ]Ж ПО|КРЕДИТ|ВНЕСЕНИ|ЗАДОЛЖ|СПЛИТ|РАССРОЧ/.test(upper) ? guessDebt(t.merchant, ctx.cal.debts) : '';
@@ -68,18 +74,41 @@ function paymentMarks(txs: DraftTx[], ctx: Ctx, items: Proposal[]) {
 }
 
 export function fromDrafts(txs: DraftTx[], ctx: Ctx, summary: string, extra: { cardBalance?: { amount: number; date: string } } = {}): Review {
-  const items: Proposal[] = markDuplicates(txs, ctx.expenses)
-    .filter(t => !t.income)
-    .map(tx => ({ id: pid(), type: 'tx', on: !tx.skip && !tx.duplicate, tx }));
-  paymentMarks(txs, ctx, items);
+  const items: Proposal[] = [];
+  const checked = markDuplicates(txs, ctx.expenses);
+  const structuredPayments = new Set<string>();
+  for (const tx of checked.filter(t => t.structured && !t.income && !t.duplicate)) {
+    const label = tx.merchant.toUpperCase();
+    const debtId = /ПОГАШ|ПЛАТ[ЕЁ]Ж ПО|КРЕДИТ|ЗАДОЛЖ|СПЛИТ|РАССРОЧ/.test(label) ? guessDebt(label, ctx.cal.debts) : '';
+    const candidates = eventsBetween(ctx.cal, addDays(tx.date, -3), addDays(tx.date, 3)).filter(event => {
+      const mark = ctx.marks[event.key];
+      const title = event.title.split(',')[0].trim().toUpperCase();
+      return event.kind === 'payment' && (debtId ? event.debtId === debtId : event.key.startsWith('fix:') && title.length >= 3 && label.includes(title)) &&
+        (mark?.done ? mark.paidDate === tx.date && cents(mark.amount ?? event.amount) === cents(tx.amount) : cents(event.amount) === cents(tx.amount));
+    });
+    if (candidates.length !== 1) continue;
+    const event = candidates[0];
+    structuredPayments.add(tx.id);
+    if (!ctx.marks[event.key]?.done && !items.some(item => item.type === 'mark' && item.event.key === event.key)) {
+      items.push({ id: pid(), type: 'mark', on: true, event, amount: tx.amount, date: tx.date });
+    }
+  }
+  for (const tx of checked.filter(t => !t.income && !structuredPayments.has(t.id))) {
+    items.push({ id: pid(), type: 'tx', on: !tx.skip && !tx.duplicate, tx });
+  }
+  paymentMarks(txs.filter(t => !t.structured), ctx, items);
   if (extra.cardBalance) items.push({ id: pid(), type: 'card', on: true, balance: extra.cardBalance.amount, date: extra.cardBalance.date });
-  const incomes = txs.filter(t => t.income);
+  const incomes = checked.filter(t => t.income && !(t.structured && t.duplicate));
   for (const t of incomes) {
     // вид поступления по подписи: «Зарплата» не должна закрыть ожидаемый «Аванс»
     const m = t.merchant.toUpperCase();
-    const kind = /АВАНС/.test(m) ? 'advance' : /ЗАРПЛАТ|ЗАРАБОТН/.test(m) ? 'salary' : /ОТПУСК/.test(m) ? 'vacation' : /ПРЕМИ/.test(m) ? 'bonus' : null;
-    const ev = matchEvent(ctx, t.date, e => e.kind === 'income' && (!kind || (kind === 'bonus' ? /^bonus/.test(e.incomeKind ?? '') : e.incomeKind === kind)));
-    items.push({ id: pid(), type: 'income', on: !!ev, event: ev, amount: t.amount, date: t.date, bonus: !!ev?.incomeKind && BONUS.includes(ev.incomeKind) });
+    const kind = /АВАНС/.test(m) ? 'advance' : /ЗАРПЛАТ|ЗАРАБОТН/.test(m) ? 'salary' : /ОТПУСК/.test(m) ? 'vacation' : /ПРЕМИ/.test(m) ? 'bonus' : /МАТЕРИАЛЬН.*ПОМОЩ/.test(m) ? 'thirteenth' : null;
+    const matchesKind = (e: CalEvent) => e.kind === 'income' && (!kind || (kind === 'bonus' ? /^bonus/.test(e.incomeKind ?? '') : e.incomeKind === kind));
+    const exactCandidates = t.structured && kind ? eventsBetween(ctx.cal, addDays(t.date, -3), addDays(t.date, 3)).filter(e =>
+      matchesKind(e) && cents(e.amount) === cents(t.amount) && !ctx.marks[e.key]?.done &&
+      !items.some(item => item.type === 'income' && item.event?.key === e.key)) : [];
+    const ev = t.structured ? (exactCandidates.length === 1 ? exactCandidates[0] : null) : matchEvent(ctx, t.date, matchesKind);
+    items.push({ id: pid(), type: 'income', on: !!ev, event: ev, amount: t.amount, date: t.date, bonus: !t.structured && !!ev?.incomeKind && BONUS.includes(ev.incomeKind) });
   }
   return { summary, warnings: [], items };
 }
@@ -208,7 +237,7 @@ function dedupe(txs: DraftTx[], expenses: Expense[]): DraftTx[] {
   for (const t of out) {
     if (t.duplicate) continue;
     const e = take(`${t.date}|${Math.round(t.amount * 100)}`, x => !x.fingerprint?.includes('#') && x.source === t.source && (!t.creditCard || x.creditCard === t.creditCard)) ?? null;
-    if (e) { t.duplicate = true; if (!e.fingerprint?.includes('#')) t.linkId = e.id; }
+    if (e) { t.duplicate = true; t.needsDuplicateReview = true; t.linkId = e.id; }
   }
   return out;
 }

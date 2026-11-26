@@ -1,8 +1,9 @@
+import { allocatePayrollReceipt, payrollReceiptParts } from '../domain/payrollReceipts';
 // Всё хранится только на телефоне (localStorage). Никаких аккаунтов и серверов.
 // Резервная копия — файл JSON (Настройки → Данные), календарь — файл .ics.
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { accountOptions, appendOperations, cents, kopecks, bookOperationAllowed, cashAccount, linkedExpenseId, expenseOperation, EMPTY_BOOK, LIFE_ACCOUNT, RESERVE_ACCOUNT, reversibleOperation, validAmount, validDate, validSplitDebit, validSplitPlan, validPayoffTerms, type PayoffTerms, type AccountBook, type AccountOperation, type BankBalance, type CashAccount, type SplitDebit, type SplitPlan } from '../domain/accounts';
+import { accountOptions, appendOperations, cents, kopecks, bookOperationAllowed, cashAccount, linkedExpenseId, expenseOperation, EMPTY_BOOK, LIFE_ACCOUNT, RESERVE_ACCOUNT, reversibleOperation, reviseOperations, validAmount, validDate, validSplitDebit, validSplitPlan, validPayoffTerms, type PayoffTerms, type AccountBook, type AccountOperation, type BankBalance, type BankImportBatch, type CashAccount, type SplitDebit, type SplitPlan } from '../domain/accounts';
 import { DEFAULT_MODEL } from '../domain/models';
 import { DEFAULT_PREPARATION_TIME, moscowClock, paymentBudget, paymentShares, partialPayments, weeklyTopUp, type FundingMode } from '../domain/funds';
 import { coverageInput, safePrepayment } from '../domain/coverage';
@@ -94,6 +95,7 @@ interface Actions {
   confirmWeeklyTransfer: (key: string, amount: number, date?: string) => boolean;
   savePayoffTerms: (id: string, terms: PayoffTerms) => boolean;
   saveOperation: (op: AccountOperation) => boolean;
+  linkPayrollReceipt: (id: string, keys: string[]) => boolean;
   linkPaymentExpense: (operationId: string, expenseId: string, budgetScope: 'weekly' | 'separate' | 'unknown') => boolean;
   setPaymentFunding: (operationId: string, scope: 'weekly' | 'separate') => boolean;
   setPaymentAccount: (key: string, accountId: string) => void;
@@ -103,6 +105,7 @@ interface Actions {
   setStress: (stress: AccountBook['stress']) => void;
   /** запомнить снимок данных до импорта из банка — откатить можно так же, как импорт из чата */
   beginImport: (summary: string) => void;
+  applyBankImport: (revision: string, summary: string, batch: BankImportBatch | undefined, apply: (state: State) => void) => boolean;
   /** запомнить продавца; null — забыть */
   remember: (key: string, rule: MemoryRule | null) => void;
   /** вернуть данные к снимку до импорта; этот и более поздние импорты уходят из журнала */
@@ -240,7 +243,14 @@ function patchDebt(d: Debt, balance: number, recalc = false): Debt {
 
 export const useStore = create<State>()(
   persist(
-    (set, get) => ({
+    (commit, read) => {
+      let staged: State | undefined;
+      const get = () => staged ?? read();
+      const set = (change: Partial<State> | ((state: State) => Partial<State>)) => {
+        if (staged) staged = { ...staged, ...(typeof change === 'function' ? change(staged) : change) };
+        else commit(change);
+      };
+      return {
       ...EMPTY,
 
       loadSeed: (seed, code = '') => set(s => ({
@@ -356,7 +366,7 @@ export const useStore = create<State>()(
         const marks = { ...s.marks };
         if (op.eventKey) delete marks[op.eventKey];
         const operations = appendOperations(s.accountBook.operations, [{ ...op, status: 'voided' }]);
-        set({ accountBook: { ...s.accountBook, operations }, marks });
+        set({ accountBook: reviseOperations(s.accountBook, operations, nowIso(), 'Отмена подтверждения'), marks });
         return true;
       },
       returnEarmark: (id, accountId, key, amount, date) => {
@@ -407,7 +417,21 @@ export const useStore = create<State>()(
           marks[op.eventKey] = { done: true, at: op.createdAt ?? nowIso(), paidDate: op.date, amount: op.amount,
             ...(op.type === 'expense' || op.type === 'debt_payment' ? { paidFrom: op.accountId === LIFE_ACCOUNT ? 'card' : 'reserve' } : {}) };
         }
-        set({ accountBook: { ...s.accountBook, operations }, marks });
+        set({ accountBook: reviseOperations(s.accountBook, operations, nowIso(), 'Уточнение операции'), marks });
+        return true;
+      },
+      linkPayrollReceipt: (id, keys) => {
+        const s = get();
+        const actual = s.work?.actual;
+        const receipt = s.accountBook.operations.find(op => op.id === id);
+        if (!actual || !receipt || receipt.date > today() || keys.some(key => s.marks[key]?.done)) return false;
+        const parts = keys.map(key => ({ key, amount: actual[key]?.net ?? 0 }));
+        const operations = allocatePayrollReceipt(s.accountBook.operations, actual, id, parts);
+        if (!operations) return false;
+        const marks = { ...s.marks };
+        const at = nowIso();
+        for (const part of parts) marks[part.key] = { done: true, paidDate: receipt.date, at, amount: part.amount };
+        set({ marks, accountBook: reviseOperations(s.accountBook, operations, at, 'Связь банка с расчётным листком') });
         return true;
       },
       setPaymentAccount: (key, accountId) => set(s => {
@@ -433,6 +457,24 @@ export const useStore = create<State>()(
         void settings; void planCode; void ready;
         return { imports: [...imports, { id: uid(), at: nowIso(), summary, revision: exchangeRevision(s), snapshot }].slice(-5) };
       }),
+      applyBankImport: (revision, summary, batch, apply) => {
+        const current = get();
+        if (staged || exchangeRevision(current) !== revision ||
+            batch && current.accountBook.importBatches?.some(row => row.fileHash === batch.fileHash)) return false;
+        staged = current;
+        let next: State;
+        try {
+          apply(staged);
+          next = staged;
+        } catch { return false; } finally { staged = undefined; }
+        if (exchangeRevision(next) === revision && next.merchantMemory === current.merchantMemory) return false;
+        const accountBook = batch ? { ...next.accountBook, importBatches: [...next.accountBook.importBatches ?? [], batch] } : next.accountBook;
+        const { imports, settings, planCode, ready, ...snapshot } = pickData(current);
+        void settings; void planCode; void ready;
+        const afterRevision = exchangeRevision({ ...next, accountBook });
+        commit({ ...next, accountBook, imports: [...imports, { id: uid(), at: nowIso(), summary, revision, afterRevision, snapshot }].slice(-5) });
+        return true;
+      },
       remember: (key, rule) => set(s => {
         const merchantMemory = { ...s.merchantMemory };
         if (rule) merchantMemory[key] = rule; else delete merchantMemory[key];
@@ -572,7 +614,7 @@ export const useStore = create<State>()(
         const budget = paymentBudget(op.amount, op.budget?.prepared ?? 0, budgetScope);
         const operations = s.accountBook.operations.map(row => row.id === operationId
           ? { ...op, expenseId, note: expense.note ?? op.note, category: expense.category, budget } : row);
-        set({ accountBook: withExpenses({ ...s.accountBook, operations }, s.expenses) });
+        set({ accountBook: withExpenses(reviseOperations(s.accountBook, operations, nowIso(), 'Сверка расхода и платежа'), s.expenses) });
         return true;
       },
       setPaymentFunding: (operationId, scope) => {
@@ -580,12 +622,14 @@ export const useStore = create<State>()(
         const op = s.accountBook.operations.find(row => row.id === operationId);
         if (!op || op.status !== 'confirmed' || (op.type !== 'expense' && op.type !== 'debt_payment') || !op.budget?.unknown) return false;
         const budget = { ...op.budget, unknown: 0, [scope]: kopecks(op.budget[scope] + op.budget.unknown) };
-        set({ accountBook: { ...s.accountBook, operations: s.accountBook.operations.map(row => row.id === operationId ? { ...op, budget } : row) } });
+        const operations = s.accountBook.operations.map(row => row.id === operationId ? { ...op, budget } : row);
+        set({ accountBook: reviseOperations(s.accountBook, operations, nowIso(), 'Уточнение бюджета платежа') });
         return true;
       },
 
       markEvent: (e, done, amount, paidFrom, details) => {
         const state = get();
+        if (payrollReceiptParts(state.accountBook.operations).has(e.key)) return;
         if (done && e.kind === 'weekly' && state.accountBook.paymentRouting === 'life' && details?.paidDate) {
           state.confirmWeeklyTransfer(e.key, amount ?? e.amount, details?.paidDate);
           return;
@@ -674,7 +718,7 @@ export const useStore = create<State>()(
               if (ref && linked.date <= ref.slice(0, 10) && (!linked.at || Date.parse(ref) > Date.parse(linked.at))) return {};
               if (linked.type === 'income' && linked.pendingSweep && (led.pendingSweepToReserve[linked.accountId] ?? 0) < linked.amount) return {};
               if (debt?.bankBalance?.at && Date.parse(debt.bankBalance.at) >= Date.parse(linked.at ?? '')) return {};
-              accountBook = { ...accountBook, operations: accountBook.operations.filter(op => op.id !== linked.id) };
+              accountBook = reviseOperations(accountBook, accountBook.operations.filter(op => op.id !== linked.id), nowIso(), 'Отмена банковского подтверждения');
             } else if (debt && prev?.prevBalance != null && (!debt.updatedAt || !debt.bankBalance)) {
               debts = s.debts.map(d => (d.id === debt.id ? { ...patchDebt(d, prev.prevBalance!), closedOn: undefined } : d));
             }
@@ -762,7 +806,8 @@ export const useStore = create<State>()(
         return true;
       },
       reset: () => set({ ...EMPTY }),
-    }),
+      };
+    },
     {
       name: 'kurs',
       version: 9,

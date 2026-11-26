@@ -1,9 +1,10 @@
+import { budgetWeek } from './budget';
 // Мост на кредитке: пока резерву не хватает до премии, часть недельных денег берётся с кредитки (только покупки).
 // Недельный лимит не меняется — меняется источник: карта жизни (пополнение из резерва + остаток прошлой недели)
 // и кредитка до лимита моста на эту неделю. Сначала тратится карта, кредитка — когда карта пуста.
 import { addDays } from './dates';
 import { weeklyLimit } from './plan';
-import { cashAccount, cents, LIFE_ACCOUNT, RESERVE_ACCOUNT, rubles, weeklyExpenseCents } from './accounts';
+import { cents, rubles } from './accounts';
 import type { Debt, Expense, WeeklyOverride } from './types';
 
 export interface BridgeWeek {
@@ -52,12 +53,8 @@ export interface WeekMoney {
 
 /** Деньги недели по источникам. Остаток прошлой недели на карте уменьшает траты с кредитки, а не пополнение. */
 export function weekMoney(expenses: Expense[], debts: Debt[], overrides: WeeklyOverride[], bridge: Bridge | null | undefined, monday: string): WeekMoney {
-  const sunday = addDays(monday, 6);
-  const list = expenses.filter(e => e.date >= monday && e.date <= sunday);
-  const spent = list.reduce((sum, e) => sum + weeklyExpenseCents(e), 0);
-  const spentCredit = list.filter(e => e.source === 'credit').reduce((sum, e) => sum + weeklyExpenseCents(e), 0);
-  const spentReserve = list.filter(e => cashAccount(e) === RESERVE_ACCOUNT).reduce((sum, e) => sum + weeklyExpenseCents(e), 0);
-  const spentLife = spent - spentCredit - spentReserve;
+  const totals = budgetWeek(expenses, monday);
+  const { spent, credit: spentCredit, reserve: spentReserve, life: spentLife } = totals;
   const limit = weeklyLimit(debts, monday, overrides);
   const plan = bridgeWeek(bridge, monday);
   const carry = plan ? Math.max(0, weekMoney(expenses, debts, overrides, bridge, addDays(monday, -7)).cardLeft) : 0;
@@ -65,7 +62,7 @@ export function weekMoney(expenses: Expense[], debts: Debt[], overrides: WeeklyO
   const cardBudget = limit - creditCap;
   return {
     monday, limit, spentLife: rubles(spentLife), spentCredit: rubles(spentCredit), spentReserve: rubles(spentReserve), spent: rubles(spent), left: rubles(cents(limit) - spent),
-    cardBudget, cardLeft: rubles(cents(cardBudget) - list.filter(e => cashAccount(e) === LIFE_ACCOUNT).reduce((sum, e) => sum + weeklyExpenseCents(e), 0)), creditCap, creditLeft: rubles(cents(creditCap) - spentCredit),
+    cardBudget, cardLeft: rubles(cents(cardBudget) - totals.lifeAccount), creditCap, creditLeft: rubles(cents(creditCap) - spentCredit),
   };
 }
 

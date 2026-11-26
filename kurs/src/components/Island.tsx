@@ -1,3 +1,4 @@
+import { useDailyLiquidityCap } from './Coverage';
 import { useLedger } from '../screens/Checkup';
 // «Остров» — как Dynamic Island на iPhone, из жидкого стекла (вариант «Тонированное» — решение владельца, DESIGN.md).
 // Когда шапка экрана уехала вверх, сверху выкатывается капсула: кольцо и сколько ещё можно сегодня. Нажатие — капсула
@@ -36,6 +37,7 @@ export function Island({ show }: { show: boolean }) {
   const cal = useCal();
   const expenses = useBudgetExpenses();
   const { lifeAvailable } = useLedger();
+  const liquidityCap = useDailyLiquidityCap();
   const [debts, overrides, marks] = useStore(useShallow(s => [s.debts, s.weeklyOverrides, s.marks] as const));
   const set = useUi(s => s.set);
   const [open, setOpen] = useState(false);
@@ -44,7 +46,7 @@ export function Island({ show }: { show: boolean }) {
   const next = useMemo(() => eventsBetween(cal, addDays(now, -20), addDays(now, 10)).find(e => e.kind === 'payment' && !marks[e.key]?.done), [cal, now, marks]);
   // как кольцо на «Сегодня»: сколько ещё можно сегодня, без «минуса»; сверх нормы или лимит недели исчерпан — красным
   const over = b.mode !== 'ok';
-  const canSpend = availableToday(b, lifeAvailable);
+  const canSpend = availableToday(b, lifeAvailable, liquidityCap);
   const frac = b.day > 0 ? canSpend / b.day : 0;
   const act = (fn: () => void) => { setOpen(false); window.setTimeout(fn, 160); };
 

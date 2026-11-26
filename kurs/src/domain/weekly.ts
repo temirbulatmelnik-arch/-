@@ -1,7 +1,8 @@
+import { budgetWeek } from './budget';
 // Итог недели: сколько потрачено из лимита, по категориям, и сколько долить на карту жизни из резерва в воскресенье.
 // Остаток недели остаётся на карте и уменьшает пополнение: долить = лимит следующей недели − остаток.
 // В недели моста на кредитке из резерва доливают по плану моста, а остаток уменьшает траты с кредитки.
-import { cashAccount, cents, LIFE_ACCOUNT, rubles, weeklyExpenseCents } from './accounts';
+import { cashAccount, cents, LIFE_ACCOUNT, rubles } from './accounts';
 import { bridgeWeek, weekMoney, type Bridge } from './bridge';
 import { addDays, fromKey, weekStart } from './dates';
 import { CATEGORIES, weeklyLimit } from './plan';
@@ -35,9 +36,7 @@ export interface WeekReport {
 }
 
 export function weekReport(expenses: Expense[], debts: Debt[], overrides: WeeklyOverride[], monday: string, bridge?: Bridge | null): WeekReport {
-  const sunday = addDays(monday, 6);
-  const list = expenses.filter(e => e.date >= monday && e.date <= sunday);
-  const spentCents = list.reduce((sum, e) => sum + weeklyExpenseCents(e), 0);
+  const { sunday, list, spent: spentCents, byCategory } = budgetWeek(expenses, monday);
   const spent = rubles(spentCents);
   const limit = weeklyLimit(debts, monday, overrides);
   const nextLimit = weeklyLimit(debts, addDays(monday, 7), overrides);
@@ -48,7 +47,7 @@ export function weekReport(expenses: Expense[], debts: Debt[], overrides: Weekly
     monday, sunday, limit, spent, left: rubles(cents(limit) - spentCents), count: list.length, nextLimit, leftover,
     topUp: next ? next.fromReserve : Math.max(0, nextLimit - leftover),
     credit: list.filter(e => e.source === 'credit').reduce((s, e) => s + e.amount, 0),
-    byCategory: CATEGORIES.map(c => ({ id: c.id, spent: rubles(list.filter(e => e.category === c.id).reduce((sum, e) => sum + weeklyExpenseCents(e), 0)) }))
+    byCategory: CATEGORIES.map(c => ({ id: c.id, spent: rubles(byCategory[c.id] ?? 0) }))
       .filter(r => r.spent > 0).sort((a, b) => b.spent - a.spent),
   };
 }

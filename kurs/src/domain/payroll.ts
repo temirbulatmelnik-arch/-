@@ -1,6 +1,9 @@
+import { explainVacation, vacationAllowance, VACATION_RULE_SPB } from './vacation';
+export { vacationDays } from './vacation';
+import { taxForPayment, taxOnBase } from './tax';
 import { addDays, addMonths, dayIn, lastDay, monthKey } from './dates';
 import { cents, kopecks, rubles, validAmount, validDate } from './accounts';
-import { calendarApproved, federalHoliday, workdayOnOrBefore, workHours } from './workdays';
+import { calendarApproved, workdayOnOrBefore, workHours } from './workdays';
 import type { CalEvent, EventMark, IncomeKind } from './types';
 
 export interface PayRate {
@@ -148,20 +151,9 @@ const dateRange = (from: string, to: string): string[] => {
   return dates;
 };
 
-export function vacationDays(v: Pick<Vacation, 'from' | 'to'>, hours?: Record<string, number>) {
-  const days = dateRange(v.from, v.to);
-  return { calendar: days.filter(date => !federalHoliday(date)).length,
-    work: days.filter(date => workHours(date, hours) > 0).length };
-}
-
 export function vacationGross(v: Vacation, profile: PayrollProfile): number | null {
-  const days = vacationDays(v, profile.workingHours).calendar;
-  const rate = effectiveRate(profile.rates, v.from);
-  if (v.gross != null) return v.gross;
-  if (v.dailyGross != null) return kopecks(v.dailyGross * days * (v.estimateUnit && rate ? rate.unit / v.estimateUnit : 1));
-  if (!rate || !v.formula) return null;
-  const additions = v.formula.additions.reduce((total, entry) => total + cents(entry.amount * (entry.index ?? 1)), 0);
-  return rubles(Math.round((cents(rate.unit * (rate.positionUnits + rate.rankUnits)) + additions / 12) * days / v.formula.divisor));
+  const explanation = explainVacation(v, effectiveRate(profile.rates, v.from), profile.workingHours);
+  return explanation ? rubles(explanation.value) : null;
 }
 
 const validMonth = (value: unknown): value is string => typeof value === 'string' && validDate(value + '-01');
@@ -253,17 +245,8 @@ export function accrual(profile: PayrollProfile, month: string) {
     days: workDays.length, firstDays, paidDays: kopecks(paidDays), firstPaidDays: kopecks(firstPaidDays) };
 }
 
-const TAX = [[2_400_000, 13], [5_000_000, 15], [20_000_000, 18], [50_000_000, 20], [Infinity, 22]] as const;
-
 export function progressiveTax(base: number): number {
-  let total = 0, previous = 0;
-  const taxable = cents(base);
-  for (const [limit, rate] of TAX) {
-    total += Math.max(0, Math.min(cents(limit), taxable) - cents(previous)) * rate;
-    if (taxable <= cents(limit)) break;
-    previous = limit;
-  }
-  return Math.round(total / 10000);
+  return rubles(taxOnBase(cents(base)));
 }
 
 type GrossPay = Omit<WorkPay, 'tax' | 'net' | 'netRange' | 'actualPayDate' | 'actualNet'>;
@@ -301,7 +284,7 @@ export function workPayments(profile: PayrollProfile, from: string, to: string, 
     if (v.to < profile.from) continue;
     const rate = effectiveRate(profile.rates, v.from);
     if (!rate) continue;
-    const nominalDate = addDays(v.from, -10); // ст. 46 (ч. 10) № 79-ФЗ
+    const nominalDate = addDays(v.from, -VACATION_RULE_SPB.minimumNoticeDays); // ст. 46 (ч. 10) № 79-ФЗ
     const payDate = v.payDate ?? workdayOnOrBefore(nominalDate, off);
     const common = {
       kind: 'vacation' as const, accrualPeriod: monthKey(v.from), nominalDate, expectedPayDate: payDate, vacationId: v.id,
@@ -317,7 +300,7 @@ export function workPayments(profile: PayrollProfile, from: string, to: string, 
     if (v.allowance && !allowanceYears.has(year)) {
       allowanceYears.add(year);
       lines.push({ ...common, key: `work:allowance:${year}`, title: 'Единовременная выплата к отпуску',
-        gross: kopecks(3 * rate.unit * (rate.positionUnits + rate.rankUnits)), source: rate.source ?? 'Параметры работодателя' });
+        gross: vacationAllowance(rate), source: rate.source ?? 'Параметры работодателя' });
     }
   }
   for (const [key, extra] of Object.entries(profile.extras ?? {})) {
@@ -360,7 +343,7 @@ export function workPayments(profile: PayrollProfile, from: string, to: string, 
     const taxDeduction = profile.deductions?.[p.key];
     const taxable = Math.max(0, gross - (taxDeduction ?? 0));
     const within = !known || date > known.asOf;
-    const tax = actual?.tax ?? (within ? progressiveTax(before + taxable) - progressiveTax(before) : progressiveTax(taxable));
+    const tax = actual?.tax ?? (within ? taxForPayment(cents(before), cents(taxable)) : progressiveTax(taxable));
     if (within) bases.set(year, before + taxable);
     if (date < from || date > to) return [];
     const net = Math.max(0, kopecks(gross - tax - (actual?.otherWithheld ?? 0)));

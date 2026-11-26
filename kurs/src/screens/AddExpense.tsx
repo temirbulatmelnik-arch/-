@@ -17,7 +17,7 @@ import { DEFAULT_SPEND_SOURCE, SOURCE_LABEL, SOURCES, spendEffect, type SpendEff
 import { guessCategory, parseSpoken } from '../domain/spoken';
 import type { CategoryId, Expense, Source } from '../domain/types';
 import { useStore } from '../store/store';
-import { toast, useUi, type AddPrefill } from '../store/ui';
+import { toast, useBudgetExpenses, useUi, type AddPrefill } from '../store/ui';
 import { useLedger } from './Checkup';
 
 /** Источник денег: свои — Нева, в долг — сиреневая штриховка (чужие деньги), резерв — сумерки */
@@ -59,7 +59,8 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   const [funding, setFunding] = useState<NonNullable<Expense['fundingSource']>>(edit?.fundingSource ?? 'unknown');
   const [scope, setScope] = useState<Expense['budgetScope']>(edit?.budgetScope);
   const cashAccounts = useStore(s => s.accountBook.accounts);
-  const [expenses, debts, weeklyOverrides, bridge] = useStore(useShallow(s => [s.expenses, s.debts, s.weeklyOverrides, s.bridge] as const));
+  const expenses = useBudgetExpenses();
+  const [debts, weeklyOverrides, bridge] = useStore(useShallow(s => [s.debts, s.weeklyOverrides, s.bridge] as const));
   const led = useLedger();
   const loan = useMemo(() => (activeBridge(bridge) ? bridgeState(expenses, bridge) : null), [expenses, bridge]);
   const [askPause, setAskPause] = useState(false);

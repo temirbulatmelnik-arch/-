@@ -1,4 +1,5 @@
-import { accountOptions, appendOperations, bookOperationAllowed, budgetExpenses, canonicalBook, cents, EMPTY_BOOK, LIFE_ACCOUNT, linkedExpenseId, monthDebtActivity, RESERVE_ACCOUNT, rubles, validAmount, validBankBalance, validDate, validLoanReview, validPayoffTerms, validSplitDebit, validSplitPlan, type AccountBook, type CashAccount } from './accounts';
+import { payrollReceiptParts } from './payrollReceipts';
+import { accountOptions, appendOperations, bookOperationAllowed, budgetExpenses, canonicalBook, cents, EMPTY_BOOK, LIFE_ACCOUNT, linkedExpenseId, monthDebtActivity, RESERVE_ACCOUNT, reviseOperations, rubles, validAmount, validBankBalance, validDate, validLoanReview, validPayoffTerms, validSplitDebit, validSplitPlan, type AccountBook, type CashAccount } from './accounts';
 import { validPayroll, with2027Unit, type PayrollProfile, type PayRate, type Vacation } from './payroll';
 import { payrollRegister } from './payrollRegister';
 import { annualIncome } from './annualIncome';
@@ -8,7 +9,7 @@ import { annualIncome } from './annualIncome';
 // Перед применением приложение показывает разницу по разделам; присланное без изменений ничего не трогает.
 import { bridgeState, weekMoney, type Bridge } from './bridge';
 import { canVoidOperation, cardOn, ledger, reserveAnchor, type Checkup, type LedgerInput } from './ledger';
-import { compare2027Coverage, compareCoverage, coverage, coverageInput, HORIZON_DAYS, safePrepayment } from './coverage';
+import { compare2027Coverage, compareCoverage, coverage, coverageInput, discretionaryLiquidityCap, HORIZON_DAYS, safePrepayment } from './coverage';
 import { PROTOCOL_VERSION } from './sync';
 import { eventsBetween, incomeStatus, paidOn, type CalendarInput, type IncomeStatus } from './calendar';
 import { categorize } from './categorize';
@@ -245,8 +246,7 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
     about: 'Файл обмена приложения «Курс». status — сводка только для чтения. Остальные разделы можно менять: в ответ присылай этот же формат только с изменениями.',
     status: {
       totalDebt: rubles(estimated),
-      totalCash: led.card == null || (led.cashAccounts.some(a => a.expected == null)) ? null
-        : rubles(cents(led.card) + cents(led.reserve) + led.cashAccounts.reduce((n, a) => n + cents(a.expected ?? 0), 0)),
+      totalCash: led.totalCash,
       lifeFree: led.lifeAvailable,
       reconciliation: led.reconciliation,
       proposedTransfers,
@@ -256,7 +256,7 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
       // сегодняшний день: норма, траты по источникам и сколько ещё можно — то же число, что в кольце на «Сегодня»
       today: {
         date: now, allowance: r0(day.day), spent: r0(day.spentToday), spentLife: r0(day.spentLife), spentCredit: r0(day.spentCredit),
-        ...(day.spentReserve ? { spentReserve: r0(day.spentReserve) } : {}), canSpend: r0(availableToday(day, led.lifeAvailable)),
+        ...(day.spentReserve ? { spentReserve: r0(day.spentReserve) } : {}), canSpend: r0(availableToday(day, led.lifeAvailable, discretionaryLiquidityCap(input, now))),
       },
       reserveNeed: { amount: r0(need.need), untilBonus: need.next },
       coverage: {
@@ -738,6 +738,7 @@ const stepCalendar: Step = (f, s, ctx) => {
       lines.push(`Не найдено основание для изменения факта ${e.key}. Используйте сверенное исправление.`);
       continue;
     }
+    if (payrollReceiptParts(s.accountBook?.operations ?? []).has(e.key)) { lines.push('Уже есть связь расчётного листка с банком'); continue; }
     const recorded = s.accountBook?.operations.find(op => op.eventKey === e.key && op.status === 'confirmed');
     const historical = s.accountBook?.historicalLoans?.find(op => op.eventKey === e.key);
     if ((recorded || historical) && (p.done === false || (p.done === true &&
@@ -1066,6 +1067,10 @@ const stepAccountBook: Step = (f, s, ctx) => {
   }
   const marks = { ...s.marks };
   if (Array.isArray(incoming.operations)) for (const op of incoming.operations) {
+    if (op.type === 'income' && op.payrollParts) {
+      if (strict) errors.push('Связь расчётного листка с банком подтверждается в приложении');
+      continue;
+    }
     if (op.legacyExpense) {
       if (strict) errors.push('accountBook.operations: записи расходов из истории меняются через expenses');
       continue;
@@ -1086,7 +1091,7 @@ const stepAccountBook: Step = (f, s, ctx) => {
       }
       continue;
     }
-    book = { ...book, operations };
+    book = reviseOperations(book, operations, ctx.at, 'Уточнение операции при обмене');
     if (op.status === 'voided' && op.eventKey && !operations.some(row => row.status === 'confirmed' && row.eventKey === op.eventKey)) delete marks[op.eventKey];
     if (op.eventKey && op.status === 'confirmed' && !('authorization' in op && op.authorization) && !marks[op.eventKey]) marks[op.eventKey] = {
       done: true, paidDate: op.date, at: op.createdAt ?? ctx.at, amount: rubles(cents(op.amount) + (partialPayments(operations).get(op.eventKey) ?? 0)),
@@ -1115,7 +1120,7 @@ const stepAccountBook: Step = (f, s, ctx) => {
       const op = book.operations.find(o => o.id === key);
       if (!op) continue;
       if (op.status !== 'planned') { errors.push(`accountBook.operations.${key}: запись журнала защищена`); continue; }
-      book = { ...book, operations: book.operations.filter(o => o.id !== key) };
+      book = reviseOperations(book, book.operations.filter(o => o.id !== key), ctx.at, 'Отмена запланированной операции');
     } else if (item.section === 'historicalLoans') {
       if (!book.historicalLoans?.some(o => o.eventKey === key)) continue;
       book = { ...book, historicalLoans: book.historicalLoans.filter(o => o.eventKey !== key) };
@@ -1353,7 +1358,7 @@ const stepCorrections: Step = (f, s, ctx) => {
     }
     actual[actualKey] = { ...previous, net: row.newValue, asOf: ctx.now, verifiedBy: row.source };
     if (mark?.done) marks[key] = { ...mark, amount: row.newValue };
-    if (op) book = { ...book, operations: book.operations.map(o => o.id === op.id ? { ...o, amount: row.newValue } : o) };
+    if (op) book = reviseOperations(book, book.operations.map(o => o.id === op.id ? { ...o, amount: row.newValue } : o), ctx.at, row.reason);
     lines.push(label(row));
   }
   if (lines.length) {
@@ -1386,7 +1391,7 @@ const stepCorrections: Step = (f, s, ctx) => {
       budget: { weekly: 0, prepared: op.amount, separate: 0, unknown: 0 } };
     const operations = candidate.filter(item => item.id !== link.transferId && !(item.legacyExpense && linkedExpenseId(item) === expense.id))
       .flatMap(item => item.id === op.id ? [candidate.at(-1)!, payment] : [item]);
-    patch.accountBook = { ...current, operations };
+    patch.accountBook = reviseOperations(current, operations, ctx.at, link.reason);
     lines.push(`Связать один платёж и подтверждённый перевод · ${ddmm(op.date)} · ${money(op.amount)}`);
   }
   for (const row of f.bankCorrection ?? []) {

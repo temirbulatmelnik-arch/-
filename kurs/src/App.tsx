@@ -10,7 +10,7 @@ import { PaymentQueueSheet } from './screens/PaymentQueue';
 import { TransferSheet } from './screens/TransferSheet';
 import { AddExpenseSheet } from './screens/AddExpense';
 import { BonusSheet } from './screens/BonusSheet';
-import { Budget } from './screens/Budget';
+import { History } from './screens/History';
 import { CheckupSheet } from './screens/Checkup';
 import { DebtSheet } from './screens/DebtSheet';
 import { EventSheet } from './screens/EventSheet';
@@ -58,7 +58,7 @@ function useTheme() {
 }
 
 const ORDER: Tab[] = TABS.map(t => t.id);
-const SCREENS: Record<Tab, ReactNode> = { week: <Week />, payments: <Payments />, budget: <Budget />, plan: <Plan /> };
+const SCREENS: Record<Tab, ReactNode> = { week: <Week />, payments: <Payments />, budget: <History />, plan: <Plan /> };
 /** Все листы — один постоянный элемент: при смене вкладки или тоста оболочка их не перерисовывает,
  *  каждый лист сам следит за своим кусочком состояния */
 const SHEETS = (

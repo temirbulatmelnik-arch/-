@@ -1,3 +1,4 @@
+import { CalendarFunding } from '../components/rows';
 // «Платежи» — хватит ли денег на всё, что спишется. Три вида, листаются пальцем:
 // «Месяц» — календарь с водой и линия денег, выбранный день; «Хватит ли» — счета и прогноз покрытия до премии;
 // «Список» — все платежи месяца по датам, отметка «оплачено» свайпом вправо.
@@ -56,6 +57,13 @@ export function Payments() {
   const marks = useStore(s => s.marks);
   // прогноз покрытия — тот же, что в «Хватит ли» и в status.coverage: остаток дня в календаре — его резерв к вечеру
   const { cov } = useCoverage();
+  const led = useLedger();
+  const statuses = new Map<string, 'Обеспечено' | 'Нужны деньги' | 'Нужна сверка'>();
+  for (const row of cov.paymentFunding ?? []) {
+    statuses.set(row.key, !row.accountId || row.available == null ? 'Нужна сверка'
+      : (led.heldForPayments.find(payment => payment.key === row.key && payment.accountId === row.accountId)?.amount ?? 0) >= row.amount
+        ? 'Обеспечено' : 'Нужны деньги');
+  }
   const set = useUi(s => s.set);
   const view = useUi(s => s.payView);
   const [month, setMonth] = useState(monthKey(now));
@@ -82,7 +90,7 @@ export function Payments() {
   const arrow = (n: 1 | -1) => { if (!(view === 'month' && flip.current?.(n))) shift(n); };
 
   return (
-    <div>
+    <CalendarFunding.Provider value={statuses}><div>
       <SkyHeader
         title={<button type="button" onClick={() => setMonth(monthKey(now))} className="text-left first-letter:uppercase">{monthName(month)}</button>}
         subtitle={<>уйдёт <Roll value={total} />, придёт <Roll value={incomes} /></>}
@@ -107,10 +115,10 @@ export function Payments() {
         { id: 'list', label: 'Лента', render: () => <ListView month={month} events={events} total={total} incomes={incomes} /> },
         { id: 'month', label: 'Месяц', render: () => <MonthView months={[prev, cur, next]} selected={selected} onSelect={setPicked} onShift={shift} flip={flip} /> },
       ]} />
-      <Sheet open={cover} onClose={() => setCover(false)} title="Хватит ли резерва" subtitle="Прогноз по дням до премии">
-        {cover && <div className="-mx-5"><CoverView /></div>}
+      <Sheet open={cover || view === 'cover'} onClose={() => { setCover(false); if (view === 'cover') set({ payView: 'list' }); }} title="Хватит ли резерва" subtitle="Прогноз по дням до премии">
+        {(cover || view === 'cover') && <div className="-mx-5"><CoverView /></div>}
       </Sheet>
-    </div>
+    </div></CalendarFunding.Provider>
   );
 }
 

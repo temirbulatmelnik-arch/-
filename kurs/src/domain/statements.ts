@@ -15,6 +15,9 @@ export interface DraftTx {
   skip: boolean;
   /** уже есть в журнале */
   duplicate?: boolean;
+  /** Совпадение без точного банковского идентификатора. */
+  needsDuplicateReview?: boolean;
+  occurredAt?: string;
   fingerprint: string;
   /** поступление, а не трата */
   income?: boolean;
@@ -27,6 +30,7 @@ export interface DraftTx {
   /** сумма из заголовка дня */
   fromHeader?: boolean;
   creditCard?: string;
+  structured?: boolean;
 }
 
 let seq = 0;
@@ -76,37 +80,79 @@ const num = (s: string) => {
 
 export interface CsvResult {
   rows: DraftTx[];
+  bank: string;
+  rejected: number;
   /** что поняли про столбцы — показать человеку */
   columns: { date: string; amount: string; merchant: string };
 }
 
-export function parseCsv(text: string): CsvResult | null {
+export function parseCsv(text: string, fileHash?: string): CsvResult | null {
   const lines = text.replace(/^﻿/, '').split(/\r?\n/).filter(l => l.trim());
   if (lines.length < 2) return null;
-  const sep = [';', '\t', ','].sort((a, b) => lines[0].split(b).length - lines[0].split(a).length)[0];
-  const head = splitCsvLine(lines[0], sep).map(h => h.toLowerCase());
-  const find = (...keys: string[]) => head.findIndex(h => keys.some(k => h.includes(k)));
-  const iDate = find('дата операции', 'дата', 'date');
-  // «Сумма операции» точнее «Суммы платежа» (у Т-Банка обе), но берём первую подходящую
-  const iAmount = find('сумма операции', 'сумма', 'amount');
-  const iDesc = find('описание', 'назначение', 'контрагент', 'получатель', 'description', 'merchant');
-  const iCat = find('категория', 'category');
-  const iStatus = find('статус', 'status');
-  if (iDate < 0 || iAmount < 0) return null;
+  for (const separator of [';', '\t', ',']) {
+    const result = parseBankTable(lines.map(line => splitCsvLine(line, separator)), fileHash);
+    if (result) return result;
+  }
+  return null;
+}
+
+const cellText = (cell: string | number | boolean | Date | null) => cell instanceof Date
+  ? cell.toISOString().slice(0, 19) : String(cell ?? '').trim();
+
+export function parseBankTable(table: (string | number | boolean | Date | null)[][], fileHash?: string): CsvResult | null {
+  const grid = table.map(row => row.map(cellText));
+  const find = (head: string[], ...keys: string[]) => keys.map(key => head.findIndex(h => h.includes(key))).find(index => index >= 0) ?? -1;
+  const dateIndex = (head: string[]) => find(head, 'дата операции', 'дата и время', 'дата', 'transaction date', 'date');
+  const amountIndex = (head: string[]) => find(head, 'сумма операции', 'transaction amount', 'сумма', 'amount');
+  const header = grid.findIndex((row, index) => index < 30 && row.length > 1 && dateIndex(row.map(h => h.toLowerCase())) >= 0 && amountIndex(row.map(h => h.toLowerCase())) >= 0);
+  if (header < 0) return null;
+  const head = grid[header].map(h => h.toLowerCase());
+  const iDate = dateIndex(head);
+  const iAmount = amountIndex(head);
+  const iDesc = find(head, 'описание операции', 'описание', 'назначение', 'контрагент', 'получатель', 'description', 'merchant');
+  const iCat = find(head, 'категория', 'category');
+  const iStatus = find(head, 'статус', 'status');
+  const iDirection = find(head, 'направление', 'приход/расход', 'дебет/кредит', 'тип операции', 'direction');
+  const iCurrency = find(head, 'валюта операции', 'валюта', 'currency');
+  const iExternal = find(head, 'id операции', 'идентификатор операции', 'transaction id', 'operation id');
+  const iAccount = find(head, 'номер счёта', 'номер счета', 'account', 'номер карты', 'card', 'счёт', 'счет', 'карта');
+  const bankTitle = grid.slice(0, header).flat().join(' ');
+  const bank = /\bVTB\b|ВТБ/i.test(bankTitle) ? 'vtb' : /Т-Банк|Тинькофф/i.test(bankTitle) ? 'tbank' : 'table';
 
   const rows: DraftTx[] = [];
-  for (const line of lines.slice(1)) {
-    const c = splitCsvLine(line, sep);
-    const date = parseDate(c[iDate] ?? '');
-    const amount = num(c[iAmount] ?? '');
-    if (!date || amount == null || amount === 0) continue;
-    if (iStatus >= 0 && /fail|отклон/i.test(c[iStatus] ?? '')) continue;
+  let rejected = 0;
+  for (const [row, c] of grid.slice(header + 1).entries()) {
+    if (!c.some(Boolean)) continue;
+    const rawDate = c[iDate] ?? '';
+    const date = parseDate(rawDate);
+    const rawAmount = c[iAmount] ?? '';
+    const amount = num(rawAmount);
+    const direction = c[iDirection]?.toLowerCase() ?? '';
+    const currency = c[iCurrency] ?? '';
+    const status = c[iStatus] ?? '';
+    if (!date || amount == null || amount === 0 ||
+      (currency && !/^(?:[₽р]|руб\.?|рубл[ьи]|RUB|RUR|643)$/i.test(currency)) ||
+      /fail|pending|reject|reversed|declined|отклон|отмен|в обработке|ожида|заблок/i.test(status)) {
+      rejected++;
+      continue;
+    }
+    const credit = /^(?:приход|зачисление|поступление|кредит|credit|in|пополнение|возврат)$/.test(direction);
+    const debit = /^(?:расход|списание|дебет|debit|out|оплата|покупка)$/.test(direction);
+    if ((direction && !credit && !debit) || (credit && amount < 0)) {
+      rejected++;
+      continue;
+    }
     const merchant = [c[iDesc], iCat >= 0 ? c[iCat] : ''].filter(Boolean).join(' · ');
-    rows.push(draft(date, amount, merchant, { income: amount > 0 }));
+    const tx = { ...draft(date, amount, merchant, { income: credit || (!debit && amount > 0) }), structured: true };
+    const external = iExternal >= 0 ? c[iExternal] : undefined;
+    const account = iAccount >= 0 ? c[iAccount] : undefined;
+    if (external && (account || bank !== 'table')) tx.fingerprint = JSON.stringify(['csv:operation', bank, account ?? '', external]);
+    else if (fileHash) tx.fingerprint = JSON.stringify(['csv:file', fileHash, row]);
+    const time = rawDate.match(/(?:T|\s)([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?(Z|[+-]\d\d:\d\d)?$/i);
+    if (time) tx.occurredAt = `${date}T${time[1]}:${time[2]}:${time[3] ?? '00'}${time[4] ?? '+03:00'}`;
+    rows.push(tx);
   }
-  // выписка, где все суммы положительные, — это обычно только списания
-  if (rows.length && rows.every(r => r.income)) rows.forEach(r => { r.income = false; r.skip = isNotSpending(r.merchant); });
-  return { rows, columns: { date: head[iDate], amount: head[iAmount], merchant: iDesc >= 0 ? head[iDesc] : '—' } };
+  return { rows, bank, rejected, columns: { date: head[iDate], amount: head[iAmount], merchant: iDesc >= 0 ? head[iDesc] : '—' } };
 }
 
 /* ---------- Текст со скриншота ---------- */

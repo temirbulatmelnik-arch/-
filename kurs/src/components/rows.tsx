@@ -1,7 +1,7 @@
 // Общие строки списков: трата, событие календаря, предупреждение.
 import { AlertTriangle, ArrowDownLeft, Check, ChevronRight, CreditCard, Info, PiggyBank, Receipt, Repeat, Sparkles, Wallet } from 'lucide-react';
 import { motion } from 'motion/react';
-import type { CSSProperties, ReactNode } from 'react';
+import { createContext, useContext, type CSSProperties, type ReactNode } from 'react';
 import { eventGroup, incomeStatus, INCOME_STATUS_LABEL, urgency, type EventGroup } from '../domain/calendar';
 import { ddmm, relDays, weekday } from '../domain/dates';
 import { CATEGORY } from '../domain/plan';
@@ -41,18 +41,21 @@ export function whenText(e: CalEvent) {
 }
 
 /** Строка платежа или поступления. Кружок слева — отметить, остальное — открыть. */
+export const CalendarFunding = createContext<ReadonlyMap<string, 'Обеспечено' | 'Нужны деньги' | 'Нужна сверка'>>(new Map());
+
 export function EventRow({ e, mark, now, onClick, onToggle, showDate = true }: { e: CalEvent; mark?: EventMark; now: string; onClick: () => void; onToggle?: () => void; showDate?: boolean }) {
   const u = urgency(e, mark, now);
   const g = eventGroup(e);
   const Icon = GROUP_ICON[g];
   const hot = u === 'overdue' || u === 'soon';
   const status = incomeStatus(e, mark);
+  const funding = useContext(CalendarFunding).get(e.key);
   // дата прошла, а отметки нет: в прогнозе оно стоит сегодняшним днём — пометка, чтобы отметить или перенести
   const missed = u !== 'done' && e.date < now && !e.payroll?.documented;
   return (
     <div className={`flex items-center gap-3 px-4 py-3 ${u === 'done' ? 'opacity-55' : ''}`}>
       <button type="button" onClick={onToggle ?? onClick} aria-label={mark?.done ? 'Снять отметку' : g === 'income' ? 'Отметить: пришло' : g === 'weekly' ? 'Отметить: долито' : 'Отметить: оплачено'}
-        className={`dot-tile size-10 transition ${mark?.done ? '!bg-pos !text-white' : hot ? 'ring-[1.5px] ring-neg/60' : ''}`}
+        className={`dot-tile size-11 transition ${mark?.done ? '!bg-pos !text-white' : hot ? 'ring-[1.5px] ring-neg/60' : ''}`}
         style={{ '--c': hot && !mark?.done ? 'var(--neg)' : GROUP_COLOR[g] } as CSSProperties}>
         {mark?.done
           ? <motion.span initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: 'spring', bounce: 0.4, duration: 0.35 }}><Check size={18} strokeWidth={2.4} /></motion.span>
@@ -63,14 +66,15 @@ export function EventRow({ e, mark, now, onClick, onToggle, showDate = true }: {
           <span className={`block truncate text-[14.5px] font-medium ${u === 'done' ? 'line-through decoration-1' : ''}`}>{e.title}</span>
           <span className={`block text-[12px] ${hot ? 'text-neg' : missed ? 'text-warn' : 'text-muted'}`}>
             {showDate ? `${whenText(e)}, ` : e.dateMode === 'until' ? 'внести до этой даты, ' : ''}
-            {e.economicType === 'loan_disbursement' ? 'заёмные средства'
+            {mark?.done ? 'Факт'
+              : e.economicType === 'loan_disbursement' ? 'заёмные средства'
               : status ? INCOME_STATUS_LABEL[status]
               : e.projection === 'conditional' ? 'условная досрочка'
               : e.projection === 'internal_transfer' ? 'между своими счетами'
               : e.projection === 'review' ? 'нужна сверка'
               : e.possibleExtra ? 'возможна доплата'
-              : u === 'done' ? (g === 'income' ? 'пришло' : g === 'weekly' ? 'долито' : 'оплачено')
-              : e.dateMode === 'month' ? 'дата не известна' : relDays(now, e.date)}
+              : funding ?? (u === 'done' ? (g === 'income' ? 'пришло' : g === 'weekly' ? 'долито' : 'оплачено')
+              : e.dateMode === 'month' ? 'дата не известна' : relDays(now, e.date))}
             {missed ? ', не отмечено' : ''}
             {e.moved && u !== 'done' ? ', дата изменена' : ''}
             {e.planned && u !== 'done' ? `, по графику ${ddmm(e.planned)} по общему графику` : ''}

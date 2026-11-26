@@ -31,6 +31,22 @@ async function reopen(version: number, state: unknown) {
   return (await import('./store')).useStore;
 }
 
+it('keeps the prior posting in the correction history after an erroneous confirmation and restores it', async () => {
+  const store = await reopen(9, { ...old, accountBook: EMPTY_BOOK });
+  const operation: AccountOperation = { id: 'incorrect-allocation', date, amount: 90, accountId: 'life',
+    type: 'allocation', toWeekly: true, origin: 'manual', status: 'confirmed', fundingSource: 'own' };
+  expect(store.getState().saveOperation(operation)).toBe(true);
+  const cash = ledger(store.getState()).totalCash;
+  expect(store.getState().voidOperation(operation.id)).toBe(true);
+  expect(store.getState().voidOperation(operation.id)).toBe(false);
+  expect(ledger(store.getState()).totalCash).toBe(cash);
+  const backup = JSON.parse(store.getState().exportData());
+  expect(store.getState().importData(backup)).toBe(true);
+  expect(store.getState().accountBook.operationChanges).toMatchObject([{
+    reason: 'Отмена подтверждения', before: operation, after: { ...operation, status: 'voided' },
+  }]);
+});
+
 describe('обратная совместимость и подтверждение операций', () => {
   beforeEach(() => storage.clear());
 
@@ -255,4 +271,25 @@ it('сверяет дублированный расход и доступные
   expect(after.accountBook.operations.map(row => row.id)).toEqual(['funded', 'payment']);
   expect(ledger({ ...after, now: day })).toMatchObject({ card: 3000, reserve: 6850, heldOnCard: 0 });
   expect(prepareExchange(patch, after, day)).toMatchObject({ sections: [], errors: [] });
+});
+
+it('импорт выписки коммитится целиком, повтор и ошибка не пишут состояние', async () => {
+  const store = await reopen(9, old);
+  const initial = store.getState();
+  const revision = exchangeRevision(initial);
+  const batch = { id: 'batch', fileHash: 'hash', importedAt: at, parserVersion: 'test', bank: 'test', rowCount: 2 };
+  const purchase = { date: '2026-11-21', amount: 100, category: 'transport', source: 'life' } as const;
+  expect(initial.applyBankImport(revision, 'Ошибка', batch, draft => {
+    draft.addExpenses([purchase]);
+    throw Error('Не удалось обработать следующую строку');
+  })).toBe(false);
+  expect(store.getState()).toBe(initial);
+  expect(initial.applyBankImport(revision, 'Сверка', batch, draft => draft.addExpenses([purchase, purchase]))).toBe(true);
+  const after = store.getState();
+  expect(after.expenses).toHaveLength(2);
+  expect(after.accountBook.importBatches).toEqual([batch]);
+  expect(after.applyBankImport(exchangeRevision(after), 'Повтор', batch, draft => draft.addExpenses([purchase]))).toBe(false);
+  expect(store.getState()).toBe(after);
+  after.rollbackImport(after.imports.at(-1)!.id);
+  expect(store.getState().expenses).toEqual(initial.expenses);
 });

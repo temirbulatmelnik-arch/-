@@ -1,3 +1,5 @@
+import { useCoverage } from '../components/Coverage';
+import { prepaymentReadiness } from '../domain/coverage';
 import { monthDebtActivity } from '../domain/accounts';
 import { useLedger } from './Checkup';
 // «Долги» — тает ли долг. Общий долг досчитывает вниз от начального, фарватер: долги буями по порядку закрытия,
@@ -42,9 +44,10 @@ export function Plan() {
 
   return (
     <div>
-      <SkyHeader back={{ label: 'Сегодня', onClick: () => useUi.getState().setTab('week') }} title="Долги" subtitle="Курс к свободе" action={
+      <SkyHeader back={{ label: 'Сегодня', onClick: () => useUi.getState().setTab('week') }} title="Финансы" subtitle="Курс к свободе" action={
         <motion.button type="button" whileTap={{ scale: 0.97 }} onClick={() => set({ bonus: {} })} className="flex h-11 items-center gap-1.5 rounded-full bg-ink px-4 text-[13.5px] font-medium text-bg"><Gift size={15} strokeWidth={1.8} /> Пришла премия</motion.button>
       } />
+      <FinanceOverview />
       <DebtHero />
       <Pager<PlanView> className="mt-5" value={view} onChange={v => set({ planView: v })} pages={[
         { id: 'debts', label: 'Долги', render: () => <DebtsView /> },
@@ -53,6 +56,32 @@ export function Plan() {
       ]} />
     </div>
   );
+}
+
+function FinanceOverview() {
+  const led = useLedger();
+  const set = useUi(s => s.set);
+  const { input, now } = useCoverage('cautious');
+  const prepayment = useMemo(() => prepaymentReadiness(input, now, 'reserve'), [input, now]);
+  return <section className="card mx-4 mt-2 space-y-2 p-4" aria-label="Собственные деньги">
+    <div className="text-[13px] text-muted">Собственные деньги</div>
+    <div className="figure text-[30px]">{led.totalCash == null ? 'Нужна сверка' : <Money value={led.totalCash} kopecks />}</div>
+    <div className="grid grid-cols-2 gap-2 text-[13px]">
+      <button type="button" className="min-h-11 rounded-xl bg-surface-2 text-left px-2" onClick={() => set({ card: true })}>
+        <span className="block text-muted">На карте</span>{led.card == null ? 'Нужна сверка' : <Money value={led.card} kopecks />}
+      </button>
+      <button type="button" className="min-h-11 rounded-xl bg-surface-2 text-left px-2" onClick={() => set({ reserve: true })}>
+        <span className="block text-muted">В резерве</span><Money value={led.reserve} kopecks />
+      </button>
+    </div>
+    <p className="text-[13px] text-muted">{prepayment.amount == null
+      ? <>Безопасная досрочка требует сверки. {prepayment.reason}.</>
+      : <>Безопасная досрочка <Money value={prepayment.amount} kopecks /></>}</p>
+    <div className="flex flex-wrap gap-x-3">
+      <button type="button" onClick={() => set({ finance: true })} className="min-h-11 text-[13px] text-sea">Счета и операции</button>
+      <button type="button" onClick={() => set({ workSheet: true })} className="min-h-11 text-[13px] text-sea">Работа и доходы</button>
+    </div>
+  </section>;
 }
 
 /** Прогноз по модели плана — один на вкладку и сохраняется между открытиями: те же данные — тот же ответ */

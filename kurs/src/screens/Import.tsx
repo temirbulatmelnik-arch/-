@@ -1,3 +1,5 @@
+import { exchangeRevision } from '../domain/exchange';
+import type { BankImportBatch } from '../domain/accounts';
 import { cashAccount } from '../domain/accounts';
 // Выписка и скриншоты из банка → что на них → что обновить: траты по категориям, оплаченные платежи,
 // поступления (премия сразу открывает распределение), остаток на карте. После — итог недели.
@@ -11,7 +13,7 @@ import { ScreenshotFlow } from './ScreenshotImport';
 import type { ImageOCR } from '../domain/imageText';
 import { moscowClock } from '../domain/funds';
 import { parseBankText } from '../domain/bankText';
-import { draft, parseCsv, parseText } from '../domain/statements';
+import { draft, parseBankTable, parseCsv, parseText } from '../domain/statements';
 import type { CategoryId, Source } from '../domain/types';
 import { weekToClose } from '../domain/weekly';
 import { uid, useStore } from '../store/store';
@@ -27,8 +29,13 @@ export function ImportSheet() {
   );
 }
 
-type Review = { summary: string; warnings: string[]; items: AnyProposal[] };
+type Review = { summary: string; warnings: string[]; items: AnyProposal[]; batch?: BankImportBatch };
 type Step = { s: 'pick' } | { s: 'text' } | { s: 'busy'; label: string } | { s: 'review'; review: Review } | { s: 'screenshots'; images: ImageOCR[] } | { s: 'error'; text: string };
+
+async function sha256Hex(data: BufferSource) {
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+}
 
 function ctx() {
   const st = useStore.getState();
@@ -91,13 +98,36 @@ function Flow() {
 
   const runCsv = async (file?: File) => {
     if (!file) return;
-    const buf = await file.arrayBuffer();
-    // банки отдают CSV в UTF-8 или Windows-1251
-    let text = new TextDecoder('utf-8').decode(buf);
-    if (text.includes('�')) text = new TextDecoder('windows-1251').decode(buf);
-    const r = parseCsv(text);
-    if (!r || !r.rows.length) { setStep({ s: 'error', text: 'Не нашёл в файле столбцы «Дата» и «Сумма».' }); return; }
-    setStep({ s: 'review', review: fromDrafts(r.rows, ctx(), `Выписка: ${r.rows.length} операций. Столбцы: «${r.columns.date}», «${r.columns.amount}», «${r.columns.merchant}».`) });
+    setStep({ s: 'busy', label: 'Читаю таблицу на устройстве…' });
+    try {
+      if (file.size > 10 * 1024 * 1024) throw new Error('Выберите файл размером до 10 МБ.');
+      const buf = await file.arrayBuffer();
+      const fileHash = await sha256Hex(buf);
+      if (useStore.getState().accountBook.importBatches?.some(batch => batch.fileHash === fileHash)) {
+        setStep({ s: 'review', review: { summary: 'Этот файл уже импортирован.', items: [], warnings: [] } });
+        return;
+      }
+      const xlsx = /\.xlsx$/i.test(file.name);
+      let r;
+      if (xlsx) {
+        const { readSheet } = await import('read-excel-file/browser');
+        r = parseBankTable(await readSheet(buf), fileHash);
+      } else {
+        let body = new TextDecoder('utf-8').decode(buf);
+        if (body.includes('�')) body = new TextDecoder('windows-1251').decode(buf);
+        r = parseCsv(body, fileHash);
+      }
+      if (!r) throw new Error('Не нашёл в файле столбцы «Дата» и «Сумма».');
+      const rows = await Promise.all(r.rows.map(async row => row.fingerprint.startsWith('["csv:operation')
+        ? { ...row, fingerprint: JSON.stringify(['csv:operation', await sha256Hex(new TextEncoder().encode(row.fingerprint))]) }
+        : row));
+      const review = fromDrafts(rows, ctx(), `Выписка: ${rows.length} операций. Столбцы: «${r.columns.date}», «${r.columns.amount}», «${r.columns.merchant}».`);
+      const warnings = r.rejected ? [`Пропущено строк: ${r.rejected}. Проверьте статус, валюту и формат данных в исходной таблице.`, ...review.warnings] : review.warnings;
+      setStep({ s: 'review', review: { ...review, warnings, batch: { id: fileHash, fileHash, bank: r.bank, importedAt: new Date().toISOString(),
+        parserVersion: xlsx ? 'kurs-xlsx-1' : 'kurs-csv-2', rowCount: rows.length } } });
+    } catch (e) {
+      fail(e);
+    }
   };
 
   if (step.s === 'busy') {
@@ -135,7 +165,7 @@ function Flow() {
       <input ref={pdf} type="file" accept="application/pdf" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void (apiKey ? runAi([f]) : runPdfLocal(f)); }} />
       <input ref={pdfLocal} type="file" accept="application/pdf" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; void runPdfLocal(f); }} />
       <input ref={shots} type="file" accept="image/*" multiple hidden onChange={e => { const f = [...(e.target.files ?? [])]; e.target.value = ''; void runScreenshots(f); }} />
-      <input ref={csv} type="file" accept=".csv,text/csv,text/plain,.txt" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; void runCsv(f); }} />
+      <input ref={csv} type="file" accept=".csv,.xlsx,text/csv,text/plain,.txt" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; void runCsv(f); }} />
 
       <SecondaryButton className="w-full" onClick={() => shots.current?.click()}><Camera size={18} /> Выбрать скриншот</SecondaryButton>
       <p className="px-1 text-[12px] text-muted">Изображение распознаётся на устройстве. Перед записью можно поправить каждую операцию.</p>
@@ -160,7 +190,7 @@ function Flow() {
         {apiKey && <button type="button" onClick={e => { e.stopPropagation(); pdfLocal.current?.click(); }} className="mt-2 text-[12.5px] font-medium text-sea">Разобрать без Claude, бесплатно</button>}
       </Option>
 
-      <Option icon={<FileSpreadsheet size={19} strokeWidth={1.9} />} color="#2ba36a" title="Файл CSV" tag="на телефоне"
+      <Option icon={<FileSpreadsheet size={19} strokeWidth={1.9} />} color="#2ba36a" title="Файл CSV или XLSX" tag="на телефоне"
         lead="Таблица операций из банка"
         text="Если банк выгружает таблицу: даты, суммы и описания найдутся по заголовкам."
         onClick={() => csv.current?.click()} />
@@ -231,57 +261,68 @@ const SOURCE_LABEL: Record<Source, string> = { life: 'карта жизни', cr
 const NEXT_SOURCE: Record<Source, Source> = { life: 'credit', credit: 'reserve', reserve: 'life' };
 
 function ReviewList({ review, onBack }: { review: Review; onBack: () => void }) {
+  const [revision] = useState(() => exchangeRevision(useStore.getState()));
   const [items, setItems] = useState<AnyProposal[]>(review.items);
   const set = useUi(s => s.set);
   const patch = (id: string, p: Partial<AnyProposal>) => setItems(list => list.map(i => (i.id === id ? ({ ...i, ...p } as AnyProposal) : i)));
-  const on = items.filter(i => i.on);
+  const on = items.filter(i => i.on && (i.type !== 'income' || i.event) && (i.type !== 'tx' || !i.tx.duplicate || i.tx.needsDuplicateReview));
   const spent = on.reduce((s, i) => s + (i.type === 'tx' ? i.tx.amount : 0), 0);
 
   const apply = () => {
     const store = useStore.getState();
     // снимок до изменений — неверный импорт откатывается в «Связи с чатом» → «Последние импорты»
-    store.beginImport(`Из банка: ${review.summary}`);
-    let bonus: AnyProposal | undefined;
-    const txs = on.flatMap(i => (i.type === 'tx' ? [i.tx] : []));
-    const people = on.flatMap(i => (i.type === 'person' && i.choice === 'spend' ? [i] : []));
-    if (txs.length || people.length) store.addExpenses([
-      ...txs.map(t => ({ date: t.date, amount: t.amount, category: t.category, note: t.merchant, source: t.source, origin: (t.nameKey ? 'text' : 'ai') as 'text' | 'ai', fingerprint: t.fingerprint, ...(t.creditCard ? { creditCard: t.creditCard } : {}) })),
-      ...people.map(p => ({ date: p.date, amount: p.amount, category: p.category, note: p.name, source: 'life' as const, origin: 'text' as const, fingerprint: p.fingerprint })),
-    ]);
-    // та же трата уже внесена вручную или из чата — привязать отпечаток, чтобы следующий скриншот её узнал
-    for (const i of items) if (i.type === 'tx' && i.tx.linkId && !i.on) store.updateExpense(i.tx.linkId, { fingerprint: i.tx.fingerprint });
-    // память продавцов: сменили категорию — запомнить
-    for (const t of txs) if (t.nameKey && t.suggested && t.category !== t.suggested) store.remember(t.nameKey, t.category);
-    for (const i of on) {
-      if (i.type === 'person' && (i.choice === 'self')) store.remember(i.key, 'self');
-      if (i.type === 'mark' && i.selfKey && !store.merchantMemory[i.selfKey]) store.remember(i.selfKey, 'self');
-      if (i.type === 'transfer') {
-        if (i.dir === 'toCard') { if (i.event) store.markEvent(i.event, true, i.amount); else store.moveReserve(-i.amount, 'Перевод из резерва на карту', i.amount); }
-        else store.moveReserve(i.amount, 'Перевод с карты в резерв', -i.amount);
+    const result: { bonus?: AnyProposal } = {};
+    const seenCsv = new Set(store.expenses.map(expense => expense.fingerprint));
+    const txs = on.flatMap(i => {
+      if (i.type !== 'tx') return [];
+      if (i.tx.fingerprint.startsWith('["csv:')) {
+        if (seenCsv.has(i.tx.fingerprint)) return [];
+        seenCsv.add(i.tx.fingerprint);
       }
-      if (i.type === 'refund') {
-        const accountId = cashAccount(i.expense) ?? i.expense.creditCard;
-        if (accountId) {
-          store.saveOperation({ id: uid(), externalId: JSON.stringify(['refund', i.expense.id, i.date, i.amount, i.name]),
-            type: 'refund', expenseId: i.expense.id, accountId, debtId: i.expense.source === 'credit' ? i.expense.creditCard : undefined,
-            amount: Math.min(i.expense.amount, i.amount), date: i.date, at: i.date === today() ? new Date().toISOString() : undefined, status: 'confirmed', origin: 'bank', fundingSource: 'unknown' });
+      return [i.tx];
+    });
+    if (!txs.length && on.every(i => i.type === 'tx')) { toast('Новых операций нет'); return; }
+    const applied = store.applyBankImport(revision, `Из банка: ${review.summary}`, review.batch, store => {
+      const people = on.flatMap(i => (i.type === 'person' && i.choice === 'spend' ? [i] : []));
+      if (txs.length || people.length) store.addExpenses([
+        ...txs.map(t => ({ date: t.date, amount: t.amount, category: t.category, note: t.merchant, source: t.source, origin: (t.nameKey ? 'text' : 'ai') as 'text' | 'ai', fingerprint: t.fingerprint, ...(t.occurredAt ? { occurredAt: t.occurredAt } : {}), ...(t.creditCard ? { creditCard: t.creditCard } : {}) })),
+        ...people.map(p => ({ date: p.date, amount: p.amount, category: p.category, note: p.name, source: 'life' as const, origin: 'text' as const, fingerprint: p.fingerprint })),
+      ]);
+      // память продавцов: сменили категорию — запомнить
+      for (const t of txs) if (t.nameKey && t.suggested && t.category !== t.suggested) store.remember(t.nameKey, t.category);
+      for (const i of on) {
+        if (i.type === 'person' && (i.choice === 'self')) store.remember(i.key, 'self');
+        if (i.type === 'mark' && i.selfKey && !store.merchantMemory[i.selfKey]) store.remember(i.selfKey, 'self');
+        if (i.type === 'transfer') {
+          if (i.dir === 'toCard') { if (i.event) store.markEvent(i.event, true, i.amount); else store.moveReserve(-i.amount, 'Перевод из резерва на карту', i.amount); }
+          else store.moveReserve(i.amount, 'Перевод с карты в резерв', -i.amount);
         }
+        if (i.type === 'refund') {
+          const accountId = cashAccount(i.expense) ?? i.expense.creditCard;
+          if (accountId) {
+            store.saveOperation({ id: uid(), externalId: JSON.stringify(['refund', i.expense.id, i.date, i.amount, i.name]),
+              type: 'refund', expenseId: i.expense.id, accountId, debtId: i.expense.source === 'credit' ? i.expense.creditCard : undefined,
+              amount: Math.min(i.expense.amount, i.amount), date: i.date, createdAt: new Date().toISOString(), status: 'confirmed', origin: 'bank', fundingSource: 'unknown' });
+          }
+        }
+        if (i.type === 'interest') store.moveReserve(i.amount, 'Проценты на накопительный');
+        if (i.type === 'due') store.setOverride(i.event.key, { amount: i.amount, date: i.date });
+        if (i.type === 'debt') {
+          store.updateDebt(i.debt.id, { balance: i.balance });
+          if (i.event && i.minPayment > 0) store.setOverride(i.event.key, { amount: i.minPayment, ...(i.dueDate ? { date: i.dueDate } : {}) });
+        }
+        if (i.type === 'mark') store.markEvent(i.event, true, i.amount, undefined, { paidDate: i.date, accountId: i.event.accountId });
+        if (i.type === 'income' && i.event) {
+          if (i.bonus && !result.bonus) result.bonus = i;
+          else if (!i.bonus) store.markEvent(i.event, true, i.amount, undefined, { paidDate: i.date });
+        }
+        if (i.type === 'reserve') store.setReserve(i.balance, 'Сверка по выписке');
+        if (i.type === 'card') store.setCardBalance({ amount: i.balance, date: i.date, source: 'statement' });
       }
-      if (i.type === 'interest') store.moveReserve(i.amount, 'Проценты на накопительный');
-      if (i.type === 'due') store.setOverride(i.event.key, { amount: i.amount, date: i.date });
-      if (i.type === 'debt') {
-        store.updateDebt(i.debt.id, { balance: i.balance });
-        if (i.event && i.minPayment > 0) store.setOverride(i.event.key, { amount: i.minPayment, ...(i.dueDate ? { date: i.dueDate } : {}) });
-      }
-      if (i.type === 'mark') store.markEvent(i.event, true, i.amount, undefined, { paidDate: i.date, accountId: i.event.accountId });
-      if (i.type === 'income' && i.event) {
-        if (i.bonus && !bonus) bonus = i;
-        else if (!i.bonus) store.markEvent(i.event, true, i.amount, undefined, { paidDate: i.date });
-      }
-      if (i.type === 'reserve') store.setReserve(i.balance, 'Сверка по выписке');
-      if (i.type === 'card') store.setCardBalance({ amount: i.balance, date: i.date, source: 'statement' });
-    }
-    toast(`Обновлено: ${on.length}`);
+    });
+    const bonus = result.bonus;
+    if (!applied && !bonus) { toast('Данные изменились или операции уже учтены. Откройте выписку заново.'); return; }
+    if (applied) toast(`Обновлено: ${on.length}`);
     if (bonus && bonus.type === 'income' && bonus.event) { set({ scan: false, bonus: { event: { ...bonus.event, amount: bonus.amount } } }); return; }
     // в выходные и в начале недели после выписки — сразу итог недели
     const now = today(), dow = fromKey(now).getDay();
@@ -312,7 +353,7 @@ function ReviewList({ review, onBack }: { review: Review; onBack: () => void }) 
             <div className="card divide-hair overflow-hidden">
               {list.map(i => (
                 <div key={i.id} className={`flex items-start gap-3 px-3.5 py-3 ${i.on || i.type === 'person' ? '' : 'opacity-50'}`}>
-                  {i.type !== 'info' && i.type !== 'person' && <button type="button" onClick={() => patch(i.id, { on: !i.on })} aria-label={i.on ? 'Не применять' : 'Применить'}
+                  {i.type !== 'info' && i.type !== 'person' && (i.type !== 'income' || i.event) && <button type="button" onClick={() => patch(i.id, { on: !i.on })} aria-label={i.on ? 'Не применять' : 'Применить'}
                     className={`mt-0.5 grid size-6 shrink-0 place-items-center rounded-md border ${i.on ? 'border-transparent bg-ink text-bg' : 'border-line text-transparent'}`}><Check size={13} strokeWidth={2.5} /></button>}
                   <div className="min-w-0 flex-1"><ProposalBody p={i} onPatch={p => patch(i.id, p)} /></div>
                 </div>
@@ -388,7 +429,7 @@ function ProposalBody({ p, onPatch }: { p: AnyProposal; onPatch: (x: Partial<Any
             </select>
             <button type="button" onClick={() => onPatch({ tx: { ...p.tx, source: NEXT_SOURCE[p.tx.source] } } as Partial<AnyProposal>)}
               className={`rounded-lg px-2 py-1 font-medium ${p.tx.source === 'credit' ? 'bg-neg/12 text-neg' : 'bg-surface-2'}`}>{SOURCE_LABEL[p.tx.source]}</button>
-            {p.tx.duplicate && <Chip tone="warn">уже есть</Chip>}
+            {p.tx.duplicate && <Chip tone="warn">{p.tx.needsDuplicateReview ? 'Возможное совпадение' : 'Уже есть'}</Chip>}
             {p.tx.skip && <Chip>не трата?</Chip>}
           </div>
         </div>

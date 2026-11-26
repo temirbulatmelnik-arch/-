@@ -1,3 +1,4 @@
+import { payrollReceiptParts } from './payrollReceipts';
 import { cents, rubles } from './accounts';
 import { cashIncomeEvent, eventsBetween, incomeStatus, paidOn, type CalendarInput } from './calendar';
 import { projectedEvent, type Scenario } from './coverage';
@@ -16,6 +17,7 @@ export function annualIncome(input: CalendarInput, year: number, now: string, sc
   const all = eventsBetween(input, from, to);
   const byKey = new Map(all.map(event => [event.key, event]));
   const journal = input.accountBook?.operations ?? [];
+  const parts = payrollReceiptParts(journal);
   const paidByKey = new Map(journal.filter(op => op.status === 'confirmed' && op.eventKey).map(op => [op.eventKey!, op]));
   const entries: { date: string; amount: number; actual: boolean; documentary: boolean; conditional: boolean; group: IncomeGroup }[] = [];
   const record = (date: string, amount: number, actual: boolean, kind?: IncomeKind, conditional = false, documentary = false) => {
@@ -27,7 +29,9 @@ export function annualIncome(input: CalendarInput, year: number, now: string, sc
     const link = paidByKey.get(event.key);
     if (link && (link.type !== 'income' || link.fundingSource === 'borrowed')) continue;
     const mark = input.marks?.[event.key];
-    if (link?.type === 'income') record(link.date, link.amount, true, event.incomeKind);
+    const part = parts.get(event.key);
+    if (part) record(part.date, part.amount, true, event.incomeKind);
+    else if (link?.type === 'income') record(link.date, link.amount, true, event.incomeKind);
     else if (mark?.done && event.projection !== 'review') record(paidOn(event, mark), mark.amount ?? event.amount, true, event.incomeKind);
     else if (event.payroll?.documented && event.payroll.actualNet != null) record(event.payroll.actualPayDate ?? event.date, event.payroll.actualNet, false, event.incomeKind, false, true);
     else {
@@ -43,7 +47,9 @@ export function annualIncome(input: CalendarInput, year: number, now: string, sc
   }
   for (const op of journal) {
     if (op.type === 'income' && op.status === 'confirmed' && op.fundingSource !== 'borrowed' && (!op.eventKey || !byKey.has(op.eventKey))) {
-      record(op.date, op.amount, true);
+      if (op.payrollParts) {
+        for (const part of op.payrollParts) if (!byKey.has(part.key)) record(op.date, part.amount, true);
+      } else record(op.date, op.amount, true);
     }
   }
   const sum = (rows: typeof entries) => {

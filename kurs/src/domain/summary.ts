@@ -1,5 +1,6 @@
+import { budgetTotals, budgetWeek, roundDailyGuide } from './budget';
 // Сводки для экранов: неделя, месяц по категориям, что требует внимания сегодня.
-import { cents, RESERVE_ACCOUNT, cashAccount, weeklyExpenseCents, rubles } from './accounts';
+import { cents, rubles } from './accounts';
 import { bridgeWeek, onBridgeCard, type Bridge } from './bridge';
 import { addDays, daysBetween, ddmm, monthKey, weekStart } from './dates';
 import { actionableEvent, eventsBetween, urgency, type CalendarInput } from './calendar';
@@ -23,16 +24,15 @@ export interface WeekSummary {
 }
 
 export function weekSummary(expenses: Expense[], debts: Debt[], overrides: WeeklyOverride[], now: string): WeekSummary {
-  const monday = weekStart(now), sunday = addDays(monday, 6);
-  const list = expenses.filter(e => e.date >= monday && e.date <= sunday);
-  const spentCents = list.reduce((sum, e) => sum + weeklyExpenseCents(e), 0);
+  const monday = weekStart(now);
+  const { sunday, list, spent: spentCents } = budgetWeek(expenses, monday);
   const spent = rubles(spentCents);
   const limit = weeklyLimit(debts, now, overrides);
   const left = rubles(cents(limit) - spentCents);
   const daysLeft = daysBetween(now, sunday) + 1;
   return {
     monday, sunday, limit, spent, left, daysLeft,
-    perDay: Math.max(0, Math.floor(left / daysLeft / 10) * 10),
+    perDay: rubles(roundDailyGuide(cents(limit) - spentCents, daysLeft)),
     timeShare: (7 - daysLeft) / 7,
     expenses: list,
   };
@@ -67,38 +67,47 @@ export interface DayBudget {
   spentReserve: number;
 }
 
-const floor10 = (n: number) => Math.max(0, Math.floor(n / 10) * 10);
-
 /** Кольцо дня: сколько можно потратить сегодня и каким станет лимит на день после сегодняшних трат */
 export function dayBudget(expenses: Expense[], debts: Debt[], overrides: WeeklyOverride[], now: string): DayBudget {
-  const monday = weekStart(now), sunday = addDays(monday, 6);
-  const counted = expenses.filter(e => e.date >= monday && e.date <= now);
-  const before = counted.filter(e => e.date < now).reduce((sum, e) => sum + weeklyExpenseCents(e), 0);
-  const todays = counted.filter(e => e.date === now);
-  const spent = todays.reduce((sum, e) => sum + weeklyExpenseCents(e), 0);
-  const credit = todays.filter(e => e.source === 'credit').reduce((sum, e) => sum + weeklyExpenseCents(e), 0);
-  const reserve = todays.filter(e => cashAccount(e) === RESERVE_ACCOUNT).reduce((sum, e) => sum + weeklyExpenseCents(e), 0);
-  const spentToday = rubles(spent);
+  const monday = weekStart(now);
+  const { list, sunday } = budgetWeek(expenses, monday);
+  const before = budgetTotals(list.filter(e => e.date < now)).spent;
+  const totals = budgetTotals(list.filter(e => e.date === now));
+  const spentToday = rubles(totals.spent);
   const morningCents = cents(weeklyLimit(debts, now, overrides)) - before;
   const morning = rubles(morningCents);
   const daysLeft = daysBetween(now, sunday) + 1;
-  const day = morning > 0 ? floor10(morning / daysLeft) : 0;
+  const day = rubles(roundDailyGuide(morningCents, daysLeft));
   const nextWeek = daysLeft === 1;
   const tomorrow = nextWeek
-    ? floor10(weeklyLimit(debts, addDays(sunday, 1), overrides) / 7)
-    : floor10((morning - spentToday) / (daysLeft - 1));
+    ? rubles(roundDailyGuide(cents(weeklyLimit(debts, addDays(sunday, 1), overrides)), 7))
+    : rubles(roundDailyGuide(morningCents - totals.spent, daysLeft - 1));
   // день — часть недели: если неделя ушла в минус, дневная норма теряет смысл — сегодня можно 0, а не «минус сверх нормы»
-  const weekLeft = rubles(morningCents - spent);
+  const weekLeft = rubles(morningCents - totals.spent);
+  const remaining = rubles(cents(day) - totals.spent);
   const mode = weekLeft < 0 || morning <= 0 ? 'week' : spentToday > day ? 'day' : 'ok';
   return {
-    day, spentToday, left: day - spentToday, tomorrow, nextWeek, exhausted: morning <= 0, morning, daysLeft,
-    weekLeft, mode, canSpend: mode === 'ok' ? day - spentToday : 0, overDay: mode === 'day' ? spentToday - day : 0,
-    spentLife: rubles(spent - credit - reserve), spentCredit: rubles(credit), spentReserve: rubles(reserve),
+    day, spentToday, left: remaining, tomorrow, nextWeek, exhausted: morning <= 0, morning, daysLeft,
+    weekLeft, mode, canSpend: mode === 'ok' ? remaining : 0, overDay: mode === 'day' ? -remaining : 0,
+    spentLife: rubles(totals.life), spentCredit: rubles(totals.credit), spentReserve: rubles(totals.reserve),
   };
 }
 
-export function availableToday(day: DayBudget, lifeAvailable: number | null) {
-  return Math.max(0, Math.min(day.canSpend, day.weekLeft, lifeAvailable ?? 0));
+/** Каноническое объяснение доступной суммы. Денежные входы и результат в копейках. */
+export function explainDailySpending(day: DayBudget, lifeAvailable: number | null, liquidityCap: number | null = null) {
+  const inputs = {
+    guide: cents(day.day), spent: cents(day.spentToday), weekRemaining: cents(day.weekLeft),
+    lifeAvailable: lifeAvailable == null ? null : cents(lifeAvailable), liquidityCap: liquidityCap == null ? null : cents(liquidityCap), daysRemaining: day.daysLeft,
+  };
+  return {
+    value: Math.max(0, Math.min(inputs.guide - inputs.spent, inputs.weekRemaining, inputs.lifeAvailable ?? 0, inputs.liquidityCap ?? Infinity)),
+    formula: 'max(0, min(guide - spent, weekRemaining, lifeAvailable, liquidityCap))',
+    inputs, sources: ['weeklyBudget', 'lifeAccountProjection'] as const,
+  };
+}
+
+export function availableToday(day: DayBudget, lifeAvailable: number | null, liquidityCap: number | null = null) {
+  return rubles(explainDailySpending(day, lifeAvailable, liquidityCap).value);
 }
 
 export interface CategoryRow {

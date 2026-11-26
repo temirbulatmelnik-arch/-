@@ -1,3 +1,4 @@
+import { payrollReceiptParts } from './payrollReceipts';
 import { accountMovement, canonicalBook, cents, EMPTY_BOOK, LIFE_ACCOUNT, linkedExpenseId, recordedAfter, RESERVE_ACCOUNT, rubles, type AccountBook, type AccountOperation, type BankBalance } from './accounts';
 import { today } from './dates';
 import type { CalEvent, EventMark, Expense, ReserveMove } from './types';
@@ -27,7 +28,7 @@ export interface JournalReview {
 export function financialJournal(s: JournalInput) {
   const book = canonicalBook(s.accountBook ?? EMPTY_BOOK, s.expenses);
   const entries: JournalEntry[] = [...book.operations];
-  const linked = new Set(entries.flatMap(op => op.eventKey ? [op.eventKey] : []));
+  const linked = new Set([...entries.flatMap(op => op.eventKey ? [op.eventKey] : []), ...payrollReceiptParts(entries).keys()]);
   for (const [key, mark] of Object.entries(s.marks)) {
     if (!mark.done || linked.has(key) || !(mark.amount && mark.amount > 0)) continue;
     const one = s.oneOff.find(e => e.key === key);

@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { CheckCircle2, ChevronDown, TriangleAlert } from 'lucide-react';
 import { useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { compareCoverage, coverage, coverageHints, coverageInput, HORIZON_DAYS, NARROW, type Coverage, type CoverageInput, type CoverageStep, type Scenario } from '../domain/coverage';
+import { compareCoverage, coverage, coverageHints, coverageInput, discretionaryLiquidityCap, HORIZON_DAYS, NARROW, type Coverage, type CoverageInput, type CoverageStep, type Scenario } from '../domain/coverage';
 import { accountOptions, EMPTY_BOOK } from '../domain/accounts';
 import { addDays, dayMonth, ddmm, ddmmyyyy, monthName } from '../domain/dates';
 import { num } from '../domain/money';
@@ -37,6 +37,11 @@ export function useCoverage(override?: Scenario): { input: CoverageInput; cov: C
     }
     return { input: covCache.input, cov: covCache.cov, now };
   }, [cal, marks, expenses, led.reserve, led.incomeOnCard, led.heldOnCard, led.card, led.cashAccounts, led.reserveVerified, now, scenario]);
+}
+
+export function useDailyLiquidityCap() {
+  const { input, now } = useCoverage('cautious');
+  return useMemo(() => discretionaryLiquidityCap(input, now), [input, now]);
 }
 
 const W = 340, H = 132, PAD = 14;
@@ -125,7 +130,7 @@ export function CoverageCard() {
   return (
     <section className="mx-4 mt-4">
       <div className="mb-3"><Segmented value={scenario} onChange={scenario => set({ scenario })} options={[
-        { id: 'base', label: 'Базовый' }, { id: 'cautious', label: 'Осторожный' }, { id: 'stress', label: 'Стрессовый' },
+        { id: 'base', label: 'С премиями' }, { id: 'cautious', label: 'Осторожный' }, { id: 'stress', label: 'Стрессовый' },
       ]} /></div>
       <div className="deep-card px-5 pt-5 pb-4">
         <span aria-hidden="true" className="deep-sheen" />
@@ -178,7 +183,7 @@ export function CoverageCard() {
           {compareYear ? 'Показать первые 150 дней' : 'Показать до конца года'}
         </button>}
         {comparisons.map(row => <div className="border-t border-line py-2" key={row.scenario}>
-          <p>{{ base: 'Базовый', cautious: 'Осторожный', stress: 'Стрессовый' }[row.scenario]} · минимум <Money value={row.min} kopecks /> {ddmm(row.minDate)}</p>
+          <p>{{ base: 'С премиями', cautious: 'Осторожный', stress: 'Стрессовый' }[row.scenario]} · минимум <Money value={row.min} kopecks /> {ddmm(row.minDate)}</p>
           <p className="mt-1 text-muted">{row.assumptions}</p>
           {row.criticalDates.length > 0 && <ul className="mt-1 text-muted">{row.criticalDates.map(critical =>
             <li key={critical.date}>{ddmm(critical.date)} · {critical.title} · <Money value={critical.balance} kopecks /></li>)}</ul>}

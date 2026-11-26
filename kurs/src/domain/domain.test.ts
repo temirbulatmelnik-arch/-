@@ -22,7 +22,7 @@ import { quickSpends, yesterdaySet } from './quick';
 import { guessCategory, parseSpoken } from './spoken';
 import { isWorkday, workdayOnOrBefore } from './workdays';
 import { draft } from './statements';
-import { parseCsv, parseText } from './statements';
+import { parseBankTable, parseCsv, parseText } from './statements';
 import type { CalEvent, Debt, EventMark, Expense, PlanSeed } from './types';
 import { coverage, coverageHints, coverageInput, monthDays } from './coverage';
 import { open, seal } from './vault';
@@ -191,6 +191,24 @@ describe('выписки', () => {
     expect(r.map(x => [x.date, x.amount])).toEqual([['2026-10-22', 412], ['2026-10-21', 1234.56], ['2026-10-20', 50000]]);
     expect(r[0].category).toBe('taxi');
     expect(r[2].skip).toBe(true);
+  });
+  it('не превращает выписку только с зачислениями в расходы', () => {
+    const r = parseCsv('Дата;Сумма;Описание\n26.11.2026;+43783;Аванс\n')!;
+    expect(r.rows[0]).toMatchObject({ income: true, amount: 43783, skip: true });
+  });
+  it('разбирает направление, время и идентичность операций ВТБ независимо от формата таблицы', () => {
+    const titles = ['Дата операции', 'Описание', 'Направление', 'Сумма', 'Статус', 'Счёт', 'ID операции', 'Валюта'];
+    const captured = ['26.11.2026 19:40:00', 'Транспорт', 'Списание', '46,00', 'Проведена', 'Дебет', 'example-01', 'RUB'];
+    const csv = parseCsv([['Выписка ВТБ'], titles, captured].map(row => row.join(';')).join('\n'), 'csv-hash')!;
+    const xlsx = parseBankTable([
+      ['Выписка ВТБ'], titles,
+      [new Date(Date.UTC(2026, 10, 26, 19, 40)), ...captured.slice(1)],
+      ['26.11.2026', 'Ожидающее списание', 'Списание', 159, 'В обработке', 'Дебет', 'example-02', 'RUB'],
+      ['26.11.2026', 'Операция в валюте', 'Списание', 159, 'Проведена', 'Дебет', 'example-03', 'USD'],
+    ], 'xlsx-hash')!;
+    expect(xlsx).toMatchObject({ bank: 'vtb', rejected: 2 });
+    expect(xlsx.rows).toHaveLength(1);
+    expect(xlsx.rows[0]).toMatchObject({ income: false, amount: 46, category: 'transport', occurredAt: '2026-11-26T19:40:00+03:00', fingerprint: csv.rows[0].fingerprint });
   });
 });
 

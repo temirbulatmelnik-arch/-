@@ -93,6 +93,7 @@ export interface Ledger {
   /** из долга на кредитке моста — проценты по дням с последнего обновления остатка (сверки): банк начисляет их каждый
    *  день, поэтому credit больше, чем «сверка + траты с кредитки» */
   creditInterest: number;
+  totalCash: number | null;
   cashAccounts: (ReturnType<typeof accountProjection>[number] & { posted?: number | null; issues?: JournalReview[] })[];
   reserveVerified: boolean;
   debtBalances: Record<string, ReturnType<typeof debtProjection>>;
@@ -239,6 +240,8 @@ export function ledger(s: LedgerInput): Ledger {
     .map(d => ({ debt: d, expected: owed(d), accrued: accruedOnCard(d, now), bridge: d.id === creditCard?.id }));
 
   return {
+    totalCash: card == null || cashAccounts.some(account => account.expected == null) ? null
+      : rubles(cents(card) + cents(reserve) + cashAccounts.reduce((sum, account) => sum + cents(account.expected ?? 0), 0)),
     cashAccounts, reserveVerified: !!point, debtBalances, reconciliation,
     cardPosted: ref ? cardProjection.posted : null, reservePosted: point ? reserveProjection.posted : null,
     unclassifiedCredit: s.expenses.filter(e => e.source === 'credit' && !s.debts.some(d => d.kind === 'card' && d.id === e.creditCard)),
