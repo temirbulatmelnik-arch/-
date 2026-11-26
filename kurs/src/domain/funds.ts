@@ -1,4 +1,4 @@
-import { cents, kopecks, LIFE_ACCOUNT, RESERVE_ACCOUNT, rubles, type AccountOperation, type PaymentShare } from './accounts';
+import { cents, kopecks, LIFE_ACCOUNT, RESERVE_ACCOUNT, rubles, type AccountOperation, type PaymentBudget, type PaymentShare } from './accounts';
 import { federalHoliday, workdayOnOrBefore } from './workdays';
 import { addDays } from './dates';
 import type { CalEvent, EventMark, ReserveMove } from './types';
@@ -19,6 +19,13 @@ export function preparationInstant(date: string, time: string) {
 }
 
 export const weeklyTopUp = (limit: number, available: number) => rubles(Math.max(0, cents(limit) - cents(available)));
+
+export function paymentBudget(amount: number, held: number, remainder: 'weekly' | 'separate' | 'unknown' = 'unknown'): PaymentBudget {
+  const prepared = Math.min(Math.max(0, cents(held)), cents(amount));
+  const parts: PaymentBudget = { weekly: 0, prepared: rubles(prepared), separate: 0, unknown: 0 };
+  parts[remainder] = rubles(cents(amount) - prepared);
+  return parts;
+}
 
 export interface HeldPayment extends PaymentShare {
   date: string;
@@ -73,7 +80,7 @@ export function earmarks(operations: AccountOperation[], log: ReserveMove[], mar
     } else if (op.type === 'income' && op.pendingSweep && op.accountId !== RESERVE_ACCOUNT && op.fundingSource !== 'borrowed') {
       pending[op.accountId] = (pending[op.accountId] ?? 0) + cents(op.amount);
     } else if ((op.type === 'debt_payment' || op.type === 'expense') && (op.eventKey || op.partialFor)) {
-      change(op.accountId, [{ key: (op.eventKey ?? op.partialFor)!, amount: op.amount }], -1, op.date);
+      change(op.accountId, [{ key: (op.eventKey ?? op.partialFor)!, amount: op.budget?.prepared ?? op.amount }], -1, op.date);
     }
   }
   return { legacyUnmapped: rubles(legacyUnmapped), held: held.filter(row => row.amount > 0), pending: Object.fromEntries(Object.entries(pending).map(([id, amount]) => [id, rubles(amount)])), legacyDraw: Object.fromEntries(Object.entries(legacyDraw).map(([id, amount]) => [id, rubles(amount)])), unassignedLife: rubles(unassignedLife) };

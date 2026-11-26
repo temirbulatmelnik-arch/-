@@ -201,3 +201,30 @@ it('links a review payment idempotently, edits only notes, and waits for booked 
   expect(alert(after.marks).map(r => r.id)).not.toContain('check:check');
   expect(alert({ ...after.marks, 'expected-receipt': { done: true, at, paidDate: date, amount: 200 } }).map(r => r.id)).toContain('check:check');
 });
+
+it('переносит журнал из версии 8, оставляет неизменяемый снимок и повторно открывает копию', async () => {
+  storage.clear();
+  const first = { id: 'trip-1', amount: 95, source: 'life', category: 'transport', date: '2026-11-21', createdAt: at } as const;
+  const source = { ...old, expenses: [first, { ...first, id: 'trip-2' }], accountBook: { ...EMPTY_BOOK, paymentRouting: 'life' } };
+  const initial = JSON.stringify({ version: 8, state: source });
+  const firstOpen = await reopen(8, source);
+  const savedJournal = firstOpen.getState().accountBook;
+  const store = await reopen(8, source);
+  expect(store.getState().accountBook).toEqual(savedJournal);
+  expect(storage.get('kurs:before-0.9.0')).toBe(initial);
+  const current = store.getState();
+  expect(current.expenses).toEqual(source.expenses);
+  expect(current.accountBook.operations.map(op => op.id)).toEqual(['expense:trip-1', 'expense:trip-2']);
+  expect(ledger({ ...current, now: '2026-11-21' }).card).toBe(2810);
+  current.updateExpense('trip-2', { amount: 100 });
+  expect(ledger({ ...store.getState(), now: '2026-11-21' }).card).toBe(2805);
+  current.removeExpense('trip-1');
+  expect(ledger({ ...store.getState(), now: '2026-11-21' }).card).toBe(2900);
+  expect(store.getState().accountBook.expenseChanges?.map(change => change.before.id)).toEqual(['trip-2', 'trip-1']);
+  const backup = JSON.parse(current.exportData());
+  for (let i = 0; i < 2; i++) expect(current.importData(backup)).toBe(true);
+  const restarted = await reopen(9, store.getState());
+  expect(restarted.getState().accountBook.operations.map(op => op.id)).toEqual(['expense:trip-2']);
+  expect(ledger({ ...restarted.getState(), now: '2026-11-21' }).card).toBe(2900);
+  expect(storage.get('kurs:before-0.9.0')).toBe(initial);
+});

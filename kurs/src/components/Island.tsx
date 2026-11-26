@@ -1,3 +1,4 @@
+import { useLedger } from '../screens/Checkup';
 // «Остров» — как Dynamic Island на iPhone, из жидкого стекла (вариант «Тонированное» — решение владельца, DESIGN.md).
 // Когда шапка экрана уехала вверх, сверху выкатывается капсула: кольцо и сколько ещё можно сегодня. Нажатие — капсула
 // перетекает в панель: сегодня, неделя, ближайший платёж и быстрые действия. Свайп вверх, нажатие мимо или Escape —
@@ -9,9 +10,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEven
 import { useShallow } from 'zustand/react/shallow';
 import { eventsBetween } from '../domain/calendar';
 import { addDays, dayMonth } from '../domain/dates';
-import { dayBudget, weekSummary } from '../domain/summary';
+import { availableToday, dayBudget, weekSummary } from '../domain/summary';
 import { useStore } from '../store/store';
-import { useCal, useToday, useUi } from '../store/ui';
+import { useBudgetExpenses, useCal, useToday, useUi } from '../store/ui';
 import { haptic } from './haptics';
 import { Roll, usePan } from './motion';
 import { runQuick } from './TabBar';
@@ -33,7 +34,9 @@ function MiniRing({ frac, over, size, stroke = 3 }: { frac: number; over: boolea
 export function Island({ show }: { show: boolean }) {
   const now = useToday();
   const cal = useCal();
-  const [expenses, debts, overrides, marks] = useStore(useShallow(s => [s.expenses, s.debts, s.weeklyOverrides, s.marks] as const));
+  const expenses = useBudgetExpenses();
+  const { lifeAvailable } = useLedger();
+  const [debts, overrides, marks] = useStore(useShallow(s => [s.debts, s.weeklyOverrides, s.marks] as const));
   const set = useUi(s => s.set);
   const [open, setOpen] = useState(false);
   const b = useMemo(() => dayBudget(expenses, debts, overrides, now), [expenses, debts, overrides, now]);
@@ -41,7 +44,8 @@ export function Island({ show }: { show: boolean }) {
   const next = useMemo(() => eventsBetween(cal, addDays(now, -20), addDays(now, 10)).find(e => e.kind === 'payment' && !marks[e.key]?.done), [cal, now, marks]);
   // как кольцо на «Сегодня»: сколько ещё можно сегодня, без «минуса»; сверх нормы или лимит недели исчерпан — красным
   const over = b.mode !== 'ok';
-  const frac = b.day > 0 ? b.canSpend / b.day : 0;
+  const canSpend = availableToday(b, lifeAvailable);
+  const frac = b.day > 0 ? canSpend / b.day : 0;
   const act = (fn: () => void) => { setOpen(false); window.setTimeout(fn, 160); };
 
   // в документе — пока виден и пока уходит; ушёл — снимаем, чтобы стекло не размывало фон впустую.
@@ -119,7 +123,7 @@ export function Island({ show }: { show: boolean }) {
       <div aria-hidden="true" onClick={() => setOpen(false)}
         className={`fixed inset-0 z-[44] bg-[rgba(4,14,22,.22)] transition-opacity duration-300 ${open ? 'opacity-100' : 'pointer-events-none opacity-0'}`} />
       <div ref={el} role="button" tabIndex={0} aria-expanded={open}
-        aria-label={open ? 'Свернуть' : `${b.mode === 'week' ? 'Лимит недели исчерпан' : b.mode === 'day' ? 'Сегодня сверх нормы' : `Сегодня можно ${Math.round(b.canSpend)} ₽`}. Раскрыть`}
+        aria-label={open ? 'Свернуть' : `${b.mode === 'week' ? 'Лимит недели исчерпан' : b.mode === 'day' ? 'Сегодня сверх нормы' : `Сегодня можно ${Math.round(canSpend)} ₽`}. Раскрыть`}
         onClick={() => { if (!open) { setOpen(true); haptic(); } }}
         onKeyDown={e => { if (e.key === 'Enter' && e.target === e.currentTarget) setOpen(!open); }}
         onPointerDown={e => { light(e); pan.onPointerDown(e); }} onPointerMove={pan.onPointerMove}
@@ -136,7 +140,7 @@ export function Island({ show }: { show: boolean }) {
         <div className="lg-layer lg-fade pointer-events-auto overflow-hidden">
           <div ref={pill} className="lg-pill absolute top-0 left-0 flex h-11 items-center gap-2.5 pr-4 pl-2 whitespace-nowrap">
             <MiniRing frac={frac} over={over} size={30} />
-            <span className={`font-display text-[16px] font-medium ${over ? 'text-neg' : ''}`}><Roll value={b.canSpend} /></span>
+            <span className={`font-display text-[16px] font-medium ${over ? 'text-neg' : ''}`}><Roll value={canSpend} /></span>
             <span className="text-[12.5px] text-muted">{b.mode === 'week' ? (b.nextWeek ? 'до понедельника' : 'до воскресенья') : b.mode === 'day' ? 'сверх нормы' : 'сегодня'}</span>
           </div>
           <div ref={panel} className="lg-panel absolute top-0 left-0 px-[18px] pt-3 pb-[18px]" style={{ width: wide }}>
@@ -148,7 +152,7 @@ export function Island({ show }: { show: boolean }) {
               </div>
               <div className="min-w-0">
                 <div className="text-[12.5px] text-muted">{b.mode === 'week' ? 'Лимит недели исчерпан' : b.mode === 'day' ? <>Сегодня сверх нормы на <Money value={b.overDay} /></> : 'Сегодня можно ещё'}</div>
-                <div className={`font-display text-[30px] leading-tight font-medium ${over ? 'text-neg' : ''}`}><Roll value={b.canSpend} /></div>
+                <div className={`font-display text-[30px] leading-tight font-medium ${over ? 'text-neg' : ''}`}><Roll value={canSpend} /></div>
                 <div className="text-[12.5px] text-muted">
                   {b.mode === 'week' ? <>потрачено сегодня <Money value={b.spentToday} />{b.weekLeft < 0 && <>, перерасход недели <Money value={-b.weekLeft} /></>}</> : <>потрачено <Money value={b.spentToday} /> из <Money value={b.day} /></>}
                 </div>

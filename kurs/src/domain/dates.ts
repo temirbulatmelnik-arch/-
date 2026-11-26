@@ -7,7 +7,8 @@ export const fromKey = (k: string) => {
   const [y, m, d] = k.split('-').map(Number);
   return new Date(y, m - 1, d || 1);
 };
-export const today = () => toKey(new Date());
+const moscowDate = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Moscow', year: 'numeric', month: '2-digit', day: '2-digit' });
+export const today = (at = new Date()) => moscowDate.format(at);
 export const monthKey = (k: string) => k.slice(0, 7);
 
 export function addDays(k: string, n: number): string {

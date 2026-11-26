@@ -50,7 +50,9 @@ export function TodayDetails({ summary }: { summary?: boolean }) {
   const { budget: b, counted } = useTodaySpends();
   const set = useUi(s => s.set);
   const { lifeAvailable } = useLedger();
-  const note = lifeAvailable != null && b.mode === 'ok' && lifeAvailable < b.canSpend
+  const note = lifeAvailable == null && b.mode === 'ok'
+    ? { text: 'Для суммы, доступной сегодня, нужен остаток карты по банку.', over: false }
+    : lifeAvailable != null && b.mode === 'ok' && lifeAvailable < b.canSpend
     ? { text: `На неделю на карте свободно ${lifeAvailable.toLocaleString('ru-RU')} ₽.`, over: false }
     : dayNote(b);
   const edit = (e: Expense) => set({ today: false, add: { edit: e } });

@@ -63,6 +63,10 @@ export interface Expense {
   /** Фактический счёт для дебетовой покупки, если отличается от карты жизни или резерва. */
   accountId?: string;
   fundingSource?: 'own' | 'borrowed' | 'unknown';
+  /** Назначение расхода независимо от категории и банковского счёта. */
+  budgetScope?: 'weekly' | 'separate' | 'unknown';
+  /** Только для расчётного представления журнала. */
+  weeklyAmount?: number;
   occurredAt?: string;
   /** Кредитка, с которой прошла трата. Без id покупка требует классификации. */
   creditCard?: string;
@@ -268,6 +272,9 @@ export interface CardBalance {
   /** Сверенные деньги, назначение которых ещё требует выписки. */
   unmatchedOnCard?: number;
   operationIds?: string[];
+  kind?: 'available' | 'posted';
+  reason?: string;
+  excludedIds?: string[];
 }
 
 /** Исходные данные плана (зашифрованы в seed.enc.json) */

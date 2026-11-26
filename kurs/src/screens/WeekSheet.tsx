@@ -47,7 +47,7 @@ function Body({ monday }: { monday: string }) {
   return (
     <div className="space-y-4 pt-1">
       <section className="deep-card px-6 py-5">
-        <div className="text-[13px] text-card-muted">{r.left >= 0 ? 'Осталось на карте жизни' : 'Перерасход'}</div>
+        <div className="text-[13px] text-card-muted">{r.left >= 0 ? 'Осталось в недельном бюджете' : 'Перерасход'}</div>
         <Money value={Math.abs(r.left)} className={`figure mt-1 block text-[48px] leading-none ${r.left < 0 ? 'text-[#f2a596]' : ''}`} />
         <Bar value={r.limit ? r.spent / r.limit : 0} tone={r.left < 0 ? 'neg' : 'card'} onCard className="mt-5" />
         <div className="mt-3 flex justify-between text-[12.5px] text-card-muted">

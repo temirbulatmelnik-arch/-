@@ -2,9 +2,9 @@
 // Резервная копия — файл JSON (Настройки → Данные), календарь — файл .ics.
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { accountOptions, appendOperations, cents, kopecks, bookOperationAllowed, cashAccount, EMPTY_BOOK, LIFE_ACCOUNT, RESERVE_ACCOUNT, reversibleOperation, validAmount, validDate, validSplitDebit, validSplitPlan, validPayoffTerms, type PayoffTerms, type AccountBook, type AccountOperation, type BankBalance, type CashAccount, type SplitDebit, type SplitPlan } from '../domain/accounts';
+import { accountOptions, appendOperations, cents, kopecks, bookOperationAllowed, cashAccount, linkedExpenseId, expenseOperation, EMPTY_BOOK, LIFE_ACCOUNT, RESERVE_ACCOUNT, reversibleOperation, validAmount, validDate, validSplitDebit, validSplitPlan, validPayoffTerms, type PayoffTerms, type AccountBook, type AccountOperation, type BankBalance, type CashAccount, type SplitDebit, type SplitPlan } from '../domain/accounts';
 import { DEFAULT_MODEL } from '../domain/models';
-import { DEFAULT_PREPARATION_TIME, moscowClock, paymentShares, partialPayments, weeklyTopUp, type FundingMode } from '../domain/funds';
+import { DEFAULT_PREPARATION_TIME, moscowClock, paymentBudget, paymentShares, partialPayments, weeklyTopUp, type FundingMode } from '../domain/funds';
 import { coverageInput, safePrepayment } from '../domain/coverage';
 import { annuity, cashIncomeEvent, eventsBetween } from '../domain/calendar';
 import { addDays, monthKey, monthsBetween, toKey, today, weekStart } from '../domain/dates';
@@ -94,6 +94,8 @@ interface Actions {
   confirmWeeklyTransfer: (key: string, amount: number, date?: string) => boolean;
   savePayoffTerms: (id: string, terms: PayoffTerms) => boolean;
   saveOperation: (op: AccountOperation) => boolean;
+  linkPaymentExpense: (operationId: string, expenseId: string, budgetScope: 'weekly' | 'separate' | 'unknown') => boolean;
+  setPaymentFunding: (operationId: string, scope: 'weekly' | 'separate') => boolean;
   setPaymentAccount: (key: string, accountId: string) => void;
   saveSplitPlan: (plan: SplitPlan) => void;
   saveSplitDebit: (debit: SplitDebit) => void;
@@ -119,7 +121,7 @@ interface Actions {
   updateExpense: (id: string, patch: Partial<Expense>) => void;
   removeExpense: (id: string) => void;
   /** отметить событие календаря; для платежа по долгу остаток уменьшается на оценку погашения */
-  markEvent: (e: CalEvent, done: boolean, amount?: number, paidFrom?: EventMark['paidFrom'], details?: { accountId?: string; bankAt?: string; externalId?: string; bankVerified?: boolean; partialId?: string; principal?: number; interest?: number; fee?: number; paidDate?: string; payrollActual?: { gross?: number; tax?: number; otherWithheld?: number } }) => void;
+  markEvent: (e: CalEvent, done: boolean, amount?: number, paidFrom?: EventMark['paidFrom'], details?: { accountId?: string; bankAt?: string; externalId?: string; bankVerified?: boolean; budgetScope?: 'weekly' | 'separate' | 'unknown'; partialId?: string; principal?: number; interest?: number; fee?: number; paidDate?: string; payrollActual?: { gross?: number; tax?: number; otherWithheld?: number } }) => void;
   updateDebt: (id: string, patch: Partial<Debt>) => void;
   /** точная сумма/дата платежа из банка */
   setOverride: (key: string, o: Pick<CalendarOverride, 'amount' | 'date' | 'prepareOn'>) => void;
@@ -159,9 +161,17 @@ export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().to
 const nowIso = () => new Date().toISOString();
 
 const confirmation = (date: string) => ({
-  date, at: date === moscowClock().date ? nowIso() : undefined,
+  date, createdAt: nowIso(), at: date === moscowClock().date ? nowIso() : undefined,
   origin: 'manual' as const, status: 'confirmed' as const, fundingSource: 'own' as const,
 });
+
+/** Persist deterministic links while older backups can still reconstruct the same entries. */
+function withExpenses(book: AccountBook, expenses: Expense[]): AccountBook {
+  const explicit = book.operations.filter(op => !op.legacyExpense);
+  const linked = new Set(explicit.map(linkedExpenseId));
+  const entries = expenses.filter(e => e.amount > 0 && !linked.has(e.id)).map(e => expenseOperation(e, book));
+  return { ...book, operations: [...explicit, ...entries] };
+}
 
 const includedAt = (expenses: Expense[], date: string) => expenses.filter(e => e.date <= date).map(e => e.id);
 
@@ -170,7 +180,8 @@ const operationIdsAt = (book: AccountBook, date: string) =>
 
 function captureCardBalance(balance: CardBalance, expenses: Expense[], book: AccountBook): CardBalance {
   if (balance.at) return balance;
-  return { ...balance, ...(balance.date === today() ? { at: nowIso() } : {}), includedExpenseIds: includedAt(expenses, balance.date), operationIds: operationIdsAt(book, balance.date) };
+  return { ...balance, ...(balance.date === today() ? { at: nowIso() } : {}),
+    includedExpenseIds: balance.includedExpenseIds ?? includedAt(expenses, balance.date), operationIds: balance.operationIds ?? operationIdsAt(book, balance.date) };
 }
 
 /** Старые файлы обмена сохраняли время импорта только в журнале. */
@@ -270,6 +281,9 @@ export const useStore = create<State>()(
           next.savingsLog = [...s.savingsLog, { id: uid(), date: today(), amount: patch.savings - s.savings, note: 'Сверка из чата «Финансы»' }];
         }
         if (patch.debts) Object.assign(next, withSnapshot(patch.debts, s.snapshots));
+        if (patch.expenses || patch.accountBook && s.accountBook.operations.some(op => op.legacyExpense)) {
+          next.accountBook = withExpenses(next.accountBook ?? s.accountBook, next.expenses ?? s.expenses);
+        }
         if (summary != null) {
           const { imports, settings, planCode, ready, ...snapshot } = pickData(s);
           void settings; void planCode; void ready;
@@ -388,7 +402,12 @@ export const useStore = create<State>()(
         if (op.eventKey && op.type === 'loan_disbursement' && !s.marks[op.eventKey]?.done) return false;
         const operations = appendOperations(s.accountBook.operations, [op]);
         if (operations === s.accountBook.operations) return false;
-        set({ accountBook: { ...s.accountBook, operations } });
+        const marks = { ...s.marks };
+        if (op.eventKey && op.status === 'confirmed' && !('authorization' in op && op.authorization) && !marks[op.eventKey]?.done) {
+          marks[op.eventKey] = { done: true, at: op.createdAt ?? nowIso(), paidDate: op.date, amount: op.amount,
+            ...(op.type === 'expense' || op.type === 'debt_payment' ? { paidFrom: op.accountId === LIFE_ACCOUNT ? 'card' : 'reserve' } : {}) };
+        }
+        set({ accountBook: { ...s.accountBook, operations }, marks });
         return true;
       },
       setPaymentAccount: (key, accountId) => set(s => {
@@ -516,14 +535,61 @@ export const useStore = create<State>()(
         return { overrides };
       }),
 
-      addExpenses: items => set(s => ({
-        expenses: [...s.expenses, ...items.map(i => ({ ...i, id: uid(), createdAt: nowIso() }))].sort((a, b) => a.date.localeCompare(b.date)),
-      })),
-      updateExpense: (id, patch) => set(s => ({ expenses: s.expenses.map(e => (e.id === id ? { ...e, ...patch } : e)) })),
-      removeExpense: id => set(s => ({ expenses: s.expenses.filter(e => e.id !== id) })),
+      addExpenses: items => set(s => {
+        const expenses = [...s.expenses, ...items.filter(i => validAmount(i.amount) && i.amount > 0 && validDate(i.date))
+          .map(i => ({ ...i, id: uid(), createdAt: nowIso() }))].sort((a, b) => a.date.localeCompare(b.date));
+        return { expenses, accountBook: withExpenses(s.accountBook, expenses) };
+      }),
+      updateExpense: (id, patch) => set(s => {
+        const current = s.expenses.find(e => e.id === id);
+        const linked = s.accountBook.operations.some(op => !op.legacyExpense && linkedExpenseId(op) === id);
+        if (!current || linked) return {};
+        const next = { ...current, ...patch, id: current.id, createdAt: current.createdAt };
+        const refunds = s.accountBook.operations.filter(op => op.type === 'refund' && op.expenseId === id && op.status === 'confirmed');
+        if (!validAmount(next.amount) || next.amount <= 0 || !validDate(next.date) ||
+            refunds.some(op => op.date < next.date || next.source !== current.source || cashAccount(next) !== cashAccount(current) || next.creditCard !== current.creditCard) ||
+            refunds.reduce((sum, op) => sum + cents(op.amount), 0) > cents(next.amount)) return {};
+        const expenses = s.expenses.map(e => e.id === id ? next : e);
+        return { expenses, accountBook: withExpenses({ ...s.accountBook,
+          expenseChanges: [...(s.accountBook.expenseChanges ?? []), { at: nowIso(), before: current, after: next }] }, expenses) };
+      }),
+      removeExpense: id => set(s => {
+        if (s.accountBook.operations.some(op => !op.legacyExpense && (linkedExpenseId(op) === id ||
+            op.type === 'refund' && op.expenseId === id && op.status === 'confirmed'))) return {};
+        const current = s.expenses.find(e => e.id === id);
+        if (!current) return {};
+        const expenses = s.expenses.filter(e => e.id !== id);
+        return { expenses, accountBook: withExpenses({ ...s.accountBook,
+          expenseChanges: [...(s.accountBook.expenseChanges ?? []), { at: nowIso(), before: current }] }, expenses) };
+      }),
+      linkPaymentExpense: (operationId, expenseId, budgetScope) => {
+        const s = get();
+        const op = s.accountBook.operations.find(row => row.id === operationId);
+        const expense = s.expenses.find(row => row.id === expenseId);
+        if (op?.type !== 'expense' || !op.eventKey || op.expenseId || op.status !== 'confirmed' || !expense ||
+            cents(op.amount) !== cents(expense.amount) || op.date !== expense.date ||
+            s.accountBook.operations.some(row => !row.legacyExpense && linkedExpenseId(row) === expenseId)) return false;
+        const budget = paymentBudget(op.amount, op.budget?.prepared ?? 0, budgetScope);
+        const operations = s.accountBook.operations.map(row => row.id === operationId
+          ? { ...op, expenseId, note: expense.note ?? op.note, category: expense.category, budget } : row);
+        set({ accountBook: withExpenses({ ...s.accountBook, operations }, s.expenses) });
+        return true;
+      },
+      setPaymentFunding: (operationId, scope) => {
+        const s = get();
+        const op = s.accountBook.operations.find(row => row.id === operationId);
+        if (!op || op.status !== 'confirmed' || (op.type !== 'expense' && op.type !== 'debt_payment') || !op.budget?.unknown) return false;
+        const budget = { ...op.budget, unknown: 0, [scope]: kopecks(op.budget[scope] + op.budget.unknown) };
+        set({ accountBook: { ...s.accountBook, operations: s.accountBook.operations.map(row => row.id === operationId ? { ...op, budget } : row) } });
+        return true;
+      },
 
       markEvent: (e, done, amount, paidFrom, details) => {
         const state = get();
+        if (done && e.kind === 'weekly' && state.accountBook.paymentRouting === 'life' && details?.paidDate) {
+          state.confirmWeeklyTransfer(e.key, amount ?? e.amount, details?.paidDate);
+          return;
+        }
         const payment = state.accountBook.operations.find(op => op.eventKey === e.key && op.status === 'confirmed');
         if (!done && payment && reversibleOperation(payment)) { state.voidOperation(payment.id); return; }
         set(s => {
@@ -550,7 +616,10 @@ export const useStore = create<State>()(
             marks[e.key] = { done: true, amount: paid, at, paidDate: date, ...(e.kind === 'payment' ? { paidFrom: from } : {}) };
             if (e.kind === 'weekly') return { marks, ...topUpMove(s, e.key, paid) };
             const accountId = singleCard && !details?.externalId ? LIFE_ACCOUNT : details?.accountId ?? e.accountId ?? (from === 'card' ? LIFE_ACCOUNT : RESERVE_ACCOUNT);
-            const bookedAt = details?.bankAt ?? (date === moscowClock().date ? at : undefined);
+            const bookedAt = details?.bankAt ?? (!details?.externalId && date === moscowClock().date ? at : undefined);
+            const held = e.kind === 'payment' ? ledger({ ...s, now: moscowClock().date }).heldForPayments
+              .find(row => row.key === e.key && row.accountId === accountId)?.amount ?? 0 : 0;
+            const budget = paymentBudget(paid, held, details?.budgetScope ?? (accountId === RESERVE_ACCOUNT ? 'separate' : 'unknown'));
             const partialId = e.kind === 'payment' ? details?.partialId : undefined;
             const previouslyPaid = partialPayments(accountBook.operations).get(e.key) ?? 0;
             if (partialId && (cents(paid) <= 0 || cents(paid) >= cents(e.amount))) return {};
@@ -562,23 +631,29 @@ export const useStore = create<State>()(
             if (e.kind === 'payment' && (debt || e.key.startsWith('split-debit:'))) {
               const op: AccountOperation = {
                 ...link, type: 'debt_payment', debtId: debt?.id, accountId, amount: paid,
-                date, at: bookedAt, origin: 'manual', status: 'confirmed', fundingSource: 'unknown',
+                date, at: bookedAt, createdAt: at, origin: 'manual', status: 'confirmed', fundingSource: 'unknown', budget,
                 principal: details?.principal, interest: details?.interest, fee: details?.fee,
               };
               if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
-              accountBook = { ...accountBook, operations: appendOperations(accountBook.operations, [op]) };
+              const operations = appendOperations(accountBook.operations, [op]);
+              if (operations === accountBook.operations) return {};
+              accountBook = { ...accountBook, operations };
             }
             if (e.kind === 'payment' && !debt && !e.key.startsWith('split-debit:') && (singleCard || details?.accountId)) {
               const op: AccountOperation = { ...link, type: 'expense', amount: paid,
-                accountId, date, at: bookedAt, origin: 'manual', status: 'confirmed', fundingSource: 'unknown' };
+                accountId, date, at: bookedAt, createdAt: at, origin: 'manual', status: 'confirmed', fundingSource: 'unknown', budget };
               if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
-              accountBook = { ...accountBook, operations: appendOperations(accountBook.operations, [op]) };
+              const operations = appendOperations(accountBook.operations, [op]);
+              if (operations === accountBook.operations) return {};
+              accountBook = { ...accountBook, operations };
             }
             if (cashIncomeEvent(e) && (singleCard || e.accountId || e.nominalDate || e.incomeKind)) {
               const op: AccountOperation = { ...link, type: 'income', amount: paid,
-                accountId: details?.externalId ? accountId : singleCard ? LIFE_ACCOUNT : e.accountId ?? LIFE_ACCOUNT, date, at: bookedAt, origin: 'manual', status: 'confirmed', fundingSource: 'own', pendingSweep: true };
+                accountId: details?.externalId ? accountId : singleCard ? LIFE_ACCOUNT : e.accountId ?? LIFE_ACCOUNT, date, at: bookedAt, createdAt: at, origin: 'manual', status: 'confirmed', fundingSource: 'own', pendingSweep: true };
               if (!bookOperationAllowed(op, accountBook, debts, s.expenses)) return {};
-              accountBook = { ...accountBook, operations: appendOperations(accountBook.operations, [op]) };
+              const operations = appendOperations(accountBook.operations, [op]);
+              if (operations === accountBook.operations) return {};
+              accountBook = { ...accountBook, operations };
               if (work && e.nominalDate) {
                 const key = e.incomeKind === 'salary' || e.incomeKind === 'advance' || e.incomeKind === 'bonusMonthly'
                   ? `inc:${e.incomeKind}:${monthKey(e.nominalDate)}` : e.key;
@@ -654,7 +729,17 @@ export const useStore = create<State>()(
         return true;
       },
 
-      moveReserve: (amount, note, card, forKeys) => set(s => ({ reserve: s.reserve + amount, reserveLog: [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), amount, note, ...(card ? { card } : {}), ...(forKeys?.length ? { forKeys } : {}) }] })),
+      moveReserve: (amount, note, card, forKeys) => {
+        if (!validAmount(amount) || !cents(amount)) return;
+        const s = get();
+        const base = { id: uid(), amount: kopecks(Math.abs(amount)), note, ...confirmation(today()) };
+        if (card && cents(card) === -cents(amount) && !forKeys?.length) {
+          s.saveOperation({ ...base, type: 'transfer', accountId: card > 0 ? RESERVE_ACCOUNT : LIFE_ACCOUNT,
+            toAccountId: card > 0 ? LIFE_ACCOUNT : RESERVE_ACCOUNT, purpose: card > 0 ? 'unassigned' : 'sweep' });
+        } else if (!card) {
+          s.saveOperation({ ...base, accountId: RESERVE_ACCOUNT, type: amount < 0 ? 'expense' : 'adjustment', fundingSource: 'unknown' });
+        }
+      },
       setReserve: (balance, note) => set(s => ({ reserve: balance, reserveLog: [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), abs: true, operationIds: operationIdsAt(s.accountBook, today()), amount: balance - s.reserve, note }] })),
 
       addWish: w => set(s => ({ wishes: [...s.wishes, { ...w, id: uid(), createdAt: nowIso() }] })),
@@ -670,20 +755,32 @@ export const useStore = create<State>()(
       importData: raw => {
         const d = raw as Partial<Data> & { app?: string };
         if (!d || d.app !== 'kurs' || !Array.isArray(d.debts) || !Array.isArray(d.expenses)) return false;
-        set(s => ({ ...EMPTY, ...pickData({ ...EMPTY, ...d } as Data), fixed: withIds(d.fixed ?? []), accountBook: { ...(d.accountBook ?? EMPTY_BOOK), paymentRouting: 'life' }, cardBalance: restoreCardTime(d.cardBalance ?? null, d.imports ?? []), ready: true, planCode: s.planCode, settings: { ...DEFAULT_SETTINGS, ...d.settings, apiKey: s.settings.apiKey } }));
+        set(s => ({ ...EMPTY, ...pickData({ ...EMPTY, ...d } as Data), fixed: withIds(d.fixed ?? []),
+          accountBook: withExpenses({ ...(d.accountBook ?? EMPTY_BOOK), paymentRouting: 'life' }, d.expenses!),
+          cardBalance: restoreCardTime(d.cardBalance ?? null, d.imports ?? []), ready: true, planCode: s.planCode,
+          settings: { ...DEFAULT_SETTINGS, ...d.settings, apiKey: s.settings.apiKey } }));
         return true;
       },
       reset: () => set({ ...EMPTY }),
     }),
     {
       name: 'kurs',
-      version: 8,
+      version: 9,
       partialize: s => pickData(s),
       // версия 1: обязательные платежи без id — добавляем, остальное новые поля берут значения по умолчанию;
       // версия 2: файл из чата задваивал траты, уже внесённые под другим названием, — убираем копии один раз;
       // версия 3: подпись банка «Транспорт» записывалась в «кафе и досуг» — поправляем категорию
       migrate: (persisted, version) => {
         const p = persisted as Partial<Data>;
+        if (version === 8) {
+          const raw = window.localStorage.getItem('kurs');
+          if (raw) {
+            const key = 'kurs:before-0.9.0';
+            try {
+              if (window.localStorage.getItem(key) == null) window.localStorage.setItem(key, raw);
+            } catch { /* The additive adapter also reads the previous format directly. */ }
+          }
+        }
         if (version < 8) {
           try {
             const backup = 'kurs:before-0.7.1';
@@ -699,7 +796,9 @@ export const useStore = create<State>()(
           cleanedTwins = r.removed.length;
         }
         if (version < 4 && expenses) expenses = fixDefaultCategories(expenses);
-        return { ...p, expenses: expenses ?? [], accountBook: { ...(p.accountBook ?? EMPTY_BOOK), paymentRouting: 'life' }, fixed: withIds(p.fixed ?? []) } as State;
+        const accountBook = { ...(p.accountBook ?? EMPTY_BOOK), paymentRouting: 'life' as const };
+        return { ...p, expenses: expenses ?? [], accountBook: version === 8 ? withExpenses(accountBook, expenses ?? []) : accountBook,
+          fixed: withIds(p.fixed ?? []) } as State;
       },
       merge: (persisted, current) => {
         const p = persisted as Partial<Data> | undefined;
@@ -711,6 +810,12 @@ export const useStore = create<State>()(
 
 // расчёты плана (этапы, лимиты) читают цифры прямо из хранилища
 setPlanSource(() => useStore.getState().plan);
+
+if (typeof window !== 'undefined' && window.addEventListener) {
+  window.addEventListener('storage', event => {
+    if (event.key === 'kurs' && event.newValue) void useStore.persist.rehydrate();
+  });
+}
 
 function withIds(list: (Omit<FixedItem, 'id'> & { id?: string })[]): FixedItem[] {
   return list.map((f, i) => ({ ...f, id: f.id ?? `fixed-${i}` }));

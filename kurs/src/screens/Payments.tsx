@@ -21,7 +21,7 @@ import { actionableEvent, cashIncomeEvent, eventGroup, eventsBetween, type Event
 import { addDays, addMonths, dayMonth, ddmm, lastDay, monthKey, monthName, plural, weekday, weekdayFull, weekStart } from '../domain/dates';
 import type { CalEvent, EventMark } from '../domain/types';
 import { useStore } from '../store/store';
-import { useCal, useToday, useUi, type PayView } from '../store/ui';
+import { useBudgetExpenses, useCal, useToday, useUi, type PayView } from '../store/ui';
 import { useLedger } from './Checkup';
 import { exportCalendar } from './reminders';
 
@@ -153,7 +153,8 @@ function MonthView({ months, selected, onSelect, onShift, flip }: {
   flip: { current: ((dir: 1 | -1) => boolean) | null };
 }) {
   const now = useToday();
-  const [marks, expenses, debts, overrides, bridge] = useStore(useShallow(s => [s.marks, s.expenses, s.debts, s.weeklyOverrides, s.bridge] as const));
+  const expenses = useBudgetExpenses();
+  const [marks, debts, overrides, bridge] = useStore(useShallow(s => [s.marks, s.debts, s.weeklyOverrides, s.bridge] as const));
   const { month, days, events } = months[1];
   const top = topOf(days);
   // текущая неделя: сколько ещё на карте и с кредитки по мосту — вторая строка карточки дня

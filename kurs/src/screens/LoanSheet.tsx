@@ -6,7 +6,7 @@ import { Money, Row, SecondaryButton, Sheet } from '../components/ui';
 import { activeBridge, bridgeState, weekMoney, weekParts } from '../domain/bridge';
 import { addDays, ddmm, ddmmyyyy, weekStart } from '../domain/dates';
 import { useStore } from '../store/store';
-import { useToday, useUi } from '../store/ui';
+import { useBudgetExpenses, useToday, useUi } from '../store/ui';
 import { useLedger } from './Checkup';
 
 export function LoanSheet() {
@@ -22,7 +22,8 @@ export function LoanSheet() {
 function Body() {
   const now = useToday();
   const set = useUi(s => s.set);
-  const [expenses, debts, overrides, bridge] = useStore(useShallow(s => [s.expenses, s.debts, s.weeklyOverrides, s.bridge] as const));
+  const expenses = useBudgetExpenses();
+  const [debts, overrides, bridge] = useStore(useShallow(s => [s.debts, s.weeklyOverrides, s.bridge] as const));
   const led = useLedger();
   const st = useMemo(() => (activeBridge(bridge) ? bridgeState(expenses, bridge) : null), [expenses, bridge]);
   const week = useMemo(() => weekMoney(expenses, debts, overrides, bridge, weekStart(now)), [expenses, debts, overrides, bridge, now]);

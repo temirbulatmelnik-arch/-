@@ -245,7 +245,8 @@ export function screenshotDuplicate(row: ScreenshotRow, expenses: Expense[], boo
   const expense = expenses.find(e => e.date === row.date && cents(e.amount) === amount &&
     (cashAccount(e) ?? e.creditCard) === account && ['purchase', 'credit'].includes(row.kind) &&
     (!key || !e.note || merchantName(e.note).includes(key) || key.includes(merchantName(e.note))));
-  const operation = book.operations.find(op => op.status === 'confirmed' && op.date === row.date &&
-    cents(op.amount) === amount && op.accountId === account && !['purchase', 'credit', 'unknown'].includes(row.kind));
+  const operation = book.operations.find(op => !op.legacyExpense && op.status === 'confirmed' && op.date === row.date &&
+    cents(op.amount) === amount && op.accountId === account &&
+    (row.kind === 'refund' ? op.type === 'refund' : !['purchase', 'credit', 'unknown'].includes(row.kind)));
   return expense || operation || marked ? { exact: false, expense, operation, label: marked ? marked.title : undefined } : null;
 }

@@ -12,7 +12,7 @@ import { haptic } from '../components/haptics';
 import { Roll, spring } from '../components/motion';
 import { QUICK_COLOR, runQuick } from '../components/TabBar';
 import { CAT_COLOR, Money } from '../components/ui';
-import { countsWeekly } from '../domain/accounts';
+import { rubles, weeklyExpenseCents } from '../domain/accounts';
 import { cashIncomeEvent, eventsBetween } from '../domain/calendar';
 import { activeBridge, bridgeState } from '../domain/bridge';
 import { addDays, dayMonth, ddmm, fromKey, monthKey, plural, weekdayFull, weekRange } from '../domain/dates';
@@ -21,7 +21,7 @@ import { rub } from '../domain/money';
 import { quickSpends, yesterdaySet, type QuickSpend } from '../domain/quick';
 import { DEFAULT_SPEND_SOURCE, spendEffect } from '../domain/sources';
 import { CATEGORY, currentPhase, phaseByDate } from '../domain/plan';
-import { dayBudget, monthByCategory, weekSummary } from '../domain/summary';
+import { availableToday, dayBudget, monthByCategory, weekSummary } from '../domain/summary';
 import { weekReport, weekToClose } from '../domain/weekly';
 import { useStore } from '../store/store';
 import { toast, useBudgetExpenses, useCal, useMoscowClock, useToday, useUi, withUndo } from '../store/ui';
@@ -200,7 +200,7 @@ export function Week() {
             {/* сколько на самом деле на карте (по учёту): остаток не сгорает, а уменьшает воскресное пополнение. При перерасходе
                 через кредитку моста на карте может остаться плюс — это нормально */}
           </div>
-          <DayRing day={today.day} canSpend={led.lifeAvailable == null ? today.canSpend : Math.min(today.canSpend, led.lifeAvailable)} mode={today.mode} overDay={today.overDay} nextWeek={today.nextWeek} onClick={() => ui.set({ today: true })}
+          <DayRing day={today.day} canSpend={availableToday(today, led.lifeAvailable)} mode={today.mode} overDay={today.overDay} nextWeek={today.nextWeek} onClick={() => ui.set({ today: true })}
             scrubMax={Math.max(1000, Math.ceil(Math.max(today.day * 2.5, 0) / 500) * 500)} onScrub={setWhatIf} onCommit={amount => ui.set({ add: { amount } })} />
         </div>
         {whatIf != null && (
@@ -285,7 +285,7 @@ function Lamps({ monday, todayIdx, limit, dayNorm }: { monday: string; todayIdx:
   const strip = useRef<HTMLDivElement>(null);
   const spent = useMemo(() => [0, 1, 2, 3, 4, 5, 6].map(i => {
     const d = addDays(monday, i);
-    return expenses.filter(e => e.date === d && countsWeekly(e)).reduce((s, e) => s + e.amount, 0);
+    return rubles(expenses.filter(e => e.date === d).reduce((sum, e) => sum + weeklyExpenseCents(e), 0));
   }), [expenses, monday]);
   useEffect(() => {
     if (open == null || scrub) return;

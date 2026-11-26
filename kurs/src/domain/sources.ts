@@ -33,8 +33,8 @@ const r = (n: number) => `${num(Math.abs(n))} ₽`;
  * Что будет после записи траты — одной строкой под суммой. amount = 0 — что сейчас. skipId — правим эту трату:
  * её прежняя сумма не считается. reserve — резерв по учёту.
  */
-export function spendEffect(s: SpendState, x: { amount: number; source: Source; date: string; now: string; reserve: number; skipId?: string; creditCard?: string; category?: Expense['category']; accountId?: string }): SpendEffect {
-  const draft: Expense = { id: '~', date: x.date, amount: x.amount, category: x.category ?? 'fun', source: x.source, accountId: x.accountId, creditCard: x.creditCard ?? s.bridge?.card, createdAt: '' };
+export function spendEffect(s: SpendState, x: { amount: number; source: Source; date: string; now: string; reserve: number; skipId?: string; creditCard?: string; category?: Expense['category']; budgetScope?: Expense['budgetScope']; accountId?: string }): SpendEffect {
+  const draft: Expense = { id: '~', date: x.date, amount: x.amount, category: x.category ?? 'fun', budgetScope: x.budgetScope, source: x.source, accountId: x.accountId, creditCard: x.creditCard ?? s.bridge?.card, createdAt: '' };
   if (cashAccount(draft) === RESERVE_ACCOUNT) {
     const budget = countsWeekly(draft) ? 'Трата входит в недельный бюджет' : 'Вне недельного лимита';
     return { text: `Из резерва: останется ${r(x.reserve - x.amount)}. ${budget}`, tone: 'rsv' };

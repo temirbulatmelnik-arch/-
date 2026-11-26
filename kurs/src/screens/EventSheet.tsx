@@ -35,6 +35,7 @@ function Body({ e }: { e: CalEvent }) {
   const prepTime = DEFAULT_PREPARATION_TIME;
   const assigned = mark?.done ? e.accountId : LIFE_ACCOUNT;
   const prepared = led.heldForPayments.find(row => row.key === e.key && row.accountId === assigned);
+  const [paymentScope, setPaymentScope] = useState<'weekly' | 'separate' | 'unknown'>('unknown');
   const [partial, setPartial] = useState(false);
   const [partialId] = useState(uid);
   const override = useStore(s => s.overrides[e.key]);
@@ -59,6 +60,8 @@ function Body({ e }: { e: CalEvent }) {
   });
   const [editing, setEditing] = useState(false);
   const book = useStore(s => s.accountBook);
+  const payment = mark?.done ? book.operations.find(row => row.eventKey === e.key && row.status === 'confirmed' &&
+    (row.type === 'debt_payment' || row.type === 'expense') && row.budget?.unknown) : undefined;
   const account = assigned ?? LIFE_ACCOUNT;
   const prep = paymentPreparations([{ ...e, accountId: assigned, prepareOn: addDays(e.date, -1) }], mark ? { [e.key]: mark } : {}, led.heldForPayments, led.reserve)[0];
   const from = account === LIFE_ACCOUNT ? 'card' : 'reserve';
@@ -84,7 +87,7 @@ function Body({ e }: { e: CalEvent }) {
     if (pay?.documented && !bankVerified) return;
     if (e.kind === 'payment' && partial && value >= e.amount) { toast('Для частичного платежа введите меньшую сумму'); return; }
     if (isBonus(e) && !e.nominalDate && e.economicType !== 'loan_disbursement') { set({ event: null, bonus: { event: { ...e, amount: value } } }); return; }
-    markEvent(e, true, value, from, { accountId: account || undefined, bankVerified, partialId: partial ? partialId : undefined, principal: parseAmount(principal) ?? undefined,
+    markEvent(e, true, value, from, { accountId: account || undefined, bankVerified, budgetScope: paymentScope, partialId: partial ? partialId : undefined, principal: parseAmount(principal) ?? undefined,
       interest: parseAmount(interest) ?? undefined, fee: parseAmount(fee) ?? undefined, paidDate,
       ...(gross || withheld || otherWithheld ? { payrollActual: { gross: parseAmount(gross) ?? undefined,
         tax: parseAmount(withheld) ?? undefined, otherWithheld: parseAmount(otherWithheld) ?? undefined } } : {}),
@@ -177,6 +180,15 @@ function Body({ e }: { e: CalEvent }) {
           transfer: { kind: 'return', held: { ...row, amount: mark?.done || row.accountId !== assigned ? row.amount : row.amount - e.amount } } })}>
           Вернуть остаток в резерв <Money value={mark?.done || row.accountId !== assigned ? row.amount : row.amount - e.amount} kopecks />
         </SecondaryButton>)}
+      {!locked && !mark?.done && e.kind === 'payment' && value > (prepared?.amount ?? 0) && (
+        <label className="card block p-3 text-[13px]">{prepared?.amount ? 'Источник оставшейся части' : 'Источник оплаты'}
+          <select className="field mt-1" value={paymentScope} onChange={event => setPaymentScope(event.target.value as typeof paymentScope)}>
+            <option value="unknown">Уточню при сверке</option>
+            <option value="weekly">Из недельных денег</option>
+            <option value="separate">Оплачено отдельно</option>
+          </select>
+        </label>
+      )}
       {locked ? (
         <div className="space-y-2"><p className="rounded-2xl bg-surface-2 px-4 py-3 text-[14px] text-muted">
           {e.economicType === 'loan_disbursement' ? 'Подтверждённое заёмное поступление. В доходы не входит.'
@@ -191,6 +203,11 @@ function Body({ e }: { e: CalEvent }) {
           <p className="rounded-2xl bg-pos/10 px-4 py-3 text-[14px] text-pos">
             {e.kind === 'income' ? 'Пришло' : e.kind === 'weekly' ? 'Долито' : 'Оплачено'}: {rub(mark.amount ?? e.amount)}
           </p>
+          {payment && <div className="card space-y-2 p-3 text-[13px]">
+            <p>Уточните источник части платежа, которая была без подготовки.</p>
+            <SecondaryButton onClick={() => { if (useStore.getState().setPaymentFunding(payment.id, 'weekly')) toast('Учтено в недельном бюджете'); }}>Из недельных денег</SecondaryButton>
+            <SecondaryButton onClick={() => { if (useStore.getState().setPaymentFunding(payment.id, 'separate')) toast('Отмечено как отдельная оплата'); }}>Оплачено отдельно</SecondaryButton>
+          </div>}
           {(e.kind !== 'weekly' || !book.operations.some(op => op.type === 'transfer' && op.purpose === 'weekly' && op.eventKey === e.key)) && <SecondaryButton onClick={() => { markEvent(e, false); if (useStore.getState().marks[e.key]?.done) { toast('Операция уже вошла в сверку или использована'); return; } toast('Отметка снята'); close(); }} className="w-full"><Undo2 size={16} strokeWidth={1.5} /> Снять отметку</SecondaryButton>}
         </>
       ) : editing ? (

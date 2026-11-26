@@ -1,7 +1,7 @@
 // Покрытие обязательных платежей: хватит ли резерва на кредиты, рассрочку, Сплит, минималки и обязательные платежи.
 // Платежи по долгам гасятся только реальными деньгами (резерв и поступления), кредитка никогда не источник платежа.
 // Регулировать можно только недельные деньги на жизнь: пополнение карты и мост на кредитке.
-import { accountMovement, cents, LIFE_ACCOUNT, RESERVE_ACCOUNT, rubles } from './accounts';
+import { accountMovement, cents, LIFE_ACCOUNT, RESERVE_ACCOUNT, rubles, type AccountOperation } from './accounts';
 import { activeBridge, bridgeState, type Bridge } from './bridge';
 import { cashIncomeEvent, eventsBetween, incomeStatus, type CalendarInput, type IncomeStatus } from './calendar';
 import { addDays, daysBetween, ddmm, lastDay, monthKey } from './dates';
@@ -82,6 +82,7 @@ export interface CoverageInput {
   lifeAvailable?: number | null;
   held?: HeldPayment[];
   pending?: Record<string, number>;
+  unresolvedCash?: boolean;
 }
 
 /**
@@ -91,9 +92,10 @@ export interface CoverageInput {
  * потраченными до нуля: из резерва уходит только воскресное пополнение карты (в неделю моста — fromReserve), траты с
  * кредитки моста резерв не уменьшают — они растят долг по кредитке.
  */
-export function coverageInput(s: CalendarInput & { marks: Record<string, EventMark>; expenses: Expense[] }, led: Pick<Ledger, 'reserve' | 'incomeOnCard' | 'heldOnCard'> & Partial<Pick<Ledger, 'card' | 'reserveVerified' | 'cashAccounts' | 'lifeAvailable' | 'heldForPayments' | 'pendingSweepToReserve'>>): CoverageInput {
+export function coverageInput(s: CalendarInput & { marks: Record<string, EventMark>; expenses: Expense[] }, led: Pick<Ledger, 'reserve' | 'incomeOnCard' | 'heldOnCard'> & Partial<Pick<Ledger, 'card' | 'reserveVerified' | 'cashAccounts' | 'lifeAvailable' | 'heldForPayments' | 'pendingSweepToReserve' | 'reconciliation'>>): CoverageInput {
   return { cal: s, marks: s.marks, reserve: led.reserve + led.incomeOnCard + led.heldOnCard, debts: s.debts, expenses: s.expenses, bridge: s.bridge ?? null,
     reserveEstimate: led.reserve, lifeAvailable: led.lifeAvailable, held: led.heldForPayments, pending: led.pendingSweepToReserve,
+    unresolvedCash: led.reconciliation?.some(issue => issue.kind === 'possible_duplicate' || issue.kind === 'snapshot_order'),
     cash: s.accountBook ? { [LIFE_ACCOUNT]: led.card ?? null, [RESERVE_ACCOUNT]: led.reserveVerified ? led.reserve : null,
       ...Object.fromEntries((led.cashAccounts ?? []).map(a => [a.id, a.expected])) } : undefined };
 }
@@ -242,6 +244,17 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
       if (id === RESERVE_ACCOUNT) dayLow = Math.min(dayLow ?? value, value + delta);
     }
   };
+  const projectTransfer = (op: Extract<AccountOperation, { type: 'transfer' }>) => {
+    const posted = { ...op, status: 'confirmed' as const };
+    move(op.accountId, accountMovement(posted, op.accountId));
+    move(op.toAccountId, accountMovement(posted, op.toAccountId));
+  };
+  const projectCash = (accountId: string | undefined, date: string, delta: number) => {
+    if (!accountId || !delta) return;
+    const operation: AccountOperation = { id: 'projection', type: delta > 0 ? 'income' : 'expense',
+      amount: rubles(Math.abs(delta)), date, accountId, origin: 'manual', status: 'confirmed', fundingSource: 'unknown' };
+    move(accountId, accountMovement(operation, accountId));
+  };
   const requireMoney = (id: string | undefined, amount: number, date: string, title: string) => {
     const available = balanceOn(id);
     if (!accountRisk && (available == null || available < amount)) {
@@ -259,7 +272,7 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
   if (deduction) {
     const amount = cents(deduction.amount);
     requireMoney(deduction.accountId, amount, from, 'Досрочное погашение');
-    move(deduction.accountId, -amount);
+    projectCash(deduction.accountId, from, -amount);
     push({ date: from, title: 'Досрочное погашение', kind: 'payment', accountId: deduction.accountId }, -amount);
   }
   const byDate = new Map<string, CalEvent[]>();
@@ -285,8 +298,8 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
     transferFunding.push({ id: `sweep:${id}`, date, fromAccountId: LIFE_ACCOUNT, toAccountId: RESERVE_ACCOUNT, amount: rubles(amount),
       available: available == null ? null : rubles(available), status });
     if (status === 'projected') {
-      move(LIFE_ACCOUNT, -amount);
-      move(RESERVE_ACCOUNT, amount);
+      projectTransfer({ id, date, amount: rubles(amount), type: 'transfer', accountId: LIFE_ACCOUNT,
+        toAccountId: RESERVE_ACCOUNT, purpose: 'sweep', fundingSource: 'own', origin: 'manual', status: 'planned' });
     }
   };
   const transfers = (book?.operations ?? []).filter(op => op.type === 'transfer' && op.status === 'planned' && !(singleCard && op.purpose) && op.date >= from && op.date <= to);
@@ -299,12 +312,12 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
       const accountId = singleCard ? LIFE_ACCOUNT : book?.paymentAccounts['bridge-repayment'];
       const fundedFrom = singleCard ? RESERVE_ACCOUNT : accountId;
       requireMoney(fundedFrom, cents(-step.delta), date, step.title);
-      move(fundedFrom, cents(step.delta));
+      projectCash(fundedFrom, date, cents(step.delta));
       push({ date, title: step.title, kind: 'bridge', accountId }, cents(step.delta));
     }
     if (stress?.date === date) {
       requireMoney(stress.accountId, cents(stress.amount), date, 'Непредвиденный необходимый расход');
-      move(stress.accountId, -cents(stress.amount));
+      projectCash(stress.accountId, date, -cents(stress.amount));
       push({ date, title: 'Непредвиденный необходимый расход', kind: 'payment', accountId: stress.accountId }, -cents(stress.amount));
     }
     // Утренний автоплатёж должен быть обеспечен до зачислений и плановых переводов этого же дня.
@@ -315,8 +328,8 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
         if (weeklyCash != null) weeklyCash -= existing;
         const topUp = target - existing;
         if (topUp > 0) requireMoney(RESERVE_ACCOUNT, topUp, date, e.title);
-        move(RESERVE_ACCOUNT, -topUp);
-        move(LIFE_ACCOUNT, -existing);
+        projectCash(RESERVE_ACCOUNT, date, -topUp);
+        projectCash(LIFE_ACCOUNT, date, -existing);
         push({ date, title: 'Необходимые расходы недели', kind: 'weekly', key: e.key, accountId: RESERVE_ACCOUNT }, -target);
         continue;
       }
@@ -352,10 +365,10 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
         shortfall: unverifiedFunding || available == null ? null : rubles(Math.max(0, amount - available)), prepareBy: group?.remindDate ?? addDays(e.date, -1),
         ...(group ? { held: group.prepared, fromReserve: unverifiedFunding ? null : group.toFund, inTransit: group.inTransit, reserveShortfall: unverifiedFunding ? undefined : group.reserveShortfall } : {}) });
       if (group?.accountId && group.accountId !== RESERVE_ACCOUNT) {
-        move(group.accountId, -(available ?? 0));
-        move(LIFE_ACCOUNT, -cents(group.inTransit));
-        move(RESERVE_ACCOUNT, -cents(group.toFund ?? 0));
-      } else move(e.accountId, -amount);
+        projectCash(group.accountId, date, -(available ?? 0));
+        projectCash(LIFE_ACCOUNT, date, -cents(group.inTransit));
+        projectCash(RESERVE_ACCOUNT, date, -cents(group.toFund ?? 0));
+      } else projectCash(e.accountId, date, -amount);
       push({ date, title: e.title, kind: e.kind, key: e.key, accountId: e.accountId, approx: e.approx, confidence: e.confidence }, -amount);
     }
     for (const op of transfers.filter(op => op.date === date)) {
@@ -365,13 +378,12 @@ function runAccounts(input: CoverageInput, from: string, to: string, scenario: S
       transferFunding.push({ id: op.id, date, fromAccountId: op.accountId, toAccountId: op.toAccountId, amount: op.amount,
         available: available == null ? null : rubles(available), status });
       if (status !== 'projected') continue;
-      move(op.accountId, accountMovement(op, op.accountId));
-      move(op.toAccountId, accountMovement(op, op.toAccountId));
+      projectTransfer(op);
     }
     if (date === from) forecastSweep('pending', date, cents(input.pending?.[LIFE_ACCOUNT] ?? 0));
     for (const e of day.filter(x => x.kind === 'income')) {
       const accountId = e.accountId ?? LIFE_ACCOUNT;
-      move(accountId, cents(e.amount));
+      projectCash(accountId, date, cents(e.amount));
       push({ date, title: e.title, kind: 'income', key: e.key, accountId, approx: e.approx, confidence: e.confidence,
         incomeStatus: incomeStatus(e) }, cents(e.amount));
       if (accountId === LIFE_ACCOUNT) forecastSweep(e.key, date, cents(e.amount));
@@ -415,6 +427,7 @@ export function scenarioInput(input: CoverageInput, scenario: Scenario): Coverag
 }
 
 export function safePrepayment(input: CoverageInput, from: string, accountId: string): number {
+  if (input.unresolvedCash) return 0;
   if (input.held !== undefined && accountId === LIFE_ACCOUNT) return 0;
   const bank = input.cash?.[accountId];
   const available = input.held !== undefined && accountId !== RESERVE_ACCOUNT

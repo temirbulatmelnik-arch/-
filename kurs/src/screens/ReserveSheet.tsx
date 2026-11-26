@@ -25,12 +25,13 @@ type Mode = 'out' | 'in' | 'set';
 function Body() {
   const now = useToday();
   const [log, debts, moveReserve, setReserve, operations] = useStore(useShallow(s => [s.reserveLog, s.debts, s.moveReserve, s.setReserve, s.accountBook.operations]));
-  const { reserve } = useLedger();
+  const led = useLedger();
+  const { reserve } = led;
   const recent = [...log, ...operations.filter(op => op.status === 'confirmed' && op.date <= now &&
-    op.type === 'transfer' && op.purpose && accountMovement(op, RESERVE_ACCOUNT) !== 0).map(op => ({
+    !op.legacyExpense && accountMovement(op, RESERVE_ACCOUNT) !== 0).map(op => ({
       id: `bank:${op.id}`, date: op.date, at: op.at, amount: rubles(accountMovement(op, RESERVE_ACCOUNT)),
       note: op.type === 'transfer' && op.purpose === 'weekly' ? 'Пополнение недели' : op.type === 'transfer' && op.purpose === 'sweep'
-        ? 'Перевод полученного дохода' : op.type === 'transfer' && op.purpose === 'return' ? 'Возврат остатка' : 'Подготовка платежа',
+        ? 'Перевод полученного дохода' : op.type === 'transfer' && op.purpose === 'return' ? 'Возврат остатка' : op.note ?? 'Банковская операция',
     }))].sort((a, b) => (b.at ?? b.date).localeCompare(a.at ?? a.date)).slice(0, 30);
   const [mode, setMode] = useState<Mode>('out');
   const [amount, setAmount] = useState('');
@@ -55,6 +56,9 @@ function Body() {
       <div className="card p-5">
         <div className="text-[13px] font-medium text-muted">Сейчас</div>
         <Money value={reserve} kopecks className="figure mt-1 block text-[40px] leading-none" />
+        {led.reservePosted != null && led.reservePosted !== reserve && <p className="text-[13px] text-muted">Проведённый остаток <Money value={led.reservePosted} kopecks /></p>}
+        {log.filter(row => row.abs).at(-1) && <p className="mt-1 text-[13px] text-muted">Последняя сверка · {ddmm(log.filter(row => row.abs).at(-1)!.date)}</p>}
+        {led.reconciliation.some(issue => issue.accountId === RESERVE_ACCOUNT) && <p className="mt-1 text-[13px] text-warn">У части операций резерва требуется сверка даты или источника.</p>}
         <p className={`mt-2 text-[13.5px] leading-snug ${reserve < need ? 'text-warn' : 'text-muted'}`}>
           До премии {monthIn(next)} резерв должен держать ≈ {rub(need)}: {rub(RESERVE_BUFFER)} на непредвиденное и нехватку зарплаты за {[month, ...months].length} мес.
           {reserve < need ? ' Сейчас меньше — трать строго по недельному лимиту.' : ''}

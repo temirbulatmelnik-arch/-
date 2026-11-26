@@ -1,18 +1,17 @@
 // Учёт по счетам банка: сколько должно быть на карте жизни (мастер-счёт), в резерве (накопительный) и долга на
 // кредитке моста — от последней сверки. В воскресенье вечером человек вводит, что видит в банке, приложение сравнивает
 // и считает, сколько перевести между картой и резервом.
-import { accountMovement, accountProjection, cents, kopecks, cashAccount, debtProjection, EMPTY_BOOK, LIFE_ACCOUNT, recordedAfter, RESERVE_ACCOUNT, rubles, type AccountBook, type AccountOperation, type BankBalance } from './accounts';
+import { accountMovement, accountProjection, cents, kopecks, debtProjection, EMPTY_BOOK, LIFE_ACCOUNT, recordedAfter, RESERVE_ACCOUNT, rubles, type AccountBook, type AccountOperation } from './accounts';
 import { activeBridge, bridgeWeek, weekMoney, type Bridge } from './bridge';
 import { addDays, daysBetween, today } from './dates';
 import { earmarks, partialPayments, type HeldPayment } from './funds';
 import { eventsBetween, type CalendarInput } from './calendar';
 import { weeklyLimit } from './plan';
+import { financialJournal, journalAccount, journalEntryAfter, journalReview, type JournalAnchor, type JournalReview } from './journal';
 import type { CalEvent, CardBalance, Debt, EventMark, Expense, ReserveMove, WeeklyOverride } from './types';
 
 /** разница в пределах рубля — сошлось */
 export const MATCH = 1;
-
-const BONUS = new Set(['bonusQuarter', 'bonusYear', 'vacation', 'thirteenth']);
 
 export interface Checkup {
   id: string;
@@ -94,10 +93,13 @@ export interface Ledger {
   /** из долга на кредитке моста — проценты по дням с последнего обновления остатка (сверки): банк начисляет их каждый
    *  день, поэтому credit больше, чем «сверка + траты с кредитки» */
   creditInterest: number;
-  cashAccounts: ReturnType<typeof accountProjection>;
+  cashAccounts: (ReturnType<typeof accountProjection>[number] & { posted?: number | null; issues?: JournalReview[] })[];
   reserveVerified: boolean;
   debtBalances: Record<string, ReturnType<typeof debtProjection>>;
   unclassifiedCredit: Expense[];
+  reconciliation: JournalReview[];
+  cardPosted: number | null;
+  reservePosted: number | null;
 }
 
 export function fundingBalanceKnown(led: Pick<Ledger, 'card' | 'reserveVerified' | 'cashAccounts'>, id: string) {
@@ -105,24 +107,13 @@ export function fundingBalanceKnown(led: Pick<Ledger, 'card' | 'reserveVerified'
     : led.cashAccounts.some(account => account.id === id && account.expected != null);
 }
 
-const endOfDay = (date: string) => `${date}T23:59:59.999`;
+const endOfDay = (date: string) => `${date}T23:59:59.999+03:00`;
 
-/** трата после точки: позже дня отсчёта; в сам день — только внесённая руками после сверки */
-const after = (e: Expense, at: string, date: string) => e.date > date || (e.date === date && (e.occurredAt ? Date.parse(e.occurredAt) > Date.parse(at) : e.origin === 'manual' && e.createdAt > at));
+type CardRef = JournalAnchor & { at: string; dateOnly?: boolean; unmatchedOnCard?: number };
 
-type CardRef = { at: string; date: string; amount: number; dateOnly?: boolean; includedExpenseIds?: string[]; operationIds?: string[]; unmatchedOnCard?: number };
-
-const fromBalance = (b: CardBalance): CardRef => ({ ...b, at: b.at ?? endOfDay(b.date), dateOnly: !b.at });
-const fromCheckup = (c: Checkup): CardRef => ({ at: c.at, date: c.date, amount: c.after.card, operationIds: c.operationIds, unmatchedOnCard: c.unmatchedOnCard });
+const fromBalance = (b: CardBalance): CardRef => ({ ...b, at: b.at ?? endOfDay(b.date), dateOnly: !b.at, includedIds: b.operationIds });
+const fromCheckup = (c: Checkup): CardRef => ({ at: c.at, date: c.date, amount: c.after.card, includedIds: c.operationIds, unmatchedOnCard: c.unmatchedOnCard });
 const time = (at: string) => Date.parse(at);
-
-function afterCard(e: Expense, ref: CardRef, included: Set<string>): boolean {
-  if (included.has(e.id) || e.date < ref.date) return false;
-  if (e.date > ref.date) return true;
-  if (ref.dateOnly) return false;
-  const elapsed = time(e.occurredAt ?? e.createdAt) - time(ref.at);
-  return elapsed > 0 || (elapsed === 0 && ref.includedExpenseIds !== undefined);
-}
 
 /** резерв, введённый из банка целиком (сверка, чат, премия), а не сдвинутый на сумму */
 export const isAbsolute = (m: ReserveMove) => m.abs ?? /^Сверка/.test(m.note);
@@ -134,6 +125,7 @@ export function reserveAnchor(log: ReserveMove[]): { at: string; date: string; o
 }
 
 export function canVoidOperation(s: LedgerInput, op: AccountOperation, now: string): boolean {
+  if (op.status === 'confirmed' && 'authorization' in op && op.authorization) return true;
   if (op.cashBooked || op.origin === 'bank') return false;
   const last = s.checkups.at(-1);
   const accounts = op.type === 'transfer' ? [op.accountId, op.toAccountId] : [op.accountId];
@@ -162,20 +154,6 @@ export function canVoidOperation(s: LedgerInput, op: AccountOperation, now: stri
     (after.card == null || after.card >= Math.min(0, before.card ?? 0));
 }
 
-type MarkKind = 'weekly' | 'payment' | 'income' | 'bonus' | null;
-
-/** что за отметка: пополнение, платёж, обычное поступление (приходит на карту) или премия (распределяется сразу) */
-function kindOf(key: string, oneOff: CalEvent[]): MarkKind {
-  if (key.startsWith('wk:')) return 'weekly';
-  if (key.startsWith('pay:') || key.startsWith('fix:')) return 'payment';
-  if (key.startsWith('work:')) return 'bonus';
-  if (key.startsWith('inc:')) return BONUS.has(key.split(':')[1]) ? 'bonus' : 'income';
-  const e = oneOff.find(o => o.key === key);
-  if (!e) return null;
-  if (e.kind === 'income') return e.incomeKind && BONUS.has(e.incomeKind) ? 'bonus' : 'income';
-  return e.kind;
-}
-
 /** платежи перевода, которые ещё не отмечены */
 const openKeys = (r: ReserveMove, marks: Record<string, EventMark>) => (r.forKeys ?? []).filter(k => !marks[k]?.done);
 
@@ -188,46 +166,29 @@ export function heldKeys(log: ReserveMove[], marks: Record<string, EventMark>): 
 
 export function ledger(s: LedgerInput): Ledger {
   const now = s.now ?? today();
-  const book = s.accountBook ?? EMPTY_BOOK;
+  const { book, entries } = financialJournal(s);
   const operations = book.operations.filter(op => op.status === 'confirmed' && op.date <= now);
-  const linked = new Set(operations.flatMap(op => op.eventKey ? [op.eventKey] : []));
-  const last = s.checkups.at(-1);
-  // точка отсчёта карты: последняя сверка или остаток карты из выписки/вручную — что позже
-  const cb = s.cardBalance ? fromBalance(s.cardBalance) : null;
+  const last = s.checkups.filter(row => row.date <= now).at(-1);
+  const cb = s.cardBalance && s.cardBalance.date <= now ? fromBalance(s.cardBalance) : null;
   const lc = last ? fromCheckup(last) : null;
   const ref = cb && (!lc || time(cb.at) >= time(lc.at)) ? cb : lc;
-
-  let card: number | null = null;
-  // pool — деньги резерва, которые лежат на карте: поступления и переводы под платежи минус сами эти платежи и то,
-  // что уже перевели в резерв. Из них held — под ещё не отмеченные платежи, остальное ждёт перевода в резерв.
-  // Платёж с карты без перевода под него (мелочь из недельных денег) в этот счёт не входит — как и раньше
+  const cardAnchor = ref && { ...ref, at: ref.dateOnly ? undefined : ref.at };
+  const cardProjection = journalAccount(entries, LIFE_ACCOUNT, cardAnchor, now);
+  const card = ref ? cardProjection.expected : null;
   let pool = 0;
   let unclassified = cents(ref?.unmatchedOnCard ?? 0);
   const classified = new Set(book.historicalLoans?.map(loan => loan.eventKey));
   const earmarked = new Set(s.reserveLog.flatMap(r => r.forKeys ?? []));
-  if (ref) {
-    card = cents(ref.amount);
-    for (const [key, m] of Object.entries(s.marks)) {
-      if (!m.done || linked.has(key) || !(time(m.at) > time(ref.at))) continue;
-      const amount = cents(m.amount ?? 0);
-      const kind = kindOf(key, s.oneOff);
-      if (kind === 'weekly') card += amount;
-      else if (kind === 'payment' && m.paidFrom === 'card') { card -= amount; if (earmarked.has(key)) pool -= amount; }
-      else if (kind === 'income') { card += amount; if (classified.has(key)) unclassified += amount; else pool += amount; }
-    }
-    const included = new Set(ref.includedExpenseIds);
-    for (const e of s.expenses) if (cashAccount(e) === LIFE_ACCOUNT && afterCard(e, ref, included)) card -= cents(e.amount);
-    const bankRef: BankBalance = { amount: ref.amount, date: ref.date, at: ref.dateOnly ? undefined : ref.at, includedIds: ref.operationIds };
-    for (const op of operations) {
-      if (!recordedAfter(op, bankRef)) continue;
-      const amount = accountMovement(op, LIFE_ACCOUNT);
-      card += amount;
-      if ((op.type === 'income' && !op.pendingSweep && op.fundingSource !== 'borrowed') ||
-          (op.type === 'transfer' && !op.purpose && op.toAccountId === RESERVE_ACCOUNT)) pool += amount;
-      if (op.type === 'loan_disbursement' || (op.type === 'income' && op.fundingSource === 'borrowed') || op.type === 'adjustment') unclassified += Math.max(0, amount);
-      if (op.eventKey && earmarked.has(op.eventKey) && (op.type === 'debt_payment' || op.type === 'expense')) pool += amount;
-    }
-    for (const r of s.reserveLog) if (r.date <= now && r.card && r.at && time(r.at) > time(ref.at)) { card += cents(r.card); if (r.card < 0 || r.forKeys) pool += cents(r.card); }
+  if (cardAnchor) for (const op of entries) {
+    if (op.status !== 'confirmed' || op.date > now || !journalEntryAfter(op, cardAnchor)) continue;
+    const amount = accountMovement(op, LIFE_ACCOUNT);
+    if (!amount) continue;
+    if (op.type === 'income' && (op.fundingSource === 'borrowed' || (op.eventKey && classified.has(op.eventKey))) ||
+        op.type === 'loan_disbursement' || op.type === 'adjustment') unclassified += Math.max(0, amount);
+    else if ((op.type === 'income' && !op.pendingSweep) ||
+        (op.type === 'transfer' && !op.purpose && op.toAccountId === RESERVE_ACCOUNT) ||
+        (op.eventKey && earmarked.has(op.eventKey) && (op.type === 'expense' || op.type === 'debt_payment'))) pool += amount;
+    if (op.legacy === 'reserve' && amount > 0 && s.reserveLog.some(r => `reserve:${r.id}` === op.id && r.forKeys)) pool += amount;
   }
   let held = 0;
   for (const r of s.reserveLog) {
@@ -248,28 +209,23 @@ export function ledger(s: LedgerInput): Ledger {
   const legacyIncome = Math.max(0, rubles(pool - held - cents(funding.legacyDraw[LIFE_ACCOUNT] ?? 0)));
   const incomeOnCard = kopecks((funding.pending[LIFE_ACCOUNT] ?? 0) + legacyIncome);
   const pendingSweepToReserve = { ...funding.pending, [LIFE_ACCOUNT]: incomeOnCard };
-  card = card == null ? null : rubles(card);
   const unmatchedOnCard = rubles(unclassified);
   const unassignedOnCard = rubles(unclassified + cents(funding.unassignedLife));
   const unavailable = heldOnCard + incomeOnCard + unassignedOnCard;
   const lifeAvailable = card == null ? null : Math.max(0, kopecks(card - unavailable));
   const allocationShortfall = card == null ? 0 : Math.max(0, kopecks(unavailable - card));
 
-  // резерв: отметки «оплачено из резерва» и траты из резерва после последнего остатка из банка
-  const anchor = [reserveAnchor(s.reserveLog), last ? { at: last.at, date: last.date, operationIds: last.operationIds } : null].filter(Boolean).sort((a, b) => b!.at.localeCompare(a!.at))[0] ?? null;
-  let reserve = cents(s.reserve);
-  if (anchor) {
-    for (const [key, m] of Object.entries(s.marks)) {
-      if (m.done && !linked.has(key) && m.at > anchor.at && kindOf(key, s.oneOff) === 'payment' && (m.paidFrom ?? 'reserve') === 'reserve') reserve -= cents(m.amount ?? 0);
-    }
-    for (const e of s.expenses) if (cashAccount(e) === RESERVE_ACCOUNT && after(e, anchor.at, anchor.date)) reserve -= cents(e.amount);
-  }
-
-  for (const op of operations) {
-    if (!anchor || recordedAfter(op, { ...anchor, amount: s.reserve, includedIds: anchor.operationIds })) {
-      reserve += accountMovement(op, RESERVE_ACCOUNT);
-    }
-  }
+  const point = [reserveAnchor(s.reserveLog.filter(row => row.date <= now)), last].filter(Boolean)
+    .sort((a, b) => time(b!.at) - time(a!.at))[0] ?? null;
+  const reserveRef = point && { amount: s.reserve, date: point.date, at: point.at, includedIds: point.operationIds, legacyManualOnly: true };
+  const reserveProjection = journalAccount(entries, RESERVE_ACCOUNT, reserveRef, now);
+  const reserve = reserveProjection.expected + (point ? 0 : s.reserve);
+  const cashAccounts = book.accounts.map(account => {
+    const balance = account.balance && account.balance.date <= now ? account.balance : null;
+    const projection = journalAccount(entries, account.id, balance, now);
+    return { ...account, expected: balance ? projection.expected : null, posted: balance ? projection.posted : null, issues: projection.issues };
+  });
+  const reconciliation = [...journalReview(s, entries, now), ...cardProjection.issues, ...reserveProjection.issues, ...cashAccounts.flatMap(row => row.issues)];
 
   // Кредитки: прогноз долга от банковской точки отсчёта и классифицированных операций.
   const b = s.bridge && s.bridge.weeks.length ? s.bridge : null;
@@ -283,9 +239,10 @@ export function ledger(s: LedgerInput): Ledger {
     .map(d => ({ debt: d, expected: owed(d), accrued: accruedOnCard(d, now), bridge: d.id === creditCard?.id }));
 
   return {
-    cashAccounts: accountProjection(book, s.expenses, now), reserveVerified: !!anchor, debtBalances,
+    cashAccounts, reserveVerified: !!point, debtBalances, reconciliation,
+    cardPosted: ref ? cardProjection.posted : null, reservePosted: point ? reserveProjection.posted : null,
     unclassifiedCredit: s.expenses.filter(e => e.source === 'credit' && !s.debts.some(d => d.kind === 'card' && d.id === e.creditCard)),
-    card, cardFrom: ref ? { at: ref.at, date: ref.date } : null, reserve: rubles(reserve), credit, creditCard, cards,
+    card, cardFrom: ref ? { at: ref.at, date: ref.date } : null, reserve: kopecks(reserve), credit, creditCard, cards,
     incomeOnCard, heldOnCard, lifeAvailable, pendingSweepToReserve, unassignedOnCard, unmatchedOnCard, allocationShortfall,
     heldForPayments: funding.held, creditInterest: creditCard ? accruedOnCard(creditCard, now) : 0,
   };
@@ -297,43 +254,21 @@ export function ledger(s: LedgerInput): Ledger {
  * ближайшая после — назад от неё. null — точек отсчёта нет.
  */
 export function cardOn(s: LedgerInput, date: string): number | null {
-  const end = time(endOfDay(date));
   const topUp = `wk:${addDays(date, 1)}`;
-  const refs = [
-    ...s.checkups.map(fromCheckup),
-    ...(s.cardBalance ? [fromBalance(s.cardBalance)] : []),
-  ].sort((a, b) => time(a.at) - time(b.at));
-  const before = refs.filter(r => time(r.at) <= end).at(-1);
-  const ref = before ?? refs.find(r => time(r.at) > end);
+  const refs = [...s.checkups.map(fromCheckup), ...(s.cardBalance ? [fromBalance(s.cardBalance)] : [])]
+    .sort((a, b) => time(a.at) - time(b.at));
+  const before = refs.filter(r => r.date <= date).at(-1);
+  const ref = before ?? refs.find(r => r.date > date);
   if (!ref) return null;
-  const fwd = ref === before;
-  // движение карты от отметки: пополнение и поступление — плюс, платёж с карты — минус; пополнение к следующей неделе
-  // считается после вечера date, даже если отмечено в тот же вечер
-  const markMove = (key: string, m: EventMark) => {
-    const kind = kindOf(key, s.oneOff), amount = m.amount ?? 0;
-    return kind === 'weekly' || kind === 'income' ? amount : kind === 'payment' && m.paidFrom === 'card' ? -amount : 0;
-  };
-  const inRange = (t: string, key = '') => {
-    const at = time(t);
-    const late = key === topUp ? Infinity : at;
-    return fwd ? at > time(ref.at) && late <= end : late > end && at <= time(ref.at);
-  };
+  const anchor = { ...ref, at: ref.dateOnly ? undefined : ref.at };
+  const { entries } = financialJournal(s);
   let delta = 0;
-  const ops = (s.accountBook ?? EMPTY_BOOK).operations.filter(op => op.status === 'confirmed');
-  const linked = new Set(ops.flatMap(op => op.eventKey ? [op.eventKey] : []));
-  for (const [key, m] of Object.entries(s.marks)) if (m.done && !linked.has(key) && inRange(m.at, key)) delta += markMove(key, m);
-  for (const r of s.reserveLog) if (r.card && r.at && inRange(r.at)) delta += r.card;
-  const included = new Set(ref.includedExpenseIds);
-  for (const e of s.expenses) {
-    if (cashAccount(e) !== LIFE_ACCOUNT) continue;
-    const afterRef = afterCard(e, ref, included);
-    if (fwd ? afterRef && e.date <= date : !afterRef && e.date > date) delta -= e.amount;
+  for (const op of entries) {
+    const afterRef = journalEntryAfter(op, anchor);
+    const throughDay = op.date <= date && op.eventKey !== topUp;
+    if (before ? afterRef && throughDay : !afterRef && !throughDay) delta += accountMovement(op, LIFE_ACCOUNT);
   }
-  for (const op of ops) {
-    const afterRef = recordedAfter(op, { amount: ref.amount, date: ref.date, at: ref.dateOnly ? undefined : ref.at, includedIds: ref.operationIds });
-    if (fwd ? afterRef && op.date <= date && op.eventKey !== topUp : !afterRef && (op.date > date || op.eventKey === topUp)) delta += rubles(accountMovement(op, LIFE_ACCOUNT));
-  }
-  return Math.round((fwd ? ref.amount + delta : ref.amount - delta) * 100) / 100;
+  return rubles(cents(ref.amount) + (before ? delta : -delta));
 }
 
 export interface CheckupPlan {

@@ -1,7 +1,8 @@
+import { accountMovement, cashAccount, LIFE_ACCOUNT } from '../domain/accounts';
 // Зарплатная карта (точка отсчёта учёта карты) и копилка недельных остатков.
 import { useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { AmountInput, Field, Money, PrimaryButton, Segmented, Sheet } from '../components/ui';
+import { AmountInput, Field, Money, PrimaryButton, SecondaryButton, Segmented, Sheet } from '../components/ui';
 import { useCoverage } from '../components/Coverage';
 import { NARROW } from '../domain/coverage';
 import { addDays, dayMonth, ddmm, today } from '../domain/dates';
@@ -26,6 +27,17 @@ function CardBody({ onClose }: { onClose: () => void }) {
   const [date, setDate] = useState(today());
   const value = parseAmount(amount);
   const led = useLedger();
+  const [excluded, setExcluded] = useState<string[]>([]);
+  const [pointType, setPointType] = useState<'available' | 'posted'>('available');
+  const [pointReason, setPointReason] = useState('');
+  const book = useStore(s => s.accountBook);
+  const [selected, select] = useState<string | null>(null);
+  const [budgetScope, setBudgetScope] = useState<'weekly' | 'separate' | 'unknown'>('unknown');
+  const expenses = useStore(s => s.expenses);
+  const reviews = led.reconciliation.filter(issue => issue.accountId === LIFE_ACCOUNT);
+  const candidates = [...expenses.filter(row => row.date === date && cashAccount(row) === LIFE_ACCOUNT),
+    ...book.operations.filter(row => !row.legacyExpense && row.date === date && accountMovement(row, LIFE_ACCOUNT))];
+
   // прогноз — общий: резерв к вечеру, как в календаре, в «Хватит ли» и в status.coverage; от остатка карты он не зависит
   const { cov } = useCoverage();
   const s = cov.shortage, low = cov.min;
@@ -40,11 +52,53 @@ function CardBody({ onClose }: { onClose: () => void }) {
         {led.incomeOnCard > 0 && <div className="flex justify-between gap-2"><span>Ожидает перевода в резерв</span><Money value={led.incomeOnCard} kopecks /></div>}
         {led.unassignedOnCard > 0 && <div className="flex justify-between gap-2"><span>Требует сверки назначения</span><Money value={led.unassignedOnCard} kopecks /></div>}
       </div>
+      {led.cardPosted != null && led.cardPosted !== led.card && <p className="text-[13px] text-muted">Проведённый остаток <Money value={led.cardPosted} kopecks /></p>}
+      {reviews.length > 0 && <section aria-label="Требуется сверка" className="card space-y-2 p-3 text-[13px]">
+        <div className="font-medium">Требуется сверка</div>
+        {reviews.some(issue => issue.kind === 'snapshot_order') && <p className="text-muted">У части операций время списания в день банковского снимка неизвестно. При новой сверке проверьте, какие из них вошли в остаток.</p>}
+        {reviews.filter(issue => issue.kind === 'possible_duplicate').map(issue => {
+          const expense = expenses.find(row => row.id === issue.relatedId);
+          const confirmed = selected === issue.operationId;
+          return <div key={issue.operationId + issue.relatedId} className="space-y-2 border-t border-line pt-2">
+            <p>{expense?.note ?? 'Платёж'} · {ddmm(issue.date)} · <Money value={issue.amount} kopecks /> · возможно, одна операция в истории и календаре.</p>
+            {confirmed ? <>
+              <label className="block">Источник оплаты по банку
+                <select className="field mt-1" value={budgetScope} onChange={e => setBudgetScope(e.target.value as typeof budgetScope)}>
+                  <option value="unknown">Уточню позже</option><option value="weekly">Из недельных денег</option><option value="separate">Оплачено отдельно</option>
+                </select>
+              </label>
+              <SecondaryButton onClick={() => {
+                if (issue.relatedId && useStore.getState().linkPaymentExpense(issue.operationId, issue.relatedId, budgetScope)) {
+                  toast('Записи связаны'); select(null);
+                }
+              }}>Подтверждаю одно списание с карты</SecondaryButton>
+            </> : <button className="text-sea" type="button" onClick={() => { setBudgetScope('unknown'); select(issue.operationId); }}>Сверить две записи</button>}
+          </div>;
+        })}
+        {reviews.some(issue => issue.kind === 'unknown_funding') && <p className="text-muted">У части платежей источник денег ещё требует сверки.</p>}
+      </section>}
       <Field label="Сколько сейчас на карте" hint="От этого остатка приложение ведёт учёт карты до следующей сверки. Выписка обновит остаток сама.">
         <AmountInput value={amount} onChange={setAmount} size="md" />
       </Field>
-      <input type="date" value={date} onChange={e => setDate(e.target.value || today())} className="field" aria-label="На какую дату" />
-      <PrimaryButton onClick={() => { setCardBalance({ amount: value!, date, source: 'manual' }); toast('Остаток обновлён'); onClose(); }} disabled={value == null}>Сохранить</PrimaryButton>
+      <input type="date" value={date} onChange={e => { setDate(e.target.value || today()); setExcluded([]); }} className="field" aria-label="На какую дату" />
+      <details className="card space-y-2 p-3 text-[13px]">
+        <summary className="font-medium">Детали банковского остатка</summary>
+        <label className="block">Вид остатка
+          <select className="field mt-1" value={pointType} onChange={event => setPointType(event.target.value as typeof pointType)}>
+            <option value="available">Доступный</option><option value="posted">Проведённый</option>
+          </select>
+        </label>
+        <input className="field" placeholder="Причина сверки" value={pointReason} onChange={event => setPointReason(event.target.value)} />
+        {candidates.length > 0 && <div className="space-y-2">
+          <p className="text-muted">Отметьте операции этой даты, которые ещё не вошли в банковский остаток.</p>
+          {candidates.map(row => <label key={row.id} className="flex min-h-8 items-center gap-2">
+            <input type="checkbox" checked={excluded.includes(row.id)} onChange={event => setExcluded(ids => event.target.checked ? [...ids, row.id] : ids.filter(id => id !== row.id))} />
+            <span>{row.note ?? 'Операция'} · <Money value={row.amount} kopecks /></span>
+          </label>)}
+        </div>}
+      </details>
+      <PrimaryButton onClick={() => { setCardBalance({ amount: value!, date, kind: pointType, reason: pointReason.trim() || undefined,
+        excludedIds: excluded, source: 'manual' }); toast('Остаток обновлён'); onClose(); }} disabled={value == null}>Сохранить</PrimaryButton>
 
       {(s || low) && (
         <p className={`rounded-xl px-3 py-2.5 text-[13px] leading-snug ${s ? 'bg-neg/10 text-neg' : low && low.balance < NARROW ? 'bg-warn/10 text-warn' : 'bg-surface-2 text-muted'}`}>

@@ -1,4 +1,4 @@
-import { accountOptions, appendOperations, bookOperationAllowed, budgetExpenses, cents, EMPTY_BOOK, LIFE_ACCOUNT, monthDebtActivity, RESERVE_ACCOUNT, rubles, validAmount, validBankBalance, validDate, validLoanReview, validPayoffTerms, validSplitDebit, validSplitPlan, type AccountBook, type CashAccount } from './accounts';
+import { accountOptions, appendOperations, bookOperationAllowed, budgetExpenses, cents, EMPTY_BOOK, LIFE_ACCOUNT, linkedExpenseId, monthDebtActivity, RESERVE_ACCOUNT, rubles, validAmount, validBankBalance, validDate, validLoanReview, validPayoffTerms, validSplitDebit, validSplitPlan, type AccountBook, type CashAccount } from './accounts';
 import { validPayroll, with2027Unit, type PayrollProfile, type PayRate, type Vacation } from './payroll';
 import { payrollRegister } from './payrollRegister';
 import { annualIncome } from './annualIncome';
@@ -16,7 +16,7 @@ import { DEFAULT_PREPARATION_TIME, partialPayments, paymentPreparations, prepara
 import { addDays, daysBetween, ddmm, plural } from './dates';
 import { rub } from './money';
 import { CATEGORIES, CATEGORY, currentPhase, DEFAULT_PLAN, reserveNeed, weeklyLimit, type BonusRule, type PlanConfig } from './plan';
-import { dayBudget, weekSummary } from './summary';
+import { availableToday, dayBudget, weekSummary } from './summary';
 import type {
   CalEvent, CalendarOverride, CardBalance, CategoryId, ChecklistItem, Debt, DebtKind, EventMark, Expense, FixedItem, IncomeTemplate, Phase, ReserveMove, Source,
   StrategySection, WeekClosure, WeeklyOverride,
@@ -101,7 +101,7 @@ export interface ExchangeFile {
   accountBook?: Partial<AccountBook> & { remove?: BookRemoval[] };
   work?: WorkPatch;
   /** source credit — с кредитки, creditCard — id долга (без него — кредитка моста); dup — добавить, даже если такая дата и сумма уже есть */
-  expenses?: ({ id?: string; date?: string; amount?: number; category?: string; note?: string; source?: Source; creditCard?: string; accountId?: string; fundingSource?: Expense['fundingSource']; occurredAt?: string; fingerprint?: string; dup?: boolean } & Del)[];
+  expenses?: ({ id?: string; date?: string; amount?: number; category?: string; note?: string; source?: Source; creditCard?: string; accountId?: string; fundingSource?: Expense['fundingSource']; budgetScope?: Expense['budgetScope']; occurredAt?: string; fingerprint?: string; dup?: boolean } & Del)[];
   /** мост на кредитке — целиком; { closed: true } — закрыть. В выгрузке ещё used и left — факт */
   bridge?: (Partial<Bridge> & { used?: number; left?: number }) | null;
   reserve?: number;
@@ -151,10 +151,10 @@ export function exchangeRevision(s: ExchangeState): string {
 /** Неделя по источникам: left меньше нуля при перерасходе недельного бюджета.
  *  cardLeft — остаток карты по учёту (а не лимит минус траты): у текущей недели — ledger.card, у прошедших — на вечер
  *  воскресенья до пополнения, по сверке этой недели (actual.card), если она была */
-function weekFields(s: ExchangeState, monday: string, cardLeft: number | null) {
-  const m = weekMoney(s.expenses, s.debts, s.weeklyOverrides, s.bridge, monday);
+function weekFields(s: ExchangeState, expenses: Expense[], monday: string, cardLeft: number | null) {
+  const m = weekMoney(expenses, s.debts, s.weeklyOverrides, s.bridge, monday);
   return {
-    limit: r0(m.limit), spent: r0(m.spent), left: r0(m.left), spentLife: r0(m.spentLife), spentCredit: r0(m.spentCredit),
+    limit: r0(m.limit), spent: r0(m.spent), left: r0(m.left), spentLife: r0(m.spentLife), spentCredit: r0(m.spentCredit), spentReserve: r0(m.spentReserve),
     cardLeft: cardLeft == null ? null : r0(cardLeft), creditLeft: r0(m.creditLeft),
   };
 }
@@ -203,14 +203,16 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
     : eventsBetween(s, addDays(now, -45), addDays(now, 400))
       .filter(e => (e.kind === 'weekly' ? e.date <= addDays(now, 7) : e.date <= addDays(now, 75) || s.overrides[e.key] || s.marks[e.key]));
   const nextWeek = recent.find(e => e.kind === 'weekly' && e.date >= now && !s.marks[e.key]?.done);
+  const nextTopUp = nextWeek && led.lifeAvailable != null
+    ? weeklyTopUp(weeklyLimit(s.debts, nextWeek.key.slice(3), s.weeklyOverrides), led.lifeAvailable) : null;
   const preparations = paymentPreparations(recent.filter(e => e.date >= now), s.marks, led.heldForPayments, led.reserve);
   const proposedTransfers = [
     ...Object.entries(led.pendingSweepToReserve).filter(([, amount]) => amount > 0).map(([accountId, amount]) => ({
       kind: 'sweep', date: now, fromAccountId: accountId, toAccountId: RESERVE_ACCOUNT, amount,
     })),
-    ...(nextWeek && led.lifeAvailable != null ? [{
+    ...(nextWeek && nextTopUp != null ? [{
       kind: 'weekly', date: nextWeek.date, fromAccountId: RESERVE_ACCOUNT, toAccountId: LIFE_ACCOUNT,
-      amount: weeklyTopUp(weeklyLimit(s.debts, nextWeek.key.slice(3), s.weeklyOverrides), led.lifeAvailable),
+      amount: nextTopUp, reserveShortfall: rubles(Math.max(0, cents(nextTopUp) - cents(led.reserve))),
       remindAt: preparationInstant(nextWeek.date, DEFAULT_PREPARATION_TIME), eventKeys: [nextWeek.key],
     }] : []),
     ...preparations.filter(group => group.toFund && group.accountId && group.date <= addDays(now, 45)).map(group => ({
@@ -245,14 +247,15 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
       totalCash: led.card == null || (led.cashAccounts.some(a => a.expected == null)) ? null
         : rubles(cents(led.card) + cents(led.reserve) + led.cashAccounts.reduce((n, a) => n + cents(a.expected ?? 0), 0)),
       lifeFree: led.lifeAvailable,
+      reconciliation: led.reconciliation,
       proposedTransfers,
       ...(!short ? { debtReconciliation: { asOf: now, basis: rubles(basis), estimated: rubles(estimated), delta: rubles(estimated - basis), rows: debtRows } } : {}),
       phase: { id: phase.id, title: phase.title, weekly: phase.weekly, monthly: phase.monthly },
-      week: { from: week.monday, to: week.sunday, ...weekFields(s, week.monday, led.card) },
+      week: { from: week.monday, to: week.sunday, ...weekFields(s, expenses, week.monday, led.card) },
       // сегодняшний день: норма, траты по источникам и сколько ещё можно — то же число, что в кольце на «Сегодня»
       today: {
         date: now, allowance: r0(day.day), spent: r0(day.spentToday), spentLife: r0(day.spentLife), spentCredit: r0(day.spentCredit),
-        canSpend: r0(led.lifeAvailable == null ? day.canSpend : Math.min(day.canSpend, led.lifeAvailable)),
+        ...(day.spentReserve ? { spentReserve: r0(day.spentReserve) } : {}), canSpend: r0(availableToday(day, led.lifeAvailable)),
       },
       reserveNeed: { amount: r0(need.need), untilBonus: need.next },
       coverage: {
@@ -262,8 +265,8 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
         narrow: cov.narrow.map(n => ({ date: n.date, title: n.title, left: r0(n.balance) })),
       },
       ...(s.accountBook ? {
-        accounts: [{ id: LIFE_ACCOUNT, expected: led.card, confirmed: s.cardBalance?.amount ?? null },
-          { id: RESERVE_ACCOUNT, expected: led.reserveVerified ? led.reserve : null, confirmed: led.reserveVerified ? s.reserve : null },
+        accounts: [{ id: LIFE_ACCOUNT, expected: led.card, posted: led.cardPosted, confirmed: s.cardBalance?.amount ?? null, date: led.cardFrom?.date },
+          { id: RESERVE_ACCOUNT, expected: led.reserveVerified ? led.reserve : null, posted: led.reservePosted, confirmed: led.reserveVerified ? s.reserve : null },
           ...led.cashAccounts.map(a => ({ id: a.id, name: a.name, expected: a.expected, confirmed: a.balance?.amount ?? null, date: a.balance?.date }))],
         debtActivity: monthDebtActivity(s.accountBook, s.expenses, now),
         ...(!short ? { pendingReview: {
@@ -341,12 +344,12 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
       ...(e.dateMode !== 'exact' ? { dateMode: e.dateMode } : {}), ...(e.note ? { note: e.note } : {}), ...(e.debtId ? { debtId: e.debtId } : {}),
     })) }),
     expensesFrom: from,
-    expenses: s.expenses.filter(e => e.date >= from).map(e => ({ id: e.id, date: e.date, amount: e.amount, category: e.category, ...(e.note ? { note: e.note } : {}), source: e.source, ...(e.creditCard ? { creditCard: e.creditCard } : {}), ...(e.accountId ? { accountId: e.accountId } : {}), ...(e.fundingSource ? { fundingSource: e.fundingSource } : {}), ...(e.occurredAt ? { occurredAt: e.occurredAt } : {}), ...(e.fingerprint ? { fingerprint: e.fingerprint } : {}) })),
+    expenses: s.expenses.filter(e => e.date >= from).map(e => ({ id: e.id, date: e.date, amount: e.amount, category: e.category, ...(e.note ? { note: e.note } : {}), source: e.source, ...(e.creditCard ? { creditCard: e.creditCard } : {}), ...(e.accountId ? { accountId: e.accountId } : {}), ...(e.fundingSource ? { fundingSource: e.fundingSource } : {}), ...(e.budgetScope ? { budgetScope: e.budgetScope } : {}), ...(e.occurredAt ? { occurredAt: e.occurredAt } : {}), ...(e.fingerprint ? { fingerprint: e.fingerprint } : {}) })),
     reserve: r0(s.reserve),
     ...(short ? {} : { savings: r0(s.savings) }),
     card: s.cardBalance ? { amount: r0(s.cardBalance.amount), date: s.cardBalance.date } : null,
     weeks: Object.values(s.closures).sort((a, b) => b.monday.localeCompare(a.monday)).slice(0, short ? 4 : 8)
-      .map(w => ({ monday: w.monday, ...weekFields(s, w.monday, w.monday === week.monday ? led.card : cardAfterWeek(s, ledIn, w.monday)), ...(w.topUp ? { topUp: r0(w.topUp) } : {}), ...(w.transferred ? { transferred: r0(w.transferred) } : {}) })),
+      .map(w => ({ monday: w.monday, ...weekFields(s, expenses, w.monday, w.monday === week.monday ? led.card : cardAfterWeek(s, ledIn, w.monday)), ...(w.topUp ? { topUp: r0(w.topUp) } : {}), ...(w.transferred ? { transferred: r0(w.transferred) } : {}) })),
     bridge: bridgeOut(s),
     ...((s.checkups ?? []).length ? { checkups: s.checkups!.slice(-4).map(c => ({ date: c.date, monday: c.monday, expected: c.expected, actual: c.actual, topUp: c.topUp, toReserve: c.toReserve })) } : {}),
     checklist: s.checklist.map(c => ({ ...c, done: s.checks[c.id]?.done ?? !!c.done })),
@@ -852,6 +855,11 @@ const stepExpenses: Step = (f, s, ctx) => {
       continue;
     }
     const i = list.findIndex(x => (p.id && x.id === p.id) || (p.fingerprint && x.fingerprint === p.fingerprint && x.accountId === p.accountId && x.source === (p.source ?? 'life')));
+    if (i >= 0 && s.accountBook?.operations.some(op => !op.legacyExpense && (linkedExpenseId(op) === list[i].id ||
+        p.delete && op.type === 'refund' && op.expenseId === list[i].id && op.status === 'confirmed'))) {
+      lines.push('Уже есть в журнале. Связанная операция требует сверенного исправления.');
+      continue;
+    }
     if (p.delete) {
       if (i >= 0) { const e = list[i]; lines.push(`Удалить: ${ddmm(e.date)} ${e.note || catName(e.category)}, ${money(e.amount)}`); list = list.filter((_, k) => k !== i); }
       continue;
@@ -868,6 +876,7 @@ const stepExpenses: Step = (f, s, ctx) => {
       if (p.source && SOURCES.includes(p.source) && p.source !== cur.source) { changes.push(SOURCE_NAME[p.source]); next.source = p.source; }
       if (p.creditCard && p.creditCard !== cur.creditCard) { changes.push(`кредитка ${p.creditCard}`); next.creditCard = p.creditCard; }
       if (strict && p.accountId && p.accountId !== cur.accountId && knownAccounts.has(p.accountId)) { next.accountId = p.accountId; changes.push('счёт'); }
+      if (strict && (p.budgetScope === 'weekly' || p.budgetScope === 'separate' || p.budgetScope === 'unknown') && p.budgetScope !== cur.budgetScope) { next.budgetScope = p.budgetScope; changes.push('недельный бюджет'); }
       if (strict && (p.fundingSource === 'own' || p.fundingSource === 'borrowed' || p.fundingSource === 'unknown') && p.fundingSource !== cur.fundingSource) { next.fundingSource = p.fundingSource; changes.push('источник денег'); }
       if (strict && p.occurredAt && Number.isFinite(Date.parse(p.occurredAt)) && cur.occurredAt !== p.occurredAt) { next.occurredAt = p.occurredAt; changes.push('время'); }
       if (changes.length) { list[i] = next; lines.push(`${ddmm(cur.date)} ${cur.note || catName(cur.category)}: ${changes.join(', ')}`); }
@@ -890,6 +899,7 @@ const stepExpenses: Step = (f, s, ctx) => {
       ...(strict && p.accountId && knownAccounts.has(p.accountId) ? { accountId: p.accountId } : {}),
       ...(strict && p.occurredAt && Number.isFinite(Date.parse(p.occurredAt)) ? { occurredAt: p.occurredAt } : {}),
       ...(strict && p.fingerprint ? { fingerprint: p.fingerprint } : {}),
+      ...(strict && (p.budgetScope === 'weekly' || p.budgetScope === 'separate' || p.budgetScope === 'unknown') ? { budgetScope: p.budgetScope } : {}),
       ...(strict && (p.fundingSource === 'own' || p.fundingSource === 'borrowed' || p.fundingSource === 'unknown') ? { fundingSource: p.fundingSource } : {}),
     });
     lines.push(`Новая: ${ddmm(p.date)} ${catName(category)}${p.note ? ` (${p.note})` : ''}, ${money(p.amount)}`);
@@ -1054,6 +1064,10 @@ const stepAccountBook: Step = (f, s, ctx) => {
   }
   const marks = { ...s.marks };
   if (Array.isArray(incoming.operations)) for (const op of incoming.operations) {
+    if (op.legacyExpense) {
+      if (strict) errors.push('accountBook.operations: записи расходов из истории меняются через expenses');
+      continue;
+    }
     if (!bookOperationAllowed(op, book, s.debts, s.expenses) || (op.status === 'confirmed' && op.date > ctx.now) || (op.eventKey && op.type === 'loan_disbursement' && !marks[op.eventKey]?.done)) { if (strict) errors.push('accountBook.operations: неверный маршрут, дата или отметка займа'); continue; }
     const previous = book.operations.find(row => row.id === op.id);
     if (op.status === 'voided' && previous?.status === 'confirmed' && !canVoidOperation({
@@ -1072,8 +1086,8 @@ const stepAccountBook: Step = (f, s, ctx) => {
     }
     book = { ...book, operations };
     if (op.status === 'voided' && op.eventKey && !operations.some(row => row.status === 'confirmed' && row.eventKey === op.eventKey)) delete marks[op.eventKey];
-    if (op.eventKey && op.status === 'confirmed' && !marks[op.eventKey]) marks[op.eventKey] = {
-      done: true, paidDate: op.date, at: op.at ?? new Date(op.date + 'T00:00:00Z').toISOString(), amount: rubles(cents(op.amount) + (partialPayments(operations).get(op.eventKey) ?? 0)),
+    if (op.eventKey && op.status === 'confirmed' && !('authorization' in op && op.authorization) && !marks[op.eventKey]) marks[op.eventKey] = {
+      done: true, paidDate: op.date, at: op.createdAt ?? ctx.at, amount: rubles(cents(op.amount) + (partialPayments(operations).get(op.eventKey) ?? 0)),
       ...((op.type === 'debt_payment' || op.type === 'expense') ? {
         paidFrom: op.accountId === LIFE_ACCOUNT ? 'card' as const : 'reserve' as const,
       } : {}),

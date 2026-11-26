@@ -1,5 +1,5 @@
 // Сводки для экранов: неделя, месяц по категориям, что требует внимания сегодня.
-import { countsWeekly } from './accounts';
+import { cents, RESERVE_ACCOUNT, cashAccount, weeklyExpenseCents, rubles } from './accounts';
 import { bridgeWeek, onBridgeCard, type Bridge } from './bridge';
 import { addDays, daysBetween, ddmm, monthKey, weekStart } from './dates';
 import { actionableEvent, eventsBetween, urgency, type CalendarInput } from './calendar';
@@ -25,9 +25,10 @@ export interface WeekSummary {
 export function weekSummary(expenses: Expense[], debts: Debt[], overrides: WeeklyOverride[], now: string): WeekSummary {
   const monday = weekStart(now), sunday = addDays(monday, 6);
   const list = expenses.filter(e => e.date >= monday && e.date <= sunday);
-  const spent = list.filter(countsWeekly).reduce((s, e) => s + e.amount, 0);
+  const spentCents = list.reduce((sum, e) => sum + weeklyExpenseCents(e), 0);
+  const spent = rubles(spentCents);
   const limit = weeklyLimit(debts, now, overrides);
-  const left = limit - spent;
+  const left = rubles(cents(limit) - spentCents);
   const daysLeft = daysBetween(now, sunday) + 1;
   return {
     monday, sunday, limit, spent, left, daysLeft,
@@ -63,6 +64,7 @@ export interface DayBudget {
   /** сегодняшние траты по источникам: с карты жизни и с кредитки */
   spentLife: number;
   spentCredit: number;
+  spentReserve: number;
 }
 
 const floor10 = (n: number) => Math.max(0, Math.floor(n / 10) * 10);
@@ -70,12 +72,15 @@ const floor10 = (n: number) => Math.max(0, Math.floor(n / 10) * 10);
 /** Кольцо дня: сколько можно потратить сегодня и каким станет лимит на день после сегодняшних трат */
 export function dayBudget(expenses: Expense[], debts: Debt[], overrides: WeeklyOverride[], now: string): DayBudget {
   const monday = weekStart(now), sunday = addDays(monday, 6);
-  const counted = expenses.filter(e => e.date >= monday && e.date <= now && countsWeekly(e));
-  const before = counted.filter(e => e.date < now).reduce((s, e) => s + e.amount, 0);
+  const counted = expenses.filter(e => e.date >= monday && e.date <= now);
+  const before = counted.filter(e => e.date < now).reduce((sum, e) => sum + weeklyExpenseCents(e), 0);
   const todays = counted.filter(e => e.date === now);
-  const spentToday = todays.reduce((s, e) => s + e.amount, 0);
-  const spentCredit = todays.filter(e => e.source === 'credit').reduce((s, e) => s + e.amount, 0);
-  const morning = weeklyLimit(debts, now, overrides) - before;
+  const spent = todays.reduce((sum, e) => sum + weeklyExpenseCents(e), 0);
+  const credit = todays.filter(e => e.source === 'credit').reduce((sum, e) => sum + weeklyExpenseCents(e), 0);
+  const reserve = todays.filter(e => cashAccount(e) === RESERVE_ACCOUNT).reduce((sum, e) => sum + weeklyExpenseCents(e), 0);
+  const spentToday = rubles(spent);
+  const morningCents = cents(weeklyLimit(debts, now, overrides)) - before;
+  const morning = rubles(morningCents);
   const daysLeft = daysBetween(now, sunday) + 1;
   const day = morning > 0 ? floor10(morning / daysLeft) : 0;
   const nextWeek = daysLeft === 1;
@@ -83,13 +88,17 @@ export function dayBudget(expenses: Expense[], debts: Debt[], overrides: WeeklyO
     ? floor10(weeklyLimit(debts, addDays(sunday, 1), overrides) / 7)
     : floor10((morning - spentToday) / (daysLeft - 1));
   // день — часть недели: если неделя ушла в минус, дневная норма теряет смысл — сегодня можно 0, а не «минус сверх нормы»
-  const weekLeft = morning - spentToday;
+  const weekLeft = rubles(morningCents - spent);
   const mode = weekLeft < 0 || morning <= 0 ? 'week' : spentToday > day ? 'day' : 'ok';
   return {
     day, spentToday, left: day - spentToday, tomorrow, nextWeek, exhausted: morning <= 0, morning, daysLeft,
     weekLeft, mode, canSpend: mode === 'ok' ? day - spentToday : 0, overDay: mode === 'day' ? spentToday - day : 0,
-    spentLife: spentToday - spentCredit, spentCredit,
+    spentLife: rubles(spent - credit - reserve), spentCredit: rubles(credit), spentReserve: rubles(reserve),
   };
+}
+
+export function availableToday(day: DayBudget, lifeAvailable: number | null) {
+  return Math.max(0, Math.min(day.canSpend, day.weekLeft, lifeAvailable ?? 0));
 }
 
 export interface CategoryRow {

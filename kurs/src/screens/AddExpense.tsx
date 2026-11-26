@@ -57,6 +57,7 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   const [card, setCard] = useState(edit?.creditCard ?? p.creditCard ?? '');
   const [account, setAccount] = useState(edit?.accountId ?? LIFE_ACCOUNT);
   const [funding, setFunding] = useState<NonNullable<Expense['fundingSource']>>(edit?.fundingSource ?? 'unknown');
+  const [scope, setScope] = useState<Expense['budgetScope']>(edit?.budgetScope);
   const cashAccounts = useStore(s => s.accountBook.accounts);
   const [expenses, debts, weeklyOverrides, bridge] = useStore(useShallow(s => [s.expenses, s.debts, s.weeklyOverrides, s.bridge] as const));
   const led = useLedger();
@@ -111,8 +112,8 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   // что будет после записи — одной строкой под суммой: остаток дня, долг по мосту или остаток резерва
   const effect = useMemo(() => spendEffect({ expenses, debts, weeklyOverrides, bridge }, {
     amount: value, source, date, now: today(), reserve: led.reserve, skipId: edit?.id, creditCard: card,
-    category: category ?? undefined, accountId: source === 'life' ? account : undefined,
-  }), [expenses, debts, weeklyOverrides, bridge, value, source, date, led.reserve, edit?.id, card, category, account]);
+    category: category ?? undefined, budgetScope: scope ?? (edit ? undefined : 'weekly'), accountId: source === 'life' ? account : undefined,
+  }), [expenses, debts, weeklyOverrides, bridge, value, source, date, led.reserve, edit?.id, card, category, account, scope]);
 
   /** src — источник, если сумму бросили в сосуд: состояние ещё не успело обновиться */
   const save = (src: Source = source) => {
@@ -120,10 +121,10 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
     if (src === 'credit' && !card) { setSource(src); toast('Выберите кредитную карту'); return; }
     if (!edit && !p.wishId && value > BIG_PURCHASE && src === 'life' && !askPause) { setAskPause(true); return; }
     const item = { date, amount: value, category: category!, note: noteText() || undefined, source: src, origin: 'manual' as const, creditCard: src === 'credit' ? card : undefined, accountId: src === 'life' && account !== LIFE_ACCOUNT ? account : undefined,
-      fundingSource: src === 'credit' ? 'borrowed' as const : funding };
+      fundingSource: src === 'credit' ? 'borrowed' as const : funding, budgetScope: scope ?? (edit ? undefined : 'weekly' as const) };
     const done = src === source ? effect : spendEffect({ expenses, debts, weeklyOverrides, bridge }, {
       amount: value, source: src, date, now: today(), reserve: led.reserve, skipId: edit?.id, creditCard: card,
-      category: item.category, accountId: item.accountId,
+      category: item.category, accountId: item.accountId, budgetScope: item.budgetScope,
     });
     if (edit) store.updateExpense(edit.id, item);
     else store.addExpenses([item]);
@@ -241,6 +242,14 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
         <select className="field mt-1" value={funding} onChange={e => setFunding(e.target.value as NonNullable<Expense['fundingSource']>)}>
           <option value="unknown">Неизвестно или смешано</option><option value="own">Подтверждено: собственные</option>
           <option value="borrowed">Подтверждено: ранее полученный заём</option>
+        </select>
+      </label>}
+      {(category === 'fixed' || scope === 'separate' || scope === 'unknown') && <label className="block text-[13px]">Участие в недельном бюджете
+        <select className="field mt-1" value={scope ?? (edit ? '' : 'weekly')} onChange={e => setScope(e.target.value as Expense['budgetScope'] || undefined)}>
+          {edit && <option value="">По правилам старой записи</option>}
+          <option value="weekly">Из недельных денег</option>
+          <option value="separate">Оплачено отдельно</option>
+          <option value="unknown">Источник требует сверки</option>
         </select>
       </label>}
       {/* подсказка не исчезает во время жеста: иначе сосуды съезжали бы из-под пальца */}
