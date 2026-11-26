@@ -95,7 +95,7 @@ export interface CoverageInput {
 export function coverageInput(s: CalendarInput & { marks: Record<string, EventMark>; expenses: Expense[] }, led: Pick<Ledger, 'reserve' | 'incomeOnCard' | 'heldOnCard'> & Partial<Pick<Ledger, 'card' | 'reserveVerified' | 'cashAccounts' | 'lifeAvailable' | 'heldForPayments' | 'pendingSweepToReserve' | 'reconciliation'>>): CoverageInput {
   return { cal: s, marks: s.marks, reserve: led.reserve + led.incomeOnCard + led.heldOnCard, debts: s.debts, expenses: s.expenses, bridge: s.bridge ?? null,
     reserveEstimate: led.reserve, lifeAvailable: led.lifeAvailable, held: led.heldForPayments, pending: led.pendingSweepToReserve,
-    unresolvedCash: led.reconciliation?.some(issue => issue.kind === 'possible_duplicate' || issue.kind === 'snapshot_order'),
+    unresolvedCash: led.reconciliation?.some(issue => issue.kind === 'possible_duplicate' || issue.kind === 'snapshot_order' || issue.kind === 'unknown_route'),
     cash: s.accountBook ? { [LIFE_ACCOUNT]: led.card ?? null, [RESERVE_ACCOUNT]: led.reserveVerified ? led.reserve : null,
       ...Object.fromEntries((led.cashAccounts ?? []).map(a => [a.id, a.expected])) } : undefined };
 }

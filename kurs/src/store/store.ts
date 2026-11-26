@@ -179,14 +179,14 @@ const operationIdsAt = (book: AccountBook, date: string) =>
   book.operations.filter(op => op.status === 'confirmed' && op.date <= date).map(op => op.id);
 
 function captureCardBalance(balance: CardBalance, expenses: Expense[], book: AccountBook): CardBalance {
-  if (balance.at) return balance;
+  if (balance.at || balance.kind && balance.operationIds) return balance;
   return { ...balance, ...(balance.date === today() ? { at: nowIso() } : {}),
     includedExpenseIds: balance.includedExpenseIds ?? includedAt(expenses, balance.date), operationIds: balance.operationIds ?? operationIdsAt(book, balance.date) };
 }
 
 /** Старые файлы обмена сохраняли время импорта только в журнале. */
 function restoreCardTime(balance: CardBalance | null, imports: ImportRecord[]): CardBalance | null {
-  if (!balance || balance.at || balance.source !== 'manual') return balance;
+  if (!balance || balance.at || balance.kind || balance.source !== 'manual') return balance;
   const entry = [...imports].reverse().find(({ snapshot }) => {
     const prior = snapshot.cardBalance;
     return !prior || prior.date !== balance.date || prior.amount !== balance.amount || prior.source !== balance.source;
@@ -274,7 +274,7 @@ export const useStore = create<State>()(
       applySync: (patch, summary) => set(s => {
         const next: Partial<Data> = { ...patch };
         if (patch.cardBalance) next.cardBalance = captureCardBalance(patch.cardBalance, patch.expenses ?? s.expenses, patch.accountBook ?? s.accountBook);
-        if (patch.reserve != null && patch.reserve !== s.reserve) {
+        if (!patch.reserveLog && patch.reserve != null && patch.reserve !== s.reserve) {
           next.reserveLog = [...s.reserveLog, { id: uid(), date: today(), at: nowIso(), abs: true, operationIds: operationIdsAt(patch.accountBook ?? s.accountBook, today()), amount: patch.reserve - s.reserve, note: 'Сверка из чата «Финансы»' }];
         }
         if (patch.savings != null && patch.savings !== s.savings) {

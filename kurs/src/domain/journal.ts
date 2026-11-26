@@ -15,7 +15,7 @@ interface JournalInput {
 type JournalEntry = AccountOperation & { legacy?: 'mark' | 'reserve'; reserveIncluded?: true };
 
 export interface JournalReview {
-  kind: 'possible_duplicate' | 'snapshot_order' | 'unknown_funding';
+  kind: 'possible_duplicate' | 'snapshot_order' | 'unknown_funding' | 'unknown_route';
   operationId: string;
   accountId: string;
   date: string;
@@ -77,7 +77,7 @@ export function journalAccount(entries: JournalEntry[], account: string, anchor:
   const issues: JournalReview[] = [];
   let posted = cents(anchor?.amount ?? 0);
   let authorization = 0;
-  let postedKnown = true;
+  let postedKnown = anchor?.kind !== 'available';
   for (const op of entries) {
     const included = anchor?.includedIds?.includes(op.id);
     if (anchor && anchor.kind !== 'posted' && included && op.accountId === account &&
@@ -119,6 +119,8 @@ export function journalReview(s: JournalInput & { fixed?: { id: string; name: st
   return entries.flatMap(op => {
     if (op.status !== 'confirmed' || op.date > now) return [];
     const findings: JournalReview[] = [];
+    if (op.legacyExpense && op.cashBooked) findings.push({ kind: 'unknown_route', operationId: op.id,
+      accountId: op.accountId, date: op.date, amount: op.amount, relatedId: linkedExpenseId(op) });
     if ('budget' in op && op.budget?.unknown) findings.push({ kind: 'unknown_funding', operationId: op.id,
       accountId: op.accountId, date: op.date, amount: op.budget.unknown });
     if (op.type !== 'expense' || op.expenseId || !op.eventKey?.startsWith('fix:')) return findings;

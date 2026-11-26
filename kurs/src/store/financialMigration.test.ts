@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EMPTY_BOOK, RESERVE_ACCOUNT, type AccountOperation } from '../domain/accounts';
-import { applyExchange, buildExchange, previewExchange, type ExchangeFile } from '../domain/exchange';
+import { applyExchange, buildExchange, exchangeRevision, prepareExchange, previewExchange, type ExchangeFile } from '../domain/exchange';
 import { ledger } from '../domain/ledger';
 import type { Debt } from '../domain/types';
 
@@ -227,4 +227,32 @@ it('переносит журнал из версии 8, оставляет не
   expect(restarted.getState().accountBook.operations.map(op => op.id)).toEqual(['expense:trip-2']);
   expect(ledger({ ...restarted.getState(), now: '2026-11-21' }).card).toBe(2900);
   expect(storage.get('kurs:before-0.9.0')).toBe(initial);
+});
+
+it('сверяет дублированный расход и доступные остатки одним патчем, сохраняя историю', async () => {
+  const day = '2026-11-21';
+  const key = 'fix:sample:2026-12';
+  const expense = { id: 'history', date: day, amount: 150, category: 'fixed', source: 'reserve', createdAt: at } as const;
+  const operation = { id: 'payment', type: 'expense', eventKey: key, accountId: 'life', date: day, amount: 150,
+    status: 'confirmed', origin: 'manual', fundingSource: 'unknown' } as const;
+  const store = await reopen(8, { ...old, expenses: [expense], accountBook: { ...EMPTY_BOOK, operations: [operation] },
+    marks: { [key]: { done: true, at, paidDate: day, amount: 150 } } });
+  const before = store.getState();
+  const revision = exchangeRevision(before);
+  const patch: ExchangeFile = { app: 'kurs-exchange', version: 2, protocolVersion: '2.8', from: 'chat', date: day,
+    patchId: 'reconcile-sample', baseRevision: revision, exportId: day + '-' + revision,
+    paymentReconciliation: [{ operationId: operation.id, expenseId: expense.id, transferId: 'funded', reason: 'Подтверждение' }],
+    bankCorrection: [['life', 3000, 3000], ['reserve', 7000, 6850]].map(([key, oldValue, newValue]) => ({
+      key: String(key), oldValue: Number(oldValue), newValue: Number(newValue), date: day, revision,
+      availableSnapshot: true, source: 'Выписка', reason: 'Остаток',
+    })) };
+  expect(prepareExchange({ ...patch, exportId: 'stale' }, before, day).errors).not.toEqual([]);
+  expect(prepareExchange(patch, before, day).errors).toEqual([]);
+  before.applySync(applyExchange(patch, before, day, null, () => 'sample'), 'Сверка');
+  const after = store.getState();
+  expect(after.expenses).toEqual([expense]);
+  expect(after.marks).toEqual(before.marks);
+  expect(after.accountBook.operations.map(row => row.id)).toEqual(['funded', 'payment']);
+  expect(ledger({ ...after, now: day })).toMatchObject({ card: 3000, reserve: 6850, heldOnCard: 0 });
+  expect(prepareExchange(patch, after, day)).toMatchObject({ sections: [], errors: [] });
 });

@@ -308,7 +308,7 @@ export function expenseOperation(e: Expense, book: AccountBook): AccountOperatio
   const knownCharge = book.creditChargeKinds?.[e.id];
   const amount = kopecks(e.amount);
   const base = { id: `expense:${e.id}`, date: e.date, createdAt: e.createdAt || undefined, at: e.occurredAt,
-    amount, accountId: cashAccount(e) ?? e.creditCard ?? 'credit-unclassified', note: e.note, expenseId: e.id,
+    amount, ...(e.bankRoutePending ? { cashBooked: true } : {}), accountId: cashAccount(e) ?? e.creditCard ?? 'credit-unclassified', note: e.note, expenseId: e.id,
     category: e.category, status: 'confirmed' as const, origin: e.origin === 'manual' ? 'manual' as const : 'exchange' as const,
     fundingSource: e.source === 'credit' ? 'borrowed' as const : e.fundingSource ?? 'unknown' as const, legacyExpense: true as const,
     budget: { weekly: weeklyExpenseCents(e) / 100, prepared: 0, separate: countsWeekly(e) || e.budgetScope === 'unknown' ? 0 : amount,

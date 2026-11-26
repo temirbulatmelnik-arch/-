@@ -80,6 +80,10 @@ function Body() {
   };
   const apply = () => {
     if (!file) return;
+    if ((file.paymentReconciliation?.length || file.bankCorrection?.some(row => row.availableSnapshot)) && off.size) {
+      toast('Для этой банковской сверки примите все разделы вместе');
+      return;
+    }
     const s = useStore.getState();
     const only = new Set(sections.map(x => x.id).filter(id => !off.has(id)));
     const patch = applyExchange(file, s, today(), only, uid);

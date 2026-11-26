@@ -1,4 +1,4 @@
-import { accountOptions, appendOperations, bookOperationAllowed, budgetExpenses, cents, EMPTY_BOOK, LIFE_ACCOUNT, linkedExpenseId, monthDebtActivity, RESERVE_ACCOUNT, rubles, validAmount, validBankBalance, validDate, validLoanReview, validPayoffTerms, validSplitDebit, validSplitPlan, type AccountBook, type CashAccount } from './accounts';
+import { accountOptions, appendOperations, bookOperationAllowed, budgetExpenses, canonicalBook, cents, EMPTY_BOOK, LIFE_ACCOUNT, linkedExpenseId, monthDebtActivity, RESERVE_ACCOUNT, rubles, validAmount, validBankBalance, validDate, validLoanReview, validPayoffTerms, validSplitDebit, validSplitPlan, type AccountBook, type CashAccount } from './accounts';
 import { validPayroll, with2027Unit, type PayrollProfile, type PayRate, type Vacation } from './payroll';
 import { payrollRegister } from './payrollRegister';
 import { annualIncome } from './annualIncome';
@@ -7,7 +7,7 @@ import { annualIncome } from './annualIncome';
 // но только с изменениями. Списки с id/key — «добавить или изменить», удаление — только явное "delete": true.
 // Перед применением приложение показывает разницу по разделам; присланное без изменений ничего не трогает.
 import { bridgeState, weekMoney, type Bridge } from './bridge';
-import { canVoidOperation, cardOn, ledger, type Checkup, type LedgerInput } from './ledger';
+import { canVoidOperation, cardOn, ledger, reserveAnchor, type Checkup, type LedgerInput } from './ledger';
 import { compare2027Coverage, compareCoverage, coverage, coverageInput, HORIZON_DAYS, safePrepayment } from './coverage';
 import { PROTOCOL_VERSION } from './sync';
 import { eventsBetween, incomeStatus, paidOn, type CalendarInput, type IncomeStatus } from './calendar';
@@ -51,7 +51,7 @@ type WorkPatch = Omit<Partial<PayrollProfile>, 'rates' | 'vacations'> & {
   vacations?: (Partial<Vacation> & Del & { id: string })[];
   remove?: { section: 'attendance' | 'workingHours' | 'absenceHours' | 'deductions' | 'extras' | 'payDates' | 'aliases'; key: string; delete: true }[];
 };
-export interface Correction { key: string; oldValue: number; newValue: number; reason: string; source: string; revision: string; date?: string }
+export interface Correction { key: string; oldValue: number; newValue: number; reason: string; source: string; revision: string; date?: string; availableSnapshot?: true }
 type BookRemoval = { section: 'accounts' | 'paymentAccounts' | 'historicalLoans' | 'creditChargeKinds' | 'loanReviews' | 'splitPlans' | 'splitDebits' | 'operations'; key: string; delete: true };
 
 export interface ExchangeFile {
@@ -65,6 +65,7 @@ export interface ExchangeFile {
   recovery?: boolean;
   actualCorrection?: Correction[];
   bankCorrection?: Correction[];
+  paymentReconciliation?: { operationId: string; expenseId: string; transferId: string; reason: string }[];
   payrollRegister?: ReturnType<typeof payrollRegister>;
   short?: boolean;
   from?: 'app' | 'chat';
@@ -101,7 +102,7 @@ export interface ExchangeFile {
   accountBook?: Partial<AccountBook> & { remove?: BookRemoval[] };
   work?: WorkPatch;
   /** source credit — с кредитки, creditCard — id долга (без него — кредитка моста); dup — добавить, даже если такая дата и сумма уже есть */
-  expenses?: ({ id?: string; date?: string; amount?: number; category?: string; note?: string; source?: Source; creditCard?: string; accountId?: string; fundingSource?: Expense['fundingSource']; budgetScope?: Expense['budgetScope']; occurredAt?: string; fingerprint?: string; dup?: boolean } & Del)[];
+  expenses?: ({ id?: string; date?: string; amount?: number; category?: string; note?: string; source?: Source; creditCard?: string; accountId?: string; fundingSource?: Expense['fundingSource']; budgetScope?: Expense['budgetScope']; bankRoutePending?: true; occurredAt?: string; fingerprint?: string; dup?: boolean } & Del)[];
   /** мост на кредитке — целиком; { closed: true } — закрыть. В выгрузке ещё used и left — факт */
   bridge?: (Partial<Bridge> & { used?: number; left?: number }) | null;
   reserve?: number;
@@ -266,7 +267,7 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
       },
       ...(s.accountBook ? {
         accounts: [{ id: LIFE_ACCOUNT, expected: led.card, posted: led.cardPosted, confirmed: s.cardBalance?.amount ?? null, date: led.cardFrom?.date },
-          { id: RESERVE_ACCOUNT, expected: led.reserveVerified ? led.reserve : null, posted: led.reservePosted, confirmed: led.reserveVerified ? s.reserve : null },
+          { id: RESERVE_ACCOUNT, expected: led.reserveVerified ? led.reserve : null, posted: led.reservePosted, confirmed: led.reserveVerified ? s.reserve : null, date: reserveAnchor(s.reserveLog ?? [])?.date },
           ...led.cashAccounts.map(a => ({ id: a.id, name: a.name, expected: a.expected, confirmed: a.balance?.amount ?? null, date: a.balance?.date }))],
         debtActivity: monthDebtActivity(s.accountBook, s.expenses, now),
         ...(!short ? { pendingReview: {
@@ -344,7 +345,7 @@ export function buildExchange(s: ExchangeState, now: string, opts: { short?: boo
       ...(e.dateMode !== 'exact' ? { dateMode: e.dateMode } : {}), ...(e.note ? { note: e.note } : {}), ...(e.debtId ? { debtId: e.debtId } : {}),
     })) }),
     expensesFrom: from,
-    expenses: s.expenses.filter(e => e.date >= from).map(e => ({ id: e.id, date: e.date, amount: e.amount, category: e.category, ...(e.note ? { note: e.note } : {}), source: e.source, ...(e.creditCard ? { creditCard: e.creditCard } : {}), ...(e.accountId ? { accountId: e.accountId } : {}), ...(e.fundingSource ? { fundingSource: e.fundingSource } : {}), ...(e.budgetScope ? { budgetScope: e.budgetScope } : {}), ...(e.occurredAt ? { occurredAt: e.occurredAt } : {}), ...(e.fingerprint ? { fingerprint: e.fingerprint } : {}) })),
+    expenses: s.expenses.filter(e => e.date >= from).map(e => ({ id: e.id, date: e.date, amount: e.amount, category: e.category, ...(e.note ? { note: e.note } : {}), source: e.source, ...(e.creditCard ? { creditCard: e.creditCard } : {}), ...(e.accountId ? { accountId: e.accountId } : {}), ...(e.fundingSource ? { fundingSource: e.fundingSource } : {}), ...(e.budgetScope ? { budgetScope: e.budgetScope } : {}), ...(e.bankRoutePending ? { bankRoutePending: true } : {}), ...(e.occurredAt ? { occurredAt: e.occurredAt } : {}), ...(e.fingerprint ? { fingerprint: e.fingerprint } : {}) })),
     reserve: r0(s.reserve),
     ...(short ? {} : { savings: r0(s.savings) }),
     card: s.cardBalance ? { amount: r0(s.cardBalance.amount), date: s.cardBalance.date } : null,
@@ -896,6 +897,7 @@ const stepExpenses: Step = (f, s, ctx) => {
     list.push({
       id: p.id || ctx.newId(), date: p.date, amount: p.amount, category, ...(p.note ? { note: p.note } : {}),
       source: p.source && SOURCES.includes(p.source) ? p.source : 'life', ...(p.source === 'credit' && p.creditCard ? { creditCard: p.creditCard } : {}), origin: 'chat', createdAt: ctx.at,
+      ...(f.protocolVersion === '2.8' && !f.recovery && p.bankRoutePending === true && p.budgetScope === 'separate' ? { bankRoutePending: true as const } : {}),
       ...(strict && p.accountId && knownAccounts.has(p.accountId) ? { accountId: p.accountId } : {}),
       ...(strict && p.occurredAt && Number.isFinite(Date.parse(p.occurredAt)) ? { occurredAt: p.occurredAt } : {}),
       ...(strict && p.fingerprint ? { fingerprint: p.fingerprint } : {}),
@@ -1359,9 +1361,37 @@ const stepCorrections: Step = (f, s, ctx) => {
     patch.work = { ...s.work!, actual };
     if (book !== s.accountBook && s.accountBook) patch.accountBook = book;
   }
+  for (const link of f.paymentReconciliation ?? []) {
+    const current = patch.accountBook ?? book;
+    const op = current.operations.find(item => item.id === link.operationId);
+    const expense = s.expenses.find(item => item.id === link.expenseId);
+    const mark = op?.eventKey ? s.marks[op.eventKey] : undefined;
+    if (!safeKey(link.transferId) || typeof link.reason !== 'string' || !link.reason.trim() ||
+        op?.type !== 'expense' || op.status !== 'confirmed' || op.accountId !== LIFE_ACCOUNT || !op.eventKey || op.expenseId ||
+        !expense || expense.source !== 'reserve' || expense.accountId && expense.accountId !== RESERVE_ACCOUNT ||
+        expense.date !== op.date || cents(expense.amount) !== cents(op.amount) ||
+        !mark?.done || mark.paidDate !== op.date || cents(mark.amount ?? 0) !== cents(op.amount) ||
+        current.operations.some(item => item.id === link.transferId ||
+          !item.legacyExpense && linkedExpenseId(item) === expense.id ||
+          item.type === 'transfer' && item.purpose === 'prepare' && item.status === 'confirmed' && item.shares?.some(share => share.key === op.eventKey))) {
+      errors.push('Сверка платежа: несовпадение фактов или перевод уже записан');
+      continue;
+    }
+    const transfer = { id: link.transferId, type: 'transfer', purpose: 'prepare', status: 'confirmed', origin: 'bank', fundingSource: 'own',
+      date: op.date, amount: op.amount, accountId: RESERVE_ACCOUNT, toAccountId: LIFE_ACCOUNT,
+      shares: [{ key: op.eventKey, amount: op.amount }], note: link.reason } as const;
+    const candidate = appendOperations(current.operations, [{ ...transfer, shares: [...transfer.shares] }]);
+    if (candidate === current.operations) { errors.push('Сверка платежа: перевод не прошёл проверку'); continue; }
+    const payment = { ...op, expenseId: expense.id, category: expense.category,
+      budget: { weekly: 0, prepared: op.amount, separate: 0, unknown: 0 } };
+    const operations = candidate.filter(item => item.id !== link.transferId && !(item.legacyExpense && linkedExpenseId(item) === expense.id))
+      .flatMap(item => item.id === op.id ? [candidate.at(-1)!, payment] : [item]);
+    patch.accountBook = { ...current, operations };
+    lines.push(`Связать один платёж и подтверждённый перевод · ${ddmm(op.date)} · ${money(op.amount)}`);
+  }
   for (const row of f.bankCorrection ?? []) {
     if (!valid(row, 'bankCorrection')) continue;
-    if (!validDate(row.date) || row.date !== ctx.now) {
+    if (!validDate(row.date) || (row.availableSnapshot ? row.date > ctx.now : row.date !== ctx.now)) {
       errors.push(`bankCorrection.${row.key}: укажите дату сегодняшней банковской сверки`); continue;
     }
     const currentBook = patch.accountBook ?? book;
@@ -1372,7 +1402,22 @@ const stepCorrections: Step = (f, s, ctx) => {
       errors.push(`bankCorrection.${row.key}: прежний банковский остаток не совпадает или не найден`); continue;
     }
     const confirmed = currentBook.operations.filter(op => op.status === 'confirmed' && op.date <= row.date!).map(op => op.id);
-    if (row.key === LIFE_ACCOUNT) patch.cardBalance = { ...s.cardBalance, amount: row.newValue, date: row.date, source: 'manual', at: ctx.at };
+    if (row.availableSnapshot && (row.key === LIFE_ACCOUNT || row.key === RESERVE_ACCOUNT)) {
+      const latest = [s.cardBalance?.date, ...(s.checkups ?? []).map(check => check.date),
+        ...(s.reserveLog ?? []).filter(entry => entry.abs).map(entry => entry.date)].filter(Boolean).sort().at(-1);
+      if (latest && latest > row.date) { errors.push('Уже есть более свежая банковская точка'); continue; }
+      const operations = canonicalBook(currentBook, s.expenses).operations
+        .filter(op => op.status === 'confirmed' && op.date <= row.date!).map(op => op.id);
+      if (row.key === LIFE_ACCOUNT) patch.cardBalance = { amount: row.newValue, date: row.date,
+        source: 'manual', kind: 'available', reason: row.reason, operationIds: operations,
+        includedExpenseIds: s.expenses.filter(item => item.date <= row.date!).map(item => item.id) };
+      else {
+        patch.reserve = row.newValue;
+        patch.reserveLog = [...(s.reserveLog ?? []), { id: `snapshot:${f.patchId}:reserve`, date: row.date,
+          amount: rubles(cents(row.newValue) - cents(s.reserve)), abs: true, kind: 'available', note: row.reason, operationIds: operations }];
+      }
+    }
+    else if (row.key === LIFE_ACCOUNT) patch.cardBalance = { ...s.cardBalance, amount: row.newValue, date: row.date, source: 'manual', at: ctx.at };
     else if (row.key === RESERVE_ACCOUNT) patch.reserve = row.newValue;
     else if (debt) patch.debts = (patch.debts ?? s.debts).map(d => d.id !== row.key ? d : {
       ...d, balance: row.newValue, updatedAt: ctx.at, bankBalance: { amount: row.newValue, date: row.date!, at: ctx.at,
@@ -1418,17 +1463,26 @@ function run(f: ExchangeFile, s: ExchangeState, now: string, only: Set<SectionId
     errors.push('Ревизия патча не совпадает или отсутствует patchId. Создайте свежую выгрузку и обновите патч.');
   }
   if (strict && f.from !== 'chat') errors.push('Полная выгрузка не предназначена для изменения данных. Для восстановления используйте резервную копию.');
-  if ((f.actualCorrection || f.bankCorrection) && !strict) errors.push('Сверенные исправления требуют протокол 2.8 и свежую ревизию');
+  if ((f.actualCorrection || f.bankCorrection || f.paymentReconciliation) && !strict) errors.push('Сверенные исправления требуют протокол 2.8 и свежую ревизию');
   if (strict && f.debts != null && !Array.isArray(f.debts)) errors.push('debts: ожидается список');
   if (strict && (f.reserve != null || f.card != null || Array.isArray(f.debts) && f.debts.some(row => row && row.balance != null && s.debts.some(d => d.id === row.id)))) {
     errors.push('Для изменения сверенных банковских остатков используйте bankCorrection');
   }
-  const listFields = ['debts', 'fixed', 'incomes', 'calendar', 'events', 'expenses', 'checklist', 'strategy', 'rules', 'actualCorrection', 'bankCorrection'] as const;
+  const listFields = ['debts', 'fixed', 'incomes', 'calendar', 'events', 'expenses', 'checklist', 'strategy', 'rules', 'actualCorrection', 'bankCorrection', 'paymentReconciliation'] as const;
   for (const key of listFields) if (f[key] != null && !Array.isArray(f[key])) errors.push(`${key}: ожидается список`);
   const workArrays = ['rates','vacations','remove'] as const;
   for (const key of workArrays) if (f.work?.[key] != null && !Array.isArray(f.work[key])) errors.push(`work.${key}: ожидается список`);
   const bookArrays = ['accounts','operations','historicalLoans','splitPlans','splitDebits','loanReviews','remove'] as const;
   for (const key of bookArrays) if (f.accountBook?.[key] != null && !Array.isArray(f.accountBook[key])) errors.push(`accountBook.${key}: ожидается список`);
+  if (errors.length) return { sections, patch, errors };
+  if (f.paymentReconciliation?.length || f.bankCorrection?.some(row => row?.availableSnapshot) || f.expenses?.some(row => row?.bankRoutePending)) {
+    if (!strict || !isDate(f.date) || f.exportId !== `${f.date}-${revision}`) errors.push('Нужен exportId актуальной выгрузки');
+    const pending = f.expenses?.filter(row => row?.bankRoutePending) ?? [];
+    if (pending.some(expense => ![LIFE_ACCOUNT, RESERVE_ACCOUNT].every(id =>
+      f.bankCorrection?.some(row => row.key === id && row.availableSnapshot && row.date && expense.date && row.date >= expense.date)))) {
+      errors.push('Расход без маршрута требует контрольных остатков обоих счетов');
+    }
+  }
   if (errors.length) return { sections, patch, errors };
   const safe = f.recovery ? { ...f, work: f.work && { ...f.work, remove: undefined,
     rates: f.work.rates?.filter(row => !row?.delete), vacations: f.work.vacations?.filter(row => !row?.delete) },

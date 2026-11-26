@@ -119,8 +119,8 @@ const time = (at: string) => Date.parse(at);
 export const isAbsolute = (m: ReserveMove) => m.abs ?? /^Сверка/.test(m.note);
 
 /** последний момент, когда резерв пришёл из банка целиком */
-export function reserveAnchor(log: ReserveMove[]): { at: string; date: string; operationIds?: string[] } | null {
-  for (let i = log.length - 1; i >= 0; i--) if (isAbsolute(log[i])) return { at: log[i].at ?? endOfDay(log[i].date), date: log[i].date, operationIds: log[i].operationIds };
+export function reserveAnchor(log: ReserveMove[]): { at: string; date: string; operationIds?: string[]; kind?: 'available' | 'posted' } | null {
+  for (let i = log.length - 1; i >= 0; i--) if (isAbsolute(log[i])) return { at: log[i].at ?? endOfDay(log[i].date), date: log[i].date, operationIds: log[i].operationIds, ...(log[i].kind ? { kind: log[i].kind } : {}) };
   return null;
 }
 
@@ -217,7 +217,7 @@ export function ledger(s: LedgerInput): Ledger {
 
   const point = [reserveAnchor(s.reserveLog.filter(row => row.date <= now)), last].filter(Boolean)
     .sort((a, b) => time(b!.at) - time(a!.at))[0] ?? null;
-  const reserveRef = point && { amount: s.reserve, date: point.date, at: point.at, includedIds: point.operationIds, legacyManualOnly: true };
+  const reserveRef = point && { amount: s.reserve, date: point.date, at: point.at, includedIds: point.operationIds, kind: 'kind' in point ? point.kind : undefined, legacyManualOnly: true };
   const reserveProjection = journalAccount(entries, RESERVE_ACCOUNT, reserveRef, now);
   const reserve = reserveProjection.expected + (point ? 0 : s.reserve);
   const cashAccounts = book.accounts.map(account => {

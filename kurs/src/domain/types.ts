@@ -65,6 +65,8 @@ export interface Expense {
   fundingSource?: 'own' | 'borrowed' | 'unknown';
   /** Назначение расхода независимо от категории и банковского счёта. */
   budgetScope?: 'weekly' | 'separate' | 'unknown';
+  /** Расход подтверждён, банковский маршрут требует сверки. */
+  bankRoutePending?: true;
   /** Только для расчётного представления журнала. */
   weeklyAmount?: number;
   occurredAt?: string;
@@ -144,6 +146,7 @@ export interface ReserveMove {
   at?: string;
   /** остаток введён из банка целиком, а не сдвинут на сумму */
   abs?: boolean;
+  kind?: 'available' | 'posted';
   operationIds?: string[];
   /** перевод между картой и резервом: на сколько изменилась карта (− с карты в резерв) */
   card?: number;
