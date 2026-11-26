@@ -89,7 +89,7 @@ function Flow() {
     if (!file) return;
     setStep({ s: 'busy', label: 'Читаю выписку на телефоне…' });
     try {
-      const { pdfText, parseStatementText, isIncomeLine } = await import('../domain/pdf');
+      const { pdfText, parseStatementText } = await import('../domain/pdf');
       const fileHash = await sha256Hex(await file.arrayBuffer());
       if (useStore.getState().accountBook.importBatches?.some(batch => batch.fileHash === fileHash && !batch.partial)) {
         setStep({ s: 'review', review: { summary: 'Этот файл уже импортирован.', items: [], warnings: [] } });
@@ -100,8 +100,9 @@ function Flow() {
       const statement = reconcileStatement({ opening: st.openingBalance, closing: st.closingBalance, end: st.periodEnd },
         st.lines.map(line => line.sign == null ? null : line.sign * line.amount));
       const rows = st.lines.map((line, index) => {
-        const tx = draft(line.date, line.amount, line.text, { income: isIncomeLine(line) });
-        return { ...tx, structured: true, skip: line.sign == null || tx.skip,
+        const tx = draft(line.date, line.amount, line.text, { income: line.sign === 1 });
+        return { ...tx, structured: true, occurredAt: line.occurredAt, skip: line.sign == null || tx.skip,
+          ...(line.sign == null ? { unknownDirection: true as const } : {}),
           fingerprint: JSON.stringify(['csv:file', fileHash, index]) };
       });
       const review = fromDrafts(rows, ctx(), `Выписка PDF: ${rows.length} операций.`);

@@ -67,7 +67,7 @@ const bankEvidence = (tx: DraftTx): BankEvidence => tx.structured ? {
 
 /** Платёж по долгу или обязательный платёж в выписке → отметка «оплачено» в календаре */
 function structuredPosting(tx: DraftTx, ctx: Ctx, amount: number): Proposal | null {
-  if (!tx.structured || !tx.fingerprint.startsWith('["csv:') || tx.duplicate) return null;
+  if (!tx.structured || tx.unknownDirection || !tx.fingerprint.startsWith('["csv:') || tx.duplicate) return null;
   const owned = /между своими|на свой сч[её]т|со своего сч[её]та|перевод себе/i.test(tx.merchant);
   const accountId = tx.source === 'reserve' ? RESERVE_ACCOUNT : LIFE_ACCOUNT;
   const operations = ctx.cal.accountBook?.operations ?? [];
@@ -130,7 +130,7 @@ export function fromDrafts(txs: DraftTx[], ctx: Ctx, summary: string, extra: { c
   const checked = markDuplicates(txs.map(tx => tx.structured && /накопительн.*сч[её]т|^резерв$/i.test(tx.bankAccount ?? '')
     ? { ...tx, source: 'reserve' as const } : tx), ctx.expenses).filter(tx => !tx.structured || !known.has(tx.fingerprint));
   const structuredPayments = new Set<string>();
-  for (const tx of checked.filter(t => t.structured && !t.income && !t.duplicate)) {
+  for (const tx of checked.filter(t => t.structured && !t.unknownDirection && !t.income && !t.duplicate)) {
     const label = tx.merchant.toUpperCase();
     const debtId = /ПОГАШ|ПЛАТ[ЕЁ]Ж ПО|КРЕДИТ|ЗАДОЛЖ|СПЛИТ|РАССРОЧ/.test(label) ? guessDebt(label, ctx.cal.debts) : '';
     const candidates = eventsBetween(ctx.cal, addDays(tx.date, -3), addDays(tx.date, 3)).filter(event => {

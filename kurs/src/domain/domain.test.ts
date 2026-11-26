@@ -13,7 +13,7 @@ import { paymentPreparations, preparationDue } from './funds';
 import { accruedOnCard, cardOn, checkupPlan, heldKeys, ledger, type Checkup, type LedgerInput } from './ledger';
 import { mergeSeed, type PlanState } from './planUpdate';
 import { applyExchange, buildExchange, dropChatTwins, exchangeDigest, normalize, parseExchange, previewExchange, type ExchangeState } from './exchange';
-import { parseStatementText, isIncomeLine } from './pdf';
+import { parseStatementText } from './pdf';
 import { weekReport, weekToClose } from './weekly';
 import { dayBudget, weekSummary } from './summary';
 import { bridgeState, weekMoney, weekParts, type Bridge } from './bridge';
@@ -439,7 +439,7 @@ describe('выписка PDF (текст)', () => {
   it('строки, знаки, остаток и конец периода', () => {
     const st = parseStatementText(raw);
     expect(st.lines.map(l => [l.date, l.amount])).toEqual([['2026-10-26', 1234.56], ['2026-10-27', 412], ['2026-10-28', 48000], ['2026-10-30', 44694.66]]);
-    expect(st.lines.map(isIncomeLine)).toEqual([false, false, true, false]);
+    expect(st.lines.map(line => line.sign === 1)).toEqual([false, false, true, false]);
     expect(st.closingBalance).toBe(13658.78);
     expect(st.periodEnd).toBe('2026-11-01');
   });
@@ -447,7 +447,7 @@ describe('выписка PDF (текст)', () => {
     const named = DEBTS.map(d => (d.id === 'loan' ? { ...d, name: 'Кредит ВТБ' } : d));
     const cal = { debts: named, incomes: [], fixed: [], oneOff: [], templateFrom: '2026-10', weeklyOverrides: [] };
     const st = parseStatementText(raw);
-    const rows = st.lines.map(l => draft(l.date, l.amount, l.text, { income: isIncomeLine(l) }));
+    const rows = st.lines.map(l => draft(l.date, l.amount, l.text, { income: l.sign === 1 }));
     const r = fromDrafts(rows, { cal, marks: {}, expenses: [], reserve: 0, now: '2026-11-01' }, '', { cardBalance: { amount: st.closingBalance!, date: st.periodEnd! } });
     expect(r.items.find(i => i.type === 'mark')).toMatchObject({ event: { key: 'pay:loan:2026-11' }, amount: 44694.66 });
     expect(r.items.filter(i => i.type === 'tx' && i.on).map(i => i.type === 'tx' && i.tx.category)).toEqual(['groceries', 'taxi']);

@@ -4,6 +4,7 @@ import { parseDate } from './statements';
 
 export interface PdfLine {
   date: string;
+  occurredAt?: string;
   amount: number;
   /** знак суммы в выписке: − списание, + зачисление, null — без знака */
   sign: -1 | 1 | null;
@@ -73,7 +74,10 @@ export function parseStatementText(raw: string): PdfStatement {
       const pick = amounts.find(a => a[1]) ?? amounts[0];
       const value = Number(`${pick[2].replace(/[   ]/g, '')}.${pick[3]}`);
       const text = stripDates(line).replace(MONEY, ' ').replace(/(RUB|RUR|руб\.?|₽)/gi, ' ').replace(/\s+/g, ' ').trim();
-      current = { date: parseDate(d[0])!, amount: value, sign: pick[1] ? (pick[1] === '+' ? 1 : -1) : null, text };
+      const date = parseDate(d[0])!;
+      const time = line.match(/\b([01]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?\b/);
+      const occurredAt = time ? `${date}T${time[1].padStart(2, '0')}:${time[2]}:${time[3] ?? '00'}+03:00` : undefined;
+      current = { date, occurredAt, amount: value, sign: pick[1] ? (pick[1] === '+' ? 1 : -1) : null, text };
       if (value > 0) lines.push(current);
     } else if (current && !d && !amounts.length && line.length > 2 && current.text.length < 120) {
       // описание операции часто переносится на следующую строку
@@ -82,8 +86,3 @@ export function parseStatementText(raw: string): PdfStatement {
   }
   return { lines, openingBalance, closingBalance, periodEnd, raw };
 }
-
-const INCOME_WORDS = /зачислен|поступлен|заработн|зарплат|аванс|преми|отпускн|возврат|кэшбэк|cashback|пополнение/i;
-
-/** Списание или зачисление: знак из выписки, иначе по словам описания */
-export const isIncomeLine = (l: PdfLine) => (l.sign != null ? l.sign > 0 : INCOME_WORDS.test(l.text));

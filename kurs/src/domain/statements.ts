@@ -33,6 +33,7 @@ export interface DraftTx {
   fromHeader?: boolean;
   creditCard?: string;
   structured?: boolean;
+  unknownDirection?: true;
   bankAccount?: string;
 }
 

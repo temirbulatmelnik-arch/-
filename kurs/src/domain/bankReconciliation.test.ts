@@ -31,6 +31,7 @@ describe('проверка конечного остатка выписки', ()
 
   it('поднимает остатки из локального PDF и требует явный знак каждой операции', () => {
     const doc = parseStatementText('Период с 25.11.2026 по 26.11.2026\nВходящий остаток 1 000,00 ₽\n26.11.2026 10:30 -15,00 ₽ Покупка\nИсходящий остаток 985,00 ₽');
+    expect(doc.lines[0].occurredAt).toBe('2026-11-26T10:30:00+03:00');
     const result = reconcileStatement({ opening: doc.openingBalance, closing: doc.closingBalance, end: doc.periodEnd },
       doc.lines.map(line => line.sign == null ? null : line.sign * line.amount));
     expect(result).toMatchObject({ end: '2026-11-26', status: 'matched', closingMinor: 98500 });
