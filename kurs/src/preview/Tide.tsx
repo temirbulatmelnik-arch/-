@@ -1,12 +1,12 @@
 import { ArrowDownLeft, ArrowUpRight, CalendarDays, ChartNoAxesCombined, Grid2X2, Navigation, OctagonAlert, ShieldCheck, Waves } from 'lucide-react';
 import { useId, useMemo, useState, type PointerEvent } from 'react';
 import { reserveByDay, type Coverage } from '../domain/coverage';
-import { coverageDayDetails } from '../domain/financialView';
+import { coverageDayDetails, SCENARIO_LABEL } from '../domain/financialView';
 import { addDays, dayMonth, ddmm } from '../domain/dates';
 import { useUi } from '../store/ui';
 import { useCoverage } from '../components/Coverage';
 import { Money, Sheet } from '../components/ui';
-import { Glyph, IconLabel, Jump } from './Visuals';
+import { ActionArrow, Glyph, IconLabel } from './Visuals';
 
 const horizons = [14, 30, 60];
 const scenarios = [
@@ -15,7 +15,7 @@ const scenarios = [
   { id: 'stress', text: 'Стресс', icon: OctagonAlert },
 ] as const;
 
-export function TideChart({ coverage, days, interactive = true }: { coverage: Coverage; days: number; interactive?: boolean }) {
+export function TideChart({ coverage, days, interactive = true, flow = false }: { coverage: Coverage; days: number; interactive?: boolean; flow?: boolean }) {
   const id = useId();
   const [picked, select] = useState<number | null>(null);
   const series = useMemo(() => {
@@ -40,10 +40,13 @@ export function TideChart({ coverage, days, interactive = true }: { coverage: Co
     const index = Math.round(((e.clientX - rect.left) / rect.width * width - start) / span * (series.length - 1));
     select(Math.min(series.length - 1, Math.max(0, index)));
   };
+  const blue = flow ? 'var(--nf-accent)' : 'var(--nv-aqua)';
+  const red = flow ? 'var(--nf-warn)' : 'var(--neg)';
+  const visibleZero = !flow || min < 0;
   return <>
     <div className="nv-chart-value" aria-live={interactive ? 'polite' : 'off'}>
       <div><IconLabel icon={CalendarDays}>{dayMonth(current.date)}</IconLabel>
-        <strong className="nv-chart-money" data-negative={current.value < 0}><Money value={current.value} kopecks /></strong>
+        <strong className="nv-chart-money" data-negative={current.value < 0}><Money value={current.value} kopecks className={flow ? "nf-exact" : undefined} /></strong>
       </div>
       {detail && <div className="nv-floor"><Waves size={14} aria-hidden="true" /> Мин. за день <Money value={detail.low} kopecks /></div>}
     </div>
@@ -60,25 +63,28 @@ export function TideChart({ coverage, days, interactive = true }: { coverage: Co
       <svg viewBox={`0 0 ${width} 151`} className="nv-plot-svg" aria-hidden="true">
         <defs>
           <linearGradient id={id + 'sea'} x1="0" y1="0" x2="0" y2="1">
-            <stop stopColor="var(--nv-aqua)" stopOpacity=".46"/><stop offset="1" stopColor="var(--nv-aqua)" stopOpacity=".02" />
+            <stop stopColor={blue} stopOpacity={flow ? ".18" : ".46"}/><stop offset="1" stopColor={blue} stopOpacity=".02" />
           </linearGradient>
           <clipPath id={id + 'below'}><rect x="0" y={y(0)} width={width} height={151-y(0)} /></clipPath>
         </defs>
         {[top, (top + bottom) / 2, bottom].map(pos => <path key={pos} d={`M0 ${pos}H${width}`} className="nv-plot-guide" />)}
-        <path d={`M0 ${y(0)}H${width}`} className="nv-plot-zero" />
+        {flow && min < 0 && <rect x="0" y={y(0)} width={width} height={bottom-y(0)} fill="var(--nf-warn-bg)" />}
         <path d={line + `V${y(0)}H${x(0)}Z`} fill={`url(#${id}sea)`} />
-        <path d={line} fill="none" stroke="var(--nv-aqua)" strokeWidth="2.2" strokeLinejoin="round" />
-        <path d={line} fill="none" stroke="var(--neg)" strokeWidth="2.5" clipPath={`url(#${id}below)`} />
+        {visibleZero && <path d={`M0 ${y(0)}H${width}`} className="nv-plot-zero" />}
+        <path d={line} fill="none" stroke={blue} strokeWidth="2.2" strokeLinejoin="round" />
+        <path d={line} fill="none" stroke={red} strokeWidth="2.5" clipPath={`url(#${id}below)`} />
         <path d={`M${x(active)} 8V131`} stroke="var(--nv-amber)" strokeWidth="1" strokeDasharray="2 3" />
         <circle cx={x(active)} cy={y(current.value)} r="10" fill="var(--nv-amber)" opacity=".22" />
         <circle cx={x(active)} cy={y(current.value)} r="4.5" fill="var(--nv-amber)" stroke="var(--surface)" strokeWidth="2" />
+        {flow && min < 0 && <text x={start} y={Math.max(11, y(0) - 3)}>0 ₽</text>}
         <text x={start} y="146" textAnchor="start">{ddmm(series[0].date)}</text>
         <text x={width / 2} y="146" textAnchor="middle">{ddmm(series[Math.floor((series.length-1)/2)].date)}</text>
         <text x={width - start} y="146" textAnchor="end">{ddmm(series.at(-1)!.date)}</text>
       </svg>
     </div>
+    {flow && <p className="nf-axis-note">На конец дня · шкала от <Money value={min} kopecks /> до <Money value={max} kopecks /></p>}
     {!!steps.length && <div className="nv-chart-events" aria-label="Движение за день">
-      {steps.slice(0,2).map((s,i) => <span key={s.key ?? i} className="nv-line">
+      {(flow ? steps : steps.slice(0,2)).map((s,i) => <span key={s.key ?? i} className="nv-line">
         <Glyph icon={s.delta >= 0 ? ArrowDownLeft : ArrowUpRight} tone={s.delta >= 0 ? 'aqua' : 'amber'} size={14}/>
         <span>{s.title}</span><Money value={s.delta} kopecks />
       </span>)}
@@ -95,29 +101,47 @@ export function ForecastCard() {
   const [table, showTable] = useState(false);
   const points = useMemo(() => Object.entries(reserveByDay(cov, cov.from, addDays(cov.from, days))).filter((row): row is [string, number] => row[1] !== null),
     [cov, days]);
-  const reason = cov.shortage ?? cov.accountRisk ?? cov.bufferRisk;
-  return <section className="nv-forecast nv-glass" aria-label="Прогноз денег">
-    <header className="nv-widget-head"><IconLabel icon={ChartNoAxesCombined}>Прогноз денег</IconLabel>
-      <button type="button" className="nv-iconbtn nv-press" onClick={() => showTable(true)} aria-label="Таблица прогноза"><Grid2X2 size={17} /></button>
+  const route = () => { go('payments'); set({ payView: 'cover' }); };
+  return <section className="nf-panel nf-chart" aria-label="Прогноз денег">
+    <header className="nf-head"><h2><IconLabel icon={ChartNoAxesCombined}>Прогноз денег</IconLabel></h2>
+      <button type="button" className="nv-iconbtn nf-press" onClick={() => showTable(true)} aria-label="Таблица прогноза"><Grid2X2 size={17} /></button>
     </header>
-    <div className="nv-switch nv-switch-scenarios" aria-label="Сценарий">
-      {scenarios.map(({id, icon: Icon, text}) => <button type="button" key={id} className="nv-press" aria-pressed={scenario === id}
+    <div className="nv-switch nv-switch-scenarios" role="group" aria-label="Сценарий">
+      {scenarios.map(({id, icon: Icon, text}) => <button type="button" key={id} className="nf-press" aria-pressed={scenario === id}
         onClick={() => set({ scenario: id })}><Icon size={16} aria-hidden="true" /><span>{text}</span></button>)}
     </div>
-    <TideChart key={scenario + days} coverage={cov} days={days} />
-    <div className="nv-switch nv-switch-horizons" aria-label="Горизонт прогноза">
-      {horizons.map(h => <button type="button" key={h} aria-pressed={h === days} onClick={() => setDays(h)}>{h} дней</button>)}
+    <RiskSummary cov={cov} scenario={scenario} onOpen={route} />
+    <div className="nv-switch nv-switch-horizons" role="group" aria-label="Горизонт прогноза">
+      {horizons.map(h => <button type="button" key={h} className="nf-press" aria-pressed={h === days} onClick={() => setDays(h)}>{h} дней</button>)}
     </div>
-    {reason && <div className="nv-forecast-jump">
-      <Jump icon={OctagonAlert} tone="amber" label={cov.shortage ? 'Первый кассовый разрыв' : cov.accountRisk ? 'Риск по счёту' : 'Резерв ниже запаса'}
-        onClick={() => { go('payments'); set({ payView: 'cover' }); }}>
-        {dayMonth(reason.date)}{'title' in reason ? ` · ${reason.title}` : ''}
-      </Jump>
-    </div>}
+    <div className="nf-chart-body" key={scenario + days}><TideChart coverage={cov} days={days} flow /></div>
     <Sheet open={table} title="Точки прогноза" onClose={() => showTable(false)}>
       <table className="nv-table"><thead><tr><th>День</th><th>Мин. за день</th><th>К вечеру</th></tr></thead>
         <tbody>{points.map(([date, value]) => <tr key={date}><td>{dayMonth(date)}</td><td><Money value={coverageDayDetails(cov, date)?.low ?? value} kopecks /></td><td><Money value={value} kopecks /></td></tr>)}</tbody>
       </table>
     </Sheet>
   </section>;
+}
+
+
+function RiskSummary({ cov, scenario, onOpen }: { cov: Coverage; scenario: keyof typeof SCENARIO_LABEL; onOpen: () => void }) {
+  const gap = cov.shortage;
+  const account = cov.accountRisk;
+  const buffer = cov.bufferRisk;
+  if (!gap && !account && !buffer) return null;
+  return <div className="nf-alert" aria-label="Риски по сценарию">
+    <p className="nv-meta">{SCENARIO_LABEL[scenario]} · до {dayMonth(cov.to)}</p>
+    {gap && <div>
+      <h3>Первый кассовый разрыв · {dayMonth(gap.date)}</h3>
+      <strong className="nf-alert-amount"><Money value={-gap.amount} kopecks className="nf-exact" /></strong>
+      <p>{gap.title}</p>
+      <p className="nv-meta">Максимальная нехватка <Money value={cov.maxShortfall} kopecks />{cov.min ? ` · ${dayMonth(cov.min.date)}` : ''}</p>
+    </div>}
+    {account && <p><strong>{account.reason === 'insufficient' ? 'Не хватает на счёте списания' : 'Нужно сверить счёт списания'}</strong>
+      {' · '}{dayMonth(account.date)} · {account.title}
+      {account.amount != null && <> · <Money value={account.amount} kopecks /></>}
+    </p>}
+    {buffer && <p><strong>Резерв ниже запаса</strong> · {dayMonth(buffer.date)} · не хватает <Money value={buffer.amount} kopecks /> до запаса</p>}
+    <button type="button" className="nf-alert-button" onClick={onOpen}>Проверить остатки и обязательства <ActionArrow /></button>
+  </div>;
 }

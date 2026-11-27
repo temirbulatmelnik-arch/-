@@ -1,4 +1,4 @@
-import { ArrowDownLeft, CalendarClock, CircleCheck, Radar, TriangleAlert, WalletCards } from 'lucide-react';
+import { ArrowDownLeft, CalendarClock, CircleCheck, ShieldCheck, TriangleAlert, WalletCards, Waves } from 'lucide-react';
 import type { CSSProperties, ReactNode } from 'react';
 import { cents, rubles } from '../domain/accounts';
 import { dayMonth } from '../domain/dates';
@@ -7,8 +7,9 @@ import { SCENARIO_LABEL } from '../domain/financialView';
 import type { PaymentPreparation } from '../domain/funds';
 import type { Ledger } from '../domain/ledger';
 import { useUi } from '../store/ui';
-import { ActionArrow, Glyph, IconLabel, Jump, Vessels } from '../preview/Visuals';
+import { ActionArrow, Glyph, IconLabel, Jump } from '../preview/Visuals';
 import { Money } from './ui';
+import '../preview/neva-flow.css';
 
 type Horizon = ReturnType<typeof positionBeforeIncome>;
 type Cash = Pick<Ledger, 'cardFrom' | 'lifeAvailable' | 'heldOnCard' | 'reserve' | 'reserveVerified' | 'cashAccounts' | 'totalCash'>;
@@ -20,12 +21,37 @@ export function TodayOverview({ cash, reserveDate, payment, horizon, cov, scenar
   const set = useUi(s => s.set);
   const funded = payment ? payment.prepared >= payment.total : false;
   const shortage = horizon.shortage ?? cov.shortage;
-  const flagged = provisional || shortage || horizon.accountRisk;
+  const accountRisk = horizon.accountRisk ?? cov.accountRisk;
+  const flagged = provisional || shortage || accountRisk || cov.bufferRisk;
   const others = cash.cashAccounts.reduce<number | null>((sum, account) =>
     sum == null || account.expected == null ? null : sum + cents(account.expected), 0);
-  return <div className="nv-stack">
-    <Vessels total={cash.totalCash} parts={[cash.lifeAvailable, cash.heldOnCard, cash.reserve]}
-      reserveVerified={cash.reserveVerified} open={[onCard, onAccounts, onReserve]}>
+  const parts = [
+    { label: 'Свободно на карте', short: 'Свободно', value: cash.lifeAvailable, icon: WalletCards, open: onCard },
+    { label: 'Под платежи', short: 'Под платежи', value: cash.heldOnCard, icon: CalendarClock, open: onAccounts },
+    { label: 'Резерв', short: 'Резерв', value: cash.reserve, icon: ShieldCheck, open: onReserve },
+  ];
+  const amounts = [...parts.map(({ value }) => value == null ? null : cents(value)), others];
+  const total = cash.totalCash == null ? null : cents(cash.totalCash);
+  const showBar = !!cash.cardFrom && cash.reserveVerified && total != null && total > 0
+    && amounts.every(value => value != null && value >= 0) && amounts.reduce<number>((sum, value) => sum + (value ?? 0), 0) === total;
+  return <div className="nv-stack nf-flow nf-home">
+    <section className="nf-panel nf-balances" aria-label="Свои деньги">
+      <header className="nf-head">
+        <h2><IconLabel icon={Waves}>Свои деньги</IconLabel></h2>
+        <span className="nf-tag">По учёту</span>
+      </header>
+      <div className="nf-total">{cash.totalCash == null ? 'Нужна сверка' : <Money value={cash.totalCash} approx={!cash.reserveVerified} kopecks />}</div>
+      {showBar && <div className="nf-money-bar" aria-hidden="true">
+        {amounts.map((value, index) => value ? <span key={index} data-part={index} style={{ width: `${value / total * 100}%` }} /> : null)}
+      </div>}
+      <div className="nf-money-parts">
+        {parts.map(({ label, short, value, icon, open }, index) => <button className="nf-vessel nf-press" type="button" key={label} data-part={index}
+          onClick={open} aria-label={`${label}, ${value == null ? 'нужна сверка' : value.toLocaleString('ru-RU') + ' ₽'}`}>
+          <Glyph icon={icon} size={18} />
+          <span>{short}</span>
+          <strong>{value == null ? 'Сверить' : <Money value={value} approx={index === 2 && !cash.reserveVerified} kopecks />}</strong>
+        </button>)}
+      </div>
       {cash.cashAccounts.length > 0 && <Jump icon={WalletCards} label="На других счетах" onClick={onAccounts}>
         {others == null ? 'Уточнить остатки' : <Money value={rubles(others)} kopecks />}
       </Jump>}
@@ -33,34 +59,38 @@ export function TodayOverview({ cash, reserveDate, payment, horizon, cov, scenar
         {cash.cardFrom ? 'Карта сверена ' + dayMonth(cash.cardFrom.date) : 'Карта ждёт сверки'}
         {' · '}{cash.reserveVerified && reserveDate ? 'резерв сверён ' + dayMonth(reserveDate) : 'резерв по учёту'}
       </p>}
-    </Vessels>
+    </section>
     <div className="nv-flow-grid">
-      <button type="button" className="nv-flow nv-glass nv-press" data-tone="amber" onClick={onPayment}>
+      <button type="button" className="nv-flow nf-panel nf-press" data-tone="amber" onClick={onPayment}>
         <Glyph icon={CalendarClock} tone="amber" />
         <span className="nv-meta">{payment ? dayMonth(payment.date) : 'Нет ближайших'}</span>
         <strong>{payment ? <Money value={payment.total} approx={payment.events.some(form => form.approx)} kopecks /> : 'Платежи'}</strong>
         <span className="nv-flow-title">{payment?.events.length === 1 ? payment.events[0].title : 'Обязательные платежи'}</span>
-        {payment && <div className="nv-funding" role="meter" aria-label="Подготовлено к платежу" aria-valuemin={0} aria-valuemax={payment.total} aria-valuenow={payment.prepared}>
+        {payment && payment.total > 0 && <div className="nv-funding" role="meter" aria-label="Подготовлено к платежу" aria-valuemin={0} aria-valuemax={payment.total} aria-valuenow={payment.prepared}>
           <span style={{ '--fill': `${Math.min(100, 100 * payment.prepared / payment.total)}%` } as CSSProperties} />
         </div>}
         {payment && <small>{funded ? 'Подготовлено' : payment.toFund == null ? 'Проверить счёт' : <>Подготовить <Money value={payment.toFund} kopecks /></>}</small>}
       </button>
-      <button type="button" className="nv-flow nv-glass nv-press" data-tone="aqua" onClick={() => set({ workSheet: true })}>
+      <button type="button" className="nv-flow nf-panel nf-press" data-tone="aqua" onClick={() => set({ workSheet: true })}>
         <Glyph icon={ArrowDownLeft} />
-        <span className="nv-meta">{horizon.until ? dayMonth(horizon.until) : 'Ожидается'}</span>
+        <span className="nv-meta">{horizon.income ? dayMonth(horizon.income.date) : 'Нет ближайших'}</span>
         <strong>{horizon.income ? <Money value={horizon.income.amount} approx={horizon.income.approx} kopecks /> : 'Доходы'}</strong>
-        <span className="nv-flow-title">{horizon.income?.title ?? 'Календарь выплат'}</span>
+        <span className="nv-flow-title">{horizon.income?.title ?? 'Нет поступлений в ближайшие 45 дней'}</span>
         <span className="nv-flow-go">К выплатам <ActionArrow /></span>
       </button>
     </div>
-    <div className="nv-glass nv-glance">
-      <Jump icon={flagged ? TriangleAlert : CircleCheck} label={provisional ? 'Сверить доступные деньги' : horizon.shortage ? 'Разрыв до ближайшей выплаты' : horizon.accountRisk ? 'Уточнить счёт списания' : cov.shortage ? 'В прогнозе есть кассовый разрыв' : `По прогнозу хватает до ${dayMonth(horizon.until)}`}
-        tone={flagged ? 'amber' : 'aqua'} onClick={onForecast}>
-        <IconLabel icon={Radar}>{shortage && !provisional
-          ? <>{SCENARIO_LABEL[horizon.shortage ? 'cautious' : scenario]} · {dayMonth(shortage.date)} · <Money value={shortage.amount} kopecks /></>
-          : 'Прогноз резерва'}</IconLabel>
-      </Jump>
-    </div>
+    <button className="nf-panel nf-risk-link nf-press" data-risk={flagged ? 'true' : undefined} type="button" onClick={onForecast}>
+      <Glyph icon={flagged ? TriangleAlert : CircleCheck} size={21} />
+      <span>
+        <strong>{provisional ? 'Сверить доступные деньги' : shortage ? 'Первый кассовый разрыв' : accountRisk ? 'Проверить счёт списания' :
+          cov.bufferRisk ? 'Резерв ниже запаса' : horizon.until ? `Денег хватает до ${dayMonth(horizon.until)}` : 'Проверить прогноз резерва'}</strong>
+        <small>{shortage && !provisional
+          ? <>{dayMonth(shortage.date)} · {shortage.title} · <Money value={-shortage.amount} kopecks /></>
+          : accountRisk && !provisional ? `${dayMonth(accountRisk.date)} · ${accountRisk.title}`
+          : `Прогноз резерва · ${SCENARIO_LABEL[scenario].toLocaleLowerCase('ru')}`}</small>
+      </span>
+      <ActionArrow />
+    </button>
     {children}
   </div>;
 }

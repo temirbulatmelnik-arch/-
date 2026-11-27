@@ -5,7 +5,7 @@ import { CalendarFunding, CalendarProof } from '../components/rows';
 // «Платежи» — хватит ли денег на всё, что спишется. Три вида, листаются пальцем:
 // «Месяц» — календарь с водой и линия денег, выбранный день; «Хватит ли» — счета и прогноз покрытия до премии;
 // «Список» — все платежи месяца по датам, отметка «оплачено» свайпом вправо.
-import { BellRing, ChevronLeft, ChevronRight, PencilLine, ReceiptText, Repeat, Scale } from 'lucide-react';
+import { BellRing, ChevronLeft, ChevronRight, PencilLine, ReceiptText, Repeat } from 'lucide-react';
 import { Hold } from '../components/Hold';
 import { motion } from 'motion/react';
 import { haptic } from '../components/haptics';
@@ -186,16 +186,22 @@ function DayCard({ date, cov, day, events, marks, now, onClose }: {
   const reserve = date ? cov.accountByDay?.[date]?.[RESERVE_ACCOUNT] : null;
   const reserveLow = date ? cov.reserveLowByDay?.[date] : null;
   return <Sheet open={!!date} title={date ? dayMonth(date) : 'День календаря'} subtitle={date ? weekdayFull(date) : undefined} onClose={onClose}>
-    {date && <div className="space-y-3">
-      {summary && <details className="card px-3 py-1">
-        <summary className="min-h-11 cursor-pointer py-3 text-[13px] font-medium">{SCENARIO_LABEL[scenario]} прогноз · всего своих денег <Money value={summary.end} kopecks /></summary>
+    {date && <div className="nf-flow space-y-3">
+      {summary && <div className="nf-panel nf-calendar-detail">
+        <p className="nv-meta">{SCENARIO_LABEL[scenario]} прогноз · остаток к вечеру</p>
+        <strong className="nf-day-total"><Money value={summary.end} kopecks className="nf-exact" /></strong>
+        {summary.low < 0 && <p className="nf-day-warning">Нехватка внутри дня <Money value={-summary.low} kopecks className="nf-exact" /></p>}
+        <details>
+        <summary>Как меняется остаток за день</summary>
         <dl className="space-y-1.5 border-t border-line py-3 text-[13px]">
           {([['На начало дня', summary.start], ['Внешние поступления', summary.income], ['Внешние расходы', -summary.out],
             ['Минимум внутри дня', summary.low], ['Резерв после переводов', reserve ?? day?.total], ['Минимум резерва внутри дня', reserveLow]] as [string, number | null | undefined][]).filter(([, value]) => value != null).map(([label, value]) =>
             <div key={label} className="flex justify-between gap-3"><dt>{label}</dt><dd><Money value={value!} kopecks /></dd></div>)}
         </dl>
         <p className="pb-3 text-xs text-muted">Когда время неизвестно, обязательства идут раньше поступлений. Переводы между своими счетами меняют остатки счетов.</p>
-      </details>}
+        </details>
+      </div>}
+      <h3 className="text-sm font-medium">События дня</h3>
       {events.length || day?.extra.length ? <div className="card divide-y divide-line">
         {events.map(event => <SwipeEvent key={event.key} e={event} mark={marks[event.key]} now={now} />)}
         {day?.extra.map(row => <div key={row.title} className="flex justify-between gap-3 p-3 text-sm">
@@ -228,7 +234,7 @@ function CoverView() {
   const overdue = useMemo(() => eventsBetween(cal, addDays(now, -60), addDays(now, -1)).filter(e => needsPaymentReview(e, marks[e.key], now)), [cal, now, marks]);
   return (
     <>
-      <CoverageCard />
+      <CoverageCard onReconcile={() => runQuick('checkup')} />
 
       <motion.section className="mx-4 mt-6" variants={listAnim} initial={false} animate="show">
         <div className="mb-2 flex items-baseline justify-between px-1">
@@ -240,10 +246,7 @@ function CoverView() {
           <AccTile label="Резерв" value={led.reserve} tone="money" hint={led.incomeOnCard > 0 ? <>+<Money value={led.incomeOnCard} /> ждут перевода</> : undefined} onClick={() => set({ reserve: true })} />
           <AccTile label={led.creditCard ? `${led.creditCard.short}, долг` : 'Кредитка'} value={led.credit} tone="ahead" onClick={() => led.creditCard && set({ debt: led.creditCard.id })} />
         </div>
-        <motion.button variants={item} type="button" whileTap={{ scale: 0.98 }} onClick={() => runQuick('checkup')}
-          className="mt-2 flex h-12 w-full items-center justify-center gap-2 rounded-[16px] border border-line bg-surface text-[14px] font-medium">
-          <Scale size={17} strokeWidth={1.6} className="text-sea" /> Сверить с банком
-        </motion.button>
+
       </motion.section>
 
 

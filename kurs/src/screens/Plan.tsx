@@ -5,9 +5,9 @@ import { monthDebtActivity } from '../domain/accounts';
 import { useLedger } from './Checkup';
 // «Долги» — тает ли долг. Общий долг досчитывает вниз от начального, фарватер: долги буями по порядку закрытия,
 // судно — у текущей цели, впереди гавань «Свобода». Ниже — «Долги / План / Чек-лист», листаются пальцем.
-import { Anchor, Check, Gift, Lock, Plus, Ship, Target } from 'lucide-react';
+import { Anchor, Check, ChevronDown, ChevronRight, Gift, Lock, Plus, Ship, Target } from 'lucide-react';
 import { motion } from 'motion/react';
-import { CountTo, item, list as listAnim, Pager, spring } from '../components/motion';
+import { Pager, spring } from '../components/motion';
 import type { Forecast } from '../domain/forecast';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
@@ -50,7 +50,7 @@ export function Plan() {
         <motion.button type="button" whileTap={{ scale: 0.97 }} onClick={() => set({ bonus: {} })} className="flex h-11 items-center gap-1.5 rounded-full bg-ink px-4 text-[13.5px] font-medium text-bg"><Gift size={15} strokeWidth={1.8} /> Пришла премия</motion.button>
       } />
       <DebtHero />
-      <div className="nv-page nv-stack">
+      <div className="nv-page nv-stack nf-flow">
         <VoyageActions explore={() => setSimulate(true)} openPrepay={() => {
           set({ planView:'debts' });
           requestAnimationFrame(() => document.getElementById('kurs-prepayment')?.scrollIntoView({ block:'center' }));
@@ -84,7 +84,7 @@ function useDebtForecast(): Forecast {
   }, [cal, debts, incomes, reserve, oneOff, templateFrom, now]);
 }
 
-/** Общий долг досчитывает вниз от начального и фарватер: долги буями по порядку закрытия, судно у текущей цели */
+/** Оценка журнала и стратегический порядок выплат. */
 function DebtHero() {
   const [debts, plan] = useStore(useShallow(s => [s.debts, s.planTrajectory] as const));
   const set = useUi(s => s.set);
@@ -94,87 +94,49 @@ function DebtHero() {
   const now = useToday();
   const comparable = start > 0 && debts.length > 0;
   const delta = total - start;
+  const paidShare = comparable ? Math.min(1, Math.max(0, 1 - total / start)) : 0;
   const fc = useDebtForecast();
   const planEnd = plan.at(-1)?.[0];
   const target = targetDebt(debts);
   const route = [...debts].sort((a, b) => Number(b.closed) - Number(a.closed) || a.order - b.order);
-  const step = 96, W = 56 + route.length * step + 96, H = 150;
-  const pos = (i: number) => ({ x: 56 + i * step, y: 70 + Math.sin(i * 1.25 + 0.4) * 16 });
-  const ti = Math.max(0, route.findIndex(d => d.id === target?.id || (!target && !d.closed)));
-  const pts = route.map((_, i) => pos(i));
-  const path = pts.reduce((d, p, i) => (i ? `${d} S${p.x - step / 2} ${p.y + (i % 2 ? 22 : -22)} ${p.x} ${p.y}` : `M8 ${p.y + 6} Q${p.x / 2} ${p.y + 14} ${p.x} ${p.y}`), '') + ` S${W - 70} 48 ${W - 40} 62`;
   return (
-    <section className="nv-debt-shell deep-card deep-dusk mx-4 mt-3 pt-5 pb-3">
-        <span aria-hidden="true" className="deep-sheen" />
-      <div className="px-5">
-        <div className="text-[13px] text-card-muted">Общий долг по учёту · оценка</div>
-        <CountTo to={total} from={start > total ? start : total} className="figure mt-1 block text-[42px] leading-none" />
-        {comparable && (
-          <div className="mt-4 h-[5px] overflow-hidden rounded-full bg-card/12">
-            <motion.div className="h-full rounded-full bg-card-sea" initial={{ width: 0 }} animate={{ width: `${Math.max(0, (1 - total / start) * 100)}%` }} transition={{ ...spring, delay: 0.4 }} />
-          </div>
-        )}
-        <div className="mt-3 grid grid-cols-2 gap-3 text-[12px] text-card-muted">
-          {comparable && <div>{delta < 0 ? 'Долг уменьшился' : delta > 0 ? 'Долг вырос' : 'Изменение долга'}
-            <Money value={Math.abs(delta)} kopecks className="mt-0.5 block text-[15px] text-card" />
-            <span className="block">{plan[0] ? 'К началу плана · ' + monthName(plan[0][0]) : 'К сумме исходных долгов'}</span>
+    <div className="nf-flow mx-4 mt-3">
+      <section className="nf-panel nf-debt" aria-label="Общий долг">
+        <header className="nf-head"><h2>Общий долг</h2><span className="nf-tag">Оценка по учёту</span></header>
+        <p className="nf-total"><Money value={total} kopecks /></p>
+        {comparable && <div className="nf-progress" role="meter" aria-label="Снижение долга к началу плана"
+          aria-valuenow={Number((paidShare * 100).toFixed(1))}>
+          <span style={{ width: `${paidShare * 100}%` }} />
+        </div>}
+        <div className="nf-kpis">
+          {comparable && <div><small>{delta < 0 ? 'Долг уменьшился' : delta > 0 ? 'Долг вырос' : 'Изменение долга'}</small>
+            <strong><Money value={Math.abs(delta)} kopecks className="nf-exact" /></strong>
+            <small>{plan[0] ? 'К началу плана · ' + monthName(plan[0][0]) : 'К сумме исходных долгов'}</small>
           </div>}
-          <div>Проценты за месяц · оценка<Money value={monthlyInterest(debts)} approx className="mt-0.5 block text-[15px] text-card" />
-            <span className="block">По остаткам и ставкам на {ddmm(now)}</span></div>
+          <div><small>Проценты за месяц</small>
+            <strong><Money value={monthlyInterest(debts)} approx className="nf-exact" /></strong>
+            <small>По остаткам и ставкам на {ddmm(now)}</small>
+          </div>
         </div>
-      </div>
-      {/* фарватер: листается вбок; буй — открыть долг, судно — у текущей цели, в конце — гавань «Свобода».
-          Бесконечные мелочи (круги у буя, пульс гавани, качка судна) — HTML-слои с CSS-анимацией: их крутит
-          видеокарта, а не скрипт на каждом кадре, и картинка фарватера не перерисовывается */}
-      <p className="px-5 pt-3 text-[12px] text-card-muted">Маршрут погашения · прокрутите вправо</p>
-      <div className="no-scrollbar overflow-x-auto" data-noswipe tabIndex={0} aria-label="Маршрут погашения">
-        <div className="relative" style={{ width: W, height: H }}>
-          <span aria-hidden="true" className="fw-pulse absolute size-9 rounded-full bg-card-sea" style={{ left: W - 40 - 18, top: 62 - 18 }} />
-          {route[ti] && !route[ti].closed && (
-            <span aria-hidden="true" className="fw-ping absolute size-7 rounded-full border-[1.5px] border-[#ffc49a]" style={{ left: pts[ti].x - 14, top: pts[ti].y + 4 - 14 }} />
-          )}
-          <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="relative block" role="img" aria-label="Фарватер: долги по порядку закрытия">
-            {/* лёгкая рябь фарватера */}
-            {[24, 112, 132].map((y, k) => <path key={y} d={`M0 ${y} q 24 -5 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0 t 48 0`} fill="none" stroke="var(--card-muted)" strokeOpacity={0.12 - k * 0.02} strokeWidth="1" />)}
-            <motion.path d={path} fill="none" stroke="var(--card-muted)" strokeOpacity=".5" strokeWidth="1.6" strokeDasharray="5 7"
-              initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 1.8, ease: [0.16, 1, 0.3, 1] }} />
-            {route.map((d, i) => {
-              const p = pts[i];
-              const cur = i === ti && !d.closed;
-              return (
-                <motion.g key={d.id} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: 0.25 + i * 0.07 }}
-                  onClick={() => set({ debt: d.id })} style={{ cursor: 'pointer' }} role="button" aria-label={`${d.short}: ${d.closed ? 'закрыт' : `${Math.round(d.balance)} ₽`}`}>
-                  <circle cx={p.x} cy={p.y} r="22" fill="transparent" />
-                  {d.closed
-                    ? <><circle cx={p.x} cy={p.y} r="10" fill="#4fd1ac" /><path d={`M${p.x - 4.5} ${p.y} l3.2 3.3 l5.8 -6.4`} stroke="#0a2433" strokeWidth="2" fill="none" strokeLinecap="round" /></>
-                    : <g>
-                        <path d={`M${p.x - 8} ${p.y + 9} L${p.x} ${p.y - 13} L${p.x + 8} ${p.y + 9} Z`} fill={cur ? '#ffc49a' : '#ee6125'} />
-                        <path d={`M${p.x - 5.3} ${p.y + 1.5} H${p.x + 5.3}`} stroke="#fff" strokeOpacity=".7" strokeWidth="2" />
-                        <rect x={p.x - 10} y={p.y + 8} width="20" height="4" rx="2" fill="var(--card-muted)" />
-                      </g>}
-                  <text x={p.x} y={p.y + 30} textAnchor="middle" fontSize="12" fontWeight={cur ? 600 : 400} fill="var(--card-ink)" opacity={d.closed ? 0.55 : 1} style={{ fontFamily: 'var(--font-sans)' }}>{d.short}</text>
-                  {!d.closed && <text x={p.x} y={p.y + 45} textAnchor="middle" fontSize="11" fill="var(--card-muted)" style={{ fontFamily: 'var(--font-sans)' }}>{Math.round((led.debtBalances[d.id]?.estimated ?? d.balance) / 1000).toLocaleString('ru-RU')} тыс.</text>}
-                </motion.g>
-              );
-            })}
-            <g transform={`translate(${W - 40} 62)`}>
-              <Anchor x={-10} y={-10} width={20} height={20} color="var(--card-sea)" />
-              <text y="36" textAnchor="middle" fontSize="12" fontWeight="600" fill="var(--card-sea)" style={{ fontFamily: 'var(--font-sans)' }}>Свобода</text>
-            </g>
-          </svg>
-          {/* судно подплывает к текущей цели и покачивается на волне */}
-          <motion.div aria-hidden="true" className="pointer-events-none absolute top-0 left-0" initial={{ x: 0, y: pts[0]?.y ?? 60 }}
-            animate={{ x: (pts[ti]?.x ?? 56) - 40, y: (pts[ti]?.y ?? 60) - 34 }} transition={{ type: 'spring', stiffness: 50, damping: 14, delay: 0.6 }}>
-            <div className="fw-bob"><Ship size={26} color="var(--card-ink)" /></div>
-          </motion.div>
+        <header className="nf-head nf-route-head"><h3>Маршрут погашения</h3><Anchor size={18} aria-hidden="true" /></header>
+        {target && <p className="nv-meta">Следующая цель · {target.short}</p>}
+        <div className="nf-route" data-noswipe tabIndex={0} aria-label="Маршрут погашения">
+          {route.map(d => {
+            const state = d.closed ? 'closed' : d.id === target?.id ? 'active' : 'next';
+            return <button type="button" key={d.id} className="nf-press" data-state={state} onClick={() => set({ debt: d.id })}>
+              {d.closed ? <Check size={18} aria-hidden="true" /> : state === 'active' ? <Ship size={21} aria-hidden="true" /> : <Anchor size={17} aria-hidden="true" />}
+              <span>{d.short}</span>
+              <small>{d.closed ? 'Закрыт' : state === 'active' ? 'Текущая цель' : 'По очереди'}</small>
+            </button>;
+          })}
+          <span><Anchor size={18} aria-hidden="true" /><span>Свобода</span><small>Все долги закрыты</small></span>
         </div>
-      </div>
-      <div className="mx-5 mt-1 border-t border-card-line pt-3 text-[12.5px] leading-snug text-card-muted">
-        {fc.freeMonth
-          ? <>Прогноз при текущих платежах · <span className="text-card">{monthName(fc.freeMonth)}</span>{planEnd ? <>. Цель стратегии · {monthName(planEnd)}</> : null}.</>
-          : 'В шестилетнем горизонте расчёта даты полного погашения пока нет.'}
-      </div>
-    </section>
+        <dl className="nf-debt-dates">
+          <div><dt>По текущим платежам</dt><dd>{fc.freeMonth ? monthName(fc.freeMonth) : 'Нет даты в пределах 6 лет'}</dd></div>
+          <div><dt>Цель стратегии</dt><dd>{planEnd ? monthName(planEnd) : 'Дата не задана'}</dd></div>
+        </dl>
+      </section>
+    </div>
   );
 }
 
@@ -240,17 +202,19 @@ function DebtsView() {
         </div>
       )}
 
-      <div className="mx-4 mt-4 flex items-center justify-between gap-2">
-        <h2 className="font-medium">Обязательства</h2>
-        <select className="min-h-11 min-w-0 rounded-xl bg-surface px-2 text-[13px]" aria-label="Сортировка долгов" value={sort} onChange={event => setSort(event.target.value)}>
+      <section className="nf-flow mt-4 space-y-2.5 px-4" aria-label="Обязательства">
+      <header className="nf-head">
+        <h2>Обязательства</h2>
+        <select className="nf-select" aria-label="Сортировка долгов" value={sort} onChange={event => setSort(event.target.value)}>
           <option value="strategy">По стратегии</option><option value="date">По сроку платежа</option><option value="rate">По ставке</option>
         </select>
-      </div>
-      <motion.div className="space-y-2.5 px-4" variants={listAnim} initial={false} animate="show">
+      </header>
+      <div className="space-y-2.5">
         {openDebts.length === 0 && <Empty>{debts.length ? 'Все долги закрыты. Свобода.' : 'Долгов пока нет.'}</Empty>}
         {openDebts.map((d, i) => <DebtCard key={d.id} n={i + 1} d={d} balance={led.debtBalances[d.id]?.estimated ?? d.balance} next={next[d.id]} closeMonth={fc.closeMonth[d.id]} target={target?.id === d.id} onClick={() => set({ debt: d.id })} />)}
-        <motion.button variants={item} type="button" onClick={() => setAdding(true)} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-line text-[13.5px] text-muted"><Plus size={16} /> Добавить долг</motion.button>
-      </motion.div>
+        <button type="button" onClick={() => setAdding(true)} className="nf-add nf-press"><Plus size={16} /> Добавить долг</button>
+      </div>
+      </section>
 
       {closed.length > 0 && (
         <details className="card mx-4 mt-4 px-3">
@@ -276,30 +240,33 @@ function DebtCard({ n, d, balance, next, closeMonth, target, onClick }: { n: num
   const paid = Math.max(0, d.startBalance - balance);
   const progress = d.startBalance > 0 && paid > 0;
   const late = closeMonth && d.targetClose && closeMonth > d.targetClose;
-  return (
-    <motion.button variants={item} whileTap={{ scale: 0.98 }} type="button" onClick={onClick} className={`card block w-full p-4 text-left ${target ? 'border-sea/50' : ''}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className={`grid size-6 place-items-center rounded-full text-[12px] font-semibold ${target ? 'bg-sea text-on-sea' : 'bg-surface-2 text-muted'}`} aria-label={`${n}-й по очереди`}>{n}</span>
-            <span className="text-[15.5px] font-medium">{d.short}</span>
-            <Chip>{pct(d.rate)} годовых</Chip>
-            {d.frozen && <Chip tone="neg"><Lock size={10} /> не тратить</Chip>}
-          </div>
-          <div className="mt-0.5 break-words text-[12px] text-muted">{d.name}</div>
-        </div>
-        <span className="shrink-0 text-right"><Money value={balance} approx={!(d.bankBalance && balance === d.bankBalance.amount)} kopecks className="figure text-[18px]" /><small className="block text-muted">{d.bankBalance && balance === d.bankBalance.amount ? 'По банку' : 'По учёту'}</small></span>
-      </div>
-      {progress && <div className="mt-3 text-xs text-muted">Погашено <Money value={paid} /> из <Money value={d.startBalance} /><Bar value={paid / d.startBalance} tone={target ? 'sea' : 'pos'} className="mt-1.5" /></div>}
-      <div className="mt-2.5 flex flex-wrap justify-between gap-x-3 gap-y-0.5 text-[12px] text-muted">
-        <span>{next ? <>платёж {next.dateMode === 'until' ? 'до ' : ''}{ddmm(next.date)}: <Money value={next.amount} approx={next.approx} className="text-ink" /></> : 'платежей в 45 дней нет'}</span>
-        <span className="basis-full">Цель стратегии · {d.targetClose ? monthName(d.targetClose) : 'дата не задана'}</span>
-        <span className={late ? 'basis-full text-warn' : 'basis-full'}>{closeMonth ? 'Прогноз при текущих платежах · ' + monthName(closeMonth) :
-          'Недостаточно данных для расчёта срока · откройте график долга'}</span>
-        {late && <span className="basis-full">Цель зависит от будущих выплат и досрочного погашения. Прогноз использует текущие платежи и доступные поступления.</span>}
-      </div>
-    </motion.button>
-  );
+  const bankMatched = !!d.bankBalance && balance === d.bankBalance.amount;
+  return <details className="nf-panel nf-obligation" data-target={target}>
+    <summary>
+      <span className="nf-obligation-name">
+        <span className="nf-debt-position" aria-label={`${n}-й по очереди`}>{n}</span><strong>{d.short}</strong>
+        <small>{pct(d.rate)} годовых</small>
+      </span>
+      <span className="nf-obligation-amount">
+        <Money value={balance} approx={!bankMatched} kopecks className="nf-exact" /><small>{bankMatched ? 'По банку' : 'По учёту'}</small>
+      </span>
+      <span className="nf-obligation-next">
+        {next ? <>Платёж {next.dateMode === 'until' ? 'до ' : ''}{ddmm(next.date)} · <Money value={next.amount} approx={next.approx} kopecks className="nf-exact" /></> : 'Платежей в 45 дней нет'}
+      </span>
+      <ChevronDown className="nf-disclose" size={18} aria-hidden="true" />
+      {(target || d.frozen || late) && <span className="nf-debt-status">
+        {target && <span>Текущая цель</span>}{d.frozen && <span><Lock size={13} /> Не тратить</span>}{late && <span>Прогноз позже цели</span>}
+      </span>}
+    </summary>
+    <div className="nf-obligation-detail">
+      <p>{d.name}</p>
+      {progress && <div>Погашено <Money value={paid} kopecks /> из <Money value={d.startBalance} kopecks /><Bar value={paid / d.startBalance} tone={target ? 'sea' : 'pos'} className="mt-1.5" /></div>}
+      <p>Цель стратегии · {d.targetClose ? monthName(d.targetClose) : 'дата не задана'}</p>
+      <p>{closeMonth ? 'Прогноз при текущих платежах · ' + monthName(closeMonth) : 'Недостаточно данных для расчёта срока'}</p>
+      {late && <p className="nv-meta">Цель зависит от будущих выплат и досрочного погашения. Прогноз использует текущие платежи и доступные поступления.</p>}
+      <button type="button" onClick={onClick} className="nf-more nf-press">Открыть долг <ChevronRight size={17} aria-hidden="true" /></button>
+    </div>
+  </details>;
 }
 
 function ChecklistView() {

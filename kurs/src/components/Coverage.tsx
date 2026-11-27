@@ -14,6 +14,7 @@ import { useStore } from '../store/store';
 import { useCal, useToday, useUi } from '../store/ui';
 import { haptic } from './haptics';
 import { ease, spring } from './motion';
+import { ActionArrow } from '../preview/Visuals';
 import { Money, Segmented } from './ui';
 
 /**
@@ -78,39 +79,41 @@ function ReserveScrub({ steps, start, from, to, focus }: { steps: CoverageStep[]
   const px = x(p.k), py = y(p.v);
   const low = p.v < NARROW, neg = p.v < 0;
   return (
-    <div className="relative mt-4 select-none" data-noswipe>
-      <div ref={box} className="relative touch-none" onPointerDown={e => { (e.target as HTMLElement).setPointerCapture?.(e.pointerId); pick(e); }} onPointerMove={e => e.buttons && pick(e)}
+    <div className="nf-scrub relative mt-2 select-none" data-noswipe>
+      <div ref={box} className="relative touch-pan-y" onPointerDown={e => { e.currentTarget.setPointerCapture?.(e.pointerId); pick(e); }} onPointerMove={e => e.buttons && pick(e)}
         role="slider" aria-label="Остаток резерва по дням" aria-valuemin={Math.round(min)} aria-valuemax={Math.round(max)} aria-valuenow={Math.round(p.v)} aria-valuetext={`${p.s ? dayMonth(p.s.date) : 'сегодня'}: ${num(p.v)} ₽`}
-        tabIndex={0} onKeyDown={e => { if (e.key === 'ArrowRight') setCur(c => Math.min(pts.length - 1, c + 1)); if (e.key === 'ArrowLeft') setCur(c => Math.max(0, c - 1)); }}>
+        tabIndex={0} onKeyDown={e => {
+          const next = { ArrowRight: cur + 1, ArrowUp: cur + 1, ArrowLeft: cur - 1, ArrowDown: cur - 1, Home: 0, End: pts.length - 1 }[e.key];
+          if (next !== undefined) { e.preventDefault(); setCur(Math.min(pts.length - 1, Math.max(0, next))); }
+        }}>
         <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full overflow-visible" aria-hidden="true">
           <defs>
-            <linearGradient id="cov-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--card-sea)" stopOpacity=".28" /><stop offset="1" stopColor="var(--card-sea)" stopOpacity="0" /></linearGradient>
+            <linearGradient id="cov-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--nf-accent)" stopOpacity=".28" /><stop offset="1" stopColor="var(--nf-accent)" stopOpacity="0" /></linearGradient>
             <clipPath id="cov-low"><rect x="0" y={y(NARROW)} width={W} height={H} /></clipPath>
             <clipPath id="cov-neg"><rect x="0" y={y(0)} width={W} height={H} /></clipPath>
           </defs>
           <path d={`${d} V${H} H0 Z`} fill="url(#cov-fill)" />
-          <path d={`M0 ${y(0)} H${W}`} strokeWidth="1" style={{ stroke: 'var(--card-muted)' }} opacity=".45" />
-          <path d={`M0 ${y(1000)} H${W}`} strokeWidth="1" strokeDasharray="3 5" style={{ stroke: '#ffc49a' }} opacity=".6" />
-          <motion.path d={d} fill="none" strokeWidth="2.2" style={{ stroke: 'var(--card-ink)' }} initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 1.1, ease: ease.out }} />
-          <path d={d} fill="none" strokeWidth="2.4" clipPath="url(#cov-low)" style={{ stroke: '#ffc49a' }} />
-          <path d={d} fill="none" strokeWidth="2.6" clipPath="url(#cov-neg)" style={{ stroke: '#ff8a5c' }} />
-          <line x1={px} x2={px} y1={4} y2={H} strokeWidth="1" style={{ stroke: 'var(--card-ink)' }} opacity=".35" />
-          <motion.circle r="5.5" animate={{ cx: px, cy: py }} transition={{ type: 'spring', bounce: 0, duration: 0.2 }} style={{ fill: neg ? '#ff8a5c' : low ? '#ffc49a' : 'var(--card-ink)', stroke: 'var(--card-bg-solid, #134c66)' }} strokeWidth="2" />
+          <path d={`M0 ${y(0)} H${W}`} strokeWidth="1" stroke="var(--nf-edge)" strokeDasharray="4 3" />
+          <path d={`M0 ${y(1000)} H${W}`} strokeWidth="1" strokeDasharray="3 5" stroke="var(--nf-edge)" opacity=".8" />
+          <path d={d} fill="none" strokeWidth="2.2" stroke="var(--nf-accent)" />
+          <path d={d} fill="none" strokeWidth="2.4" clipPath="url(#cov-low)" stroke="var(--nf-prepared)" />
+          <path d={d} fill="none" strokeWidth="2.6" clipPath="url(#cov-neg)" stroke="var(--nf-warn)" />
+          <line x1={px} x2={px} y1={4} y2={H} strokeWidth="1" stroke="var(--nf-edge)" opacity=".7" />
+          <circle r="5.5" cx={px} cy={py} fill={neg ? 'var(--nf-warn)' : low ? 'var(--nf-prepared)' : 'var(--nf-accent)'} stroke="var(--nf-surface)" strokeWidth="2" />
+          {min < 0 && <text className="nf-zero-label" x="2" y={y(0) - 3}>0 ₽</text>}
         </svg>
-        {/* подпись под пальцем: дата, остаток, что списывается */}
-        <div className="pointer-events-none absolute -top-1 rounded-xl bg-black/30 px-2.5 py-1.5 text-[12px] leading-tight backdrop-blur-sm"
-          style={{ left: `clamp(0px, calc(${(px / W) * 100}% - 70px), calc(100% - 140px))`, width: 140 }}>
-          <div className="text-card-muted">{p.s ? dayMonth(p.s.date) : 'сегодня'}</div>
-          <div className={`font-display text-[15px] font-medium ${neg ? 'text-[#ff9a70]' : low ? 'text-[#ffc49a]' : 'text-card'}`}>{num(Math.round(p.v))} ₽</div>
-          {p.s && <div className="truncate text-card-muted">{p.s.delta > 0 ? '+' : '−'}{num(Math.abs(Math.round(p.s.delta)))} {p.s.title}</div>}
-        </div>
       </div>
-      <div className="mt-1 flex justify-between text-[11px] text-card-muted"><span>сегодня</span><span>ведите пальцем по линии</span><span>{ddmm(to)}</span></div>
+      <div className="nf-scrub-dates"><span>{ddmm(from)}</span><span>{ddmm(to)}</span></div>
+      <div className="nf-scrub-event">
+        <span>{p.s ? dayMonth(p.s.date) : 'На начало прогноза'}</span>
+        <strong><Money value={p.v} kopecks className="nf-exact" /></strong>
+        {p.s && <p>{p.s.title} · <Money value={p.s.delta} kopecks sign className="nf-exact" /></p>}
+      </div>
     </div>
   );
 }
 
-export function CoverageCard() {
+export function CoverageCard({ onReconcile }: { onReconcile: () => void }) {
   const set = useUi(s => s.set);
   // резерв по учёту: минус оплаченное из него после последнего остатка из банка, плюс поступления, ждущие перевода с карты
   const { input, cov, now } = useCoverage();
@@ -132,39 +135,37 @@ export function CoverageCard() {
   const fallback = !helpful.length && s && !risk;
 
   return (
-    <section className="mx-4 mt-4">
+    <section className="nf-flow nf-cover mx-4 mt-4">
       <div className="mb-3"><Segmented value={scenario} onChange={scenario => set({ scenario })} options={[
         { id: 'base', label: SCENARIO_LABEL.base }, { id: 'cautious', label: SCENARIO_LABEL.cautious }, { id: 'stress', label: SCENARIO_LABEL.stress },
       ]} /></div>
-      <div className="deep-card px-5 pt-5 pb-4">
-        <span aria-hidden="true" className="deep-sheen" />
-        <div className="flex items-start gap-3">
-          {s || risk || unverified ? <TriangleAlert size={22} strokeWidth={1.8} className="mt-0.5 shrink-0 text-[#ff9a70]" /> : <CheckCircle2 size={22} strokeWidth={1.8} className="mt-0.5 shrink-0 text-[#9ff0d4]" />}
+      <div className="nf-panel nf-cover-lead" data-risk={!!(s || risk || unverified)}>
+        <div className="flex items-start gap-2">
+          {s || risk || unverified ? <TriangleAlert size={21} aria-hidden="true" /> : <CheckCircle2 size={21} aria-hidden="true" />}
           <div className="min-w-0">
-            <h2 className="font-display text-[21px] leading-tight font-medium">
-              {s ? <>Кассовый разрыв по прогнозу <Money value={s.amount} kopecks /></> : risk || unverified ? <>Нужна сверка для прогноза</> : <>Хватает по прогнозу до {dayMonth(cov.to)}</>}
-            </h2>
-            <p className="mt-1 text-[13.5px] leading-snug text-card-muted">
-              {s ? <>Первый дефицит {dayMonth(s.date)} после «{s.title}». {m && <>Минимум {ddmm(m.date)} · <Money value={m.balance} kopecks />.</>} Расчёт до {ddmmyyyy(cov.to)}.</>
-                : m ? <>Минимум {dayMonth(m.date)} · <Money value={m.balance} className="text-card" /></> : null}
-            </p>
+            <p className="nv-meta">{SCENARIO_LABEL[scenario]} · до {ddmmyyyy(cov.to)}</p>
+            <h2>{s ? `Первый кассовый разрыв · ${dayMonth(s.date)}` : risk || unverified ? 'Нужна сверка для прогноза' : `Денег хватает до ${dayMonth(cov.to)}`}</h2>
+            {s && <strong className="nf-alert-amount"><Money value={-s.amount} kopecks className="nf-exact" /></strong>}
+            {s && <p>{s.title}</p>}
+            {m && <p className="nv-meta">Самый низкий остаток · {ddmm(m.date)} · <Money value={m.balance} kopecks className="nf-exact" /></p>}
+            {s && <p className="nv-meta">Максимальная нехватка <Money value={cov.maxShortfall} kopecks className="nf-exact" /></p>}
           </div>
         </div>
-        {unverified && <p className="mt-2 text-[13px] text-card-muted">Расчёт уточнится после сверки счетов.</p>}
-        <ReserveScrub steps={cov.steps} start={cov.start} from={cov.from} to={cov.to} focus={focus} />
+        {unverified && <p className="nv-meta">Расчёт уточнится после сверки счетов.</p>}
+        <button className="nf-alert-button nf-more nf-press" type="button" onClick={onReconcile}>Сверить с банком <ActionArrow /></button>
       </div>
-
-      {risk && <div className="mt-3 rounded-[18px] bg-warn/12 px-4 py-3 text-[13.5px]">
-        <b>{dayMonth(risk.date)} · {risk.title}</b>
-        <div>{riskName ?? 'Счёт списания не указан'}{risk.amount != null ? <> · прогнозная недостача <Money value={risk.amount} kopecks /></>
-          : riskName ? ' · остаток не подтверждён' : ' · сумма на этом счёте пока неизвестна'}</div>
-        {hints[0] && <p className="mt-1 text-muted">{hints[0].text}</p>}
+      <div className="nf-panel nf-cover-plot">
+        <h3>Остаток относительно нуля</h3>
+        <ReserveScrub key={scenario} steps={cov.steps} start={cov.start} from={cov.from} to={cov.to} focus={focus} />
+      </div>
+      {risk && <div className="nf-alert">
+        <strong>{risk.reason === 'insufficient' ? 'Не хватает на счёте списания' : 'Нужна сверка счёта списания'}</strong>
+        <p>{dayMonth(risk.date)} · {risk.title}</p>
+        <p>{riskName ?? 'Счёт списания не указан'}{risk.amount != null ? <> · прогнозная недостача <Money value={risk.amount} kopecks /></>
+          : riskName ? ' · остаток не подтверждён' : ' · сумма на этом счёте пока неизвестна'}</p>
+        {hints[0] && <p className="nv-meta">{hints[0].text}</p>}
       </div>}
-      {cov.shortage && <p className="mt-3 px-1 text-[13px] text-warn">
-        Первый общий дефицит {dayMonth(cov.shortage.date)} · <Money value={cov.shortage.amount} kopecks />.
-        Максимум на горизонте <Money value={cov.maxShortfall} kopecks />.
-      </p>}
-      {cov.bufferRisk && <p className="mt-3 px-1 text-[13px] text-muted">С {dayMonth(cov.bufferRisk.date)} запас ниже цели на <Money value={cov.bufferRisk.amount} />.</p>}
+      {cov.bufferRisk && <p className="mt-3 px-1 nv-meta">С {dayMonth(cov.bufferRisk.date)} запас ниже цели на <Money value={cov.bufferRisk.amount} kopecks />.</p>}
       {funding.length > 0 && <details className="card mt-3 p-4 text-[13px]">
         <summary className="font-medium text-sea">Счета и подготовка ближайших платежей</summary>
         <div className="mt-2 divide-y divide-line">
