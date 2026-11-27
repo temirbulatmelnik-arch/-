@@ -6,6 +6,7 @@ import './index.css';
 import './preview/widgets.css';
 import './preview/glass.css';
 import App from './App';
+import { openFinanceProfile } from './store/store';
 import { useUi } from './store/ui';
 
 // страница открылась сама — флаг спасения от старого кеша «Тонуса» больше не нужен (vite.config.ts)
@@ -16,9 +17,10 @@ const render = () => createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 );
-// демо-макет нового вида: вымышленный план вместо ввода кода
-if (import.meta.env.VITE_DEMO) void import('./demo').then(m => { m.startDemo(); render(); });
-else render();
+void openFinanceProfile().then(async () => {
+  if (import.meta.env.VITE_DEMO) (await import('./demo')).startDemo();
+  render();
+});
 
 // Проверяем обновление при запуске, возврате в приложение и восстановлении интернета.
 if (!import.meta.env.VITE_NO_SW && 'serviceWorker' in navigator && window.isSecureContext && window.self === window.top) {

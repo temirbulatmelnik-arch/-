@@ -1,10 +1,12 @@
 import { groupablePaymentMatches, journalReview, materializeJournal } from '../domain/journal';
 import { allocatePayrollReceipt, payrollReceiptParts } from '../domain/payrollReceipts';
-// Всё хранится только на телефоне (localStorage). Никаких аккаунтов и серверов.
+// Данные и архивы хранятся в браузере устройства.
 // Резервная копия — файл JSON (Настройки → Данные), календарь — файл .ics.
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { createFinanceStorage, FINANCE_KEY, FINANCE_SCHEMA, LEGACY_KEY, PREVIOUS_FINANCE_KEY, readMigrationBackup } from './financeStorage';
+import { createFinanceStorage, FINANCE_KEY, FINANCE_SCHEMA, LEGACY_KEY, MIGRATION_BACKUP_KEY, PREVIOUS_FINANCE_KEY,
+  migrationProblem, readMigrationBackup, reportFinanceArchiveProblem } from './financeStorage';
+import { financeLocalStorage, historicalFinanceArchives, loadFinanceArchives, relocateFinanceArchives } from './financeArchives';
 import { dryRunFinanceMigration } from '../domain/financeMigration';
 import { accountOptions, appendOperations, cents, kopecks, bookOperationAllowed, canonicalBook, cashAccount, linkedExpenseId, expenseOperation, EMPTY_BOOK, LIFE_ACCOUNT, RESERVE_ACCOUNT, reversibleOperation, reviseOperations, validAmount, validDate, validSplitDebit, validSplitPlan, validPayoffTerms, type PayoffTerms, type AccountBook, type AccountOperation, type BankBalance, type BankImportBatch, type CashAccount, type SplitDebit, type SplitPlan } from '../domain/accounts';
 import { DEFAULT_MODEL } from '../domain/models';
@@ -842,8 +844,9 @@ export const useStore = create<State>()(
     {
       name: FINANCE_KEY,
       version: FINANCE_SCHEMA,
+      skipHydration: typeof window !== 'undefined' && 'indexedDB' in window,
       partialize: s => pickData(s),
-      storage: typeof window === 'undefined' ? undefined : createFinanceStorage<Data>(() => window.localStorage, prepareLegacyData, (before, after) => {
+      storage: typeof window === 'undefined' ? undefined : createFinanceStorage<Data>(financeLocalStorage, prepareLegacyData, (before, after) => {
         return dryRunFinanceMigration(before, today(), after).canCommit;
       }, normalizeJournalData),
       merge: (persisted, current) => {
@@ -857,9 +860,23 @@ export const useStore = create<State>()(
 // расчёты плана (этапы, лимиты) читают цифры прямо из хранилища
 setPlanSource(() => useStore.getState().plan);
 
+export async function openFinanceProfile(releaseSpace = true) {
+  try {
+    const local = window.localStorage;
+    await loadFinanceArchives(local);
+    await useStore.persist.rehydrate();
+    if (!releaseSpace) return;
+    // Keep the legacy profile in place whenever its older snapshots provide enough room.
+    for (const keys of [historicalFinanceArchives, [LEGACY_KEY, PREVIOUS_FINANCE_KEY, MIGRATION_BACKUP_KEY], [MIGRATION_BACKUP_KEY]]) {
+      if (migrationProblem() !== 'quota' || local.getItem(FINANCE_KEY) !== null) break;
+      if (await relocateFinanceArchives(local, keys)) await useStore.persist.rehydrate();
+    }
+  } catch { reportFinanceArchiveProblem(); }
+}
+
 if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener('storage', event => {
-    if (event.key === FINANCE_KEY || event.key === PREVIOUS_FINANCE_KEY || event.key === LEGACY_KEY) void useStore.persist.rehydrate();
+    if (event.key === FINANCE_KEY || event.key === PREVIOUS_FINANCE_KEY || event.key === LEGACY_KEY) void openFinanceProfile(false);
   });
 }
 
@@ -896,12 +913,12 @@ function exportBackup(data: Data) {
 }
 
 export function migrationBackupFile(): string | null {
-  const backup = readMigrationBackup(window.localStorage);
+  const backup = readMigrationBackup(financeLocalStorage());
   return backup ? exportBackup(prepareLegacyData(backup.state, backup.version ?? 0)) : null;
 }
 
 export function currentLegacyFile(): string | null {
-  const storage = window.localStorage;
+  const storage = financeLocalStorage();
   if (storage.getItem(PREVIOUS_FINANCE_KEY)) {
     try {
       const source = readMigrationBackup(storage, true);

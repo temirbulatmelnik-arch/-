@@ -11,7 +11,7 @@ export const PREVIOUS_FINANCE_KEY = 'kurs:journal-v10';
 export const MIGRATION_BACKUP_KEY = 'kurs:before-1.0';
 
 type Storage = Pick<globalThis.Storage, 'getItem' | 'setItem' | 'removeItem'>;
-export type FinanceStorageProblem = 'storage' | 'quota' | 'verification' | 'other-version' | 'changed';
+export type FinanceStorageProblem = 'storage' | 'quota' | 'verification' | 'other-version' | 'changed' | 'archive';
 type CompactBook = Omit<AccountBook, 'operations'> & { operations: (AccountOperation | { expenseRef: string })[] };
 type FinancialData = { expenses?: Expense[]; accountBook?: AccountBook };
 type CompactData = Omit<FinancialData, 'accountBook'> & { accountBook?: CompactBook };
@@ -19,6 +19,7 @@ type CompactData = Omit<FinancialData, 'accountBook'> & { accountBook?: CompactB
 const subscribers = new Set<() => void>();
 let problem: FinanceStorageProblem | null = null;
 export const migrationProblem = () => problem;
+export const reportFinanceArchiveProblem = () => updateProblem('archive');
 export function subscribeMigration(listener: () => void) {
   subscribers.add(listener);
   return () => { subscribers.delete(listener); };
