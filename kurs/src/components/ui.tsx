@@ -238,8 +238,8 @@ export function Field({ label, hint, children }: { label: string; hint?: ReactNo
 
 /** Большое поле суммы */
 /** Поле суммы. sm — для двух полей в ряд (долг и доступно на кредитке); disabled — значение подставлено само */
-export function AmountInput({ value, onChange, autoFocus, size = 'lg', label = 'Сумма', disabled, prefix }: {
-  value: string; onChange: (v: string) => void; autoFocus?: boolean; size?: 'lg' | 'md' | 'sm'; label?: string; disabled?: boolean;
+export function AmountInput({ value, onChange, autoFocus, size = 'lg', label = 'Сумма', disabled, prefix, readOnly }: {
+  value: string; onChange?: (v: string) => void; autoFocus?: boolean; size?: 'lg' | 'md' | 'sm'; label?: string; disabled?: boolean; readOnly?: boolean;
   /** перед числом: например, кнопка «−» для суммы меньше нуля */
   prefix?: ReactNode;
 }) {
@@ -248,7 +248,8 @@ export function AmountInput({ value, onChange, autoFocus, size = 'lg', label = '
   return (
     <div className={`flex items-baseline gap-2 rounded-2xl border border-line ${size === 'sm' ? 'px-3 py-2.5' : 'px-4 py-3'} ${disabled ? 'bg-surface-2' : 'bg-surface'}`}>
       {prefix}
-      <input value={value} onChange={e => onChange(e.target.value)} inputMode="decimal" placeholder="0" autoFocus={autoFocus} aria-label={label} disabled={disabled}
+      <input value={value} onChange={onChange && (e => onChange(e.target.value))} inputMode={readOnly ? 'none' : 'decimal'} readOnly={readOnly}
+        placeholder="0" autoFocus={autoFocus} aria-label={label} disabled={disabled}
         className={`figure w-full min-w-0 bg-transparent leading-none outline-none placeholder:text-faint disabled:text-muted disabled:opacity-100 ${text}`} />
       <span className={`text-muted ${rub}`}>₽</span>
     </div>

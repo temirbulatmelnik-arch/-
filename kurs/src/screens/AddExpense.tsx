@@ -1,7 +1,6 @@
 import { countsWeekly, LIFE_ACCOUNT } from '../domain/accounts';
-// Запись траты: нативный ввод суммы, категория и сохранение.
-// Больше 5 000 — предложить паузу 48 часов. Сверху — «Из банка»: загрузить траты разом.
-import { CreditCard, Hourglass, PiggyBank, Trash2, Wallet, type LucideIcon } from 'lucide-react';
+// Запись траты: собственная цифровая клавиатура, категория и сохранение.
+import { CreditCard, Delete, Hourglass, PiggyBank, Trash2, Wallet, type LucideIcon } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useMemo, useRef, useState, type CSSProperties } from 'react';
 import { snappy } from '../components/motion';
@@ -30,13 +29,16 @@ const SRC_UI: Record<Source, { icon: LucideIcon; pill: string }> = {
   reserve: { icon: PiggyBank, pill: 'linear-gradient(180deg, var(--rsv-2), var(--rsv))' },
 };
 const EFFECT_COLOR: Record<SpendEffect['tone'], string> = { ok: 'var(--muted)', warn: 'var(--warn)', neg: 'var(--neg)', loan: 'var(--loan)', rsv: 'var(--rsv)' };
+const AMOUNT_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', ',', '0', 'Backspace'];
+const AMOUNT_TEXT = /^\d{0,9}(,\d{0,2})?$/;
+const editable = 'textarea, select, [contenteditable="true"], input:not([readonly])';
 
 export function AddExpenseSheet() {
   const prefill = useUi(s => s.add);
   const set = useUi(s => s.set);
   const close = () => set({ add: null });
   return (
-    <Sheet open={!!prefill} onClose={close} title={prefill?.edit ? 'Трата' : 'Новая операция'}>
+    <Sheet bare open={!!prefill} onClose={close} title={prefill?.edit ? 'Трата' : 'Новая операция'}>
       {prefill && <Form key={prefill.edit?.id ?? prefill.wishId ?? 'new'} p={prefill} onDone={close} />}
     </Sheet>
   );
@@ -46,7 +48,7 @@ export function AddExpenseSheet() {
 function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   const store = useStore.getState();
   const edit = p.edit ? store.expenses.find(e => e.id === p.edit!.id) ?? p.edit : undefined;
-  const [amount, setAmount] = useState(edit ? String(edit.amount) : p.amount ? String(p.amount) : '');
+  const [amount, setAmount] = useState(String(edit?.amount ?? p.amount ?? '').replace('.', ','));
   const recent = store.expenses.filter(item => item.source === 'life' && item.budgetScope !== 'separate').at(-1)?.category;
   const [category, setCategory] = useState<CategoryId | null>(edit?.category ?? p.category ?? recent ?? null);
   const categoryPicked = useRef(!!(edit || p.category));
@@ -68,6 +70,24 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   const liquidityCap = useMemo(() => positionBeforeIncome(input, now).available, [input, now]);
   const loan = useMemo(() => (activeBridge(bridge) ? bridgeState(expenses, bridge) : null), [expenses, bridge]);
   const [askPause, setAskPause] = useState(false);
+
+  const pressAmount = (key: string, input?: HTMLInputElement) => {
+    const selection = input && [input.selectionStart, input.selectionEnd] as const;
+    setAmount(previous => {
+      const from = selection?.[0] ?? previous.length;
+      const to = selection?.[1] ?? from;
+      if (key === 'Backspace' || key === 'Delete') {
+        if (from !== to) return previous.slice(0, from) + previous.slice(to);
+        return key === 'Backspace'
+          ? previous.slice(0, Math.max(0, from - 1)) + previous.slice(to)
+          : previous.slice(0, from) + previous.slice(to + 1);
+      }
+      let next = previous.slice(0, from) + key + previous.slice(to);
+      if (next.startsWith(',')) next = '0' + next;
+      if (/^0\d/.test(next)) next = next.replace(/^0+(?=\d)/, '');
+      return AMOUNT_TEXT.test(next) ? next : previous;
+    });
+  };
 
   const saving = useRef(false);
   const openAlternative = (action: () => void) => {
@@ -149,11 +169,25 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   const defaultWeekly = countsWeekly(budgetDraft);
 
   return (
-    <form className="space-y-3 pb-3" onSubmit={event => { event.preventDefault(); save(); }}>
-      <AmountInput value={amount} autoFocus={!edit} onChange={text => {
-        const next = text.replace(/\s/g, '').replace('.', ',');
-        if (/^\d{0,9}(,\d{0,2})?$/.test(next)) setAmount(next);
-      }} />
+    <form className="flex min-h-0 flex-1 flex-col [@media(max-height:480px)]:block [@media(max-height:480px)]:overflow-y-auto"
+      onSubmit={event => { event.preventDefault(); save(); }}
+      onKeyDown={event => {
+        if (event.defaultPrevented || event.nativeEvent.isComposing || event.ctrlKey || event.metaKey || event.altKey ||
+          (event.target instanceof Element && event.target.closest(editable))) return;
+        const key = event.key === '.' ? ',' : event.key;
+        if (!AMOUNT_KEYS.includes(key) && key !== 'Delete') return;
+        event.preventDefault();
+        pressAmount(key, event.target instanceof HTMLInputElement ? event.target : undefined);
+      }}
+      onPaste={event => {
+        if (!(event.target instanceof HTMLInputElement) || !event.target.readOnly) return;
+        const text = event.clipboardData.getData('text').replace(/[\s₽]/g, '').replace('.', ',');
+        if (!text || !AMOUNT_TEXT.test(text)) return;
+        event.preventDefault();
+        setAmount(text.startsWith(',') ? '0' + text : text);
+      }}>
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-5 pb-3">
+      <AmountInput value={amount} readOnly autoFocus={!edit} />
       <p className="text-center text-[13px] leading-snug" aria-live="polite">
         {value > 0 && <><Money value={-value} kopecks /> · {source === 'life' && account === LIFE_ACCOUNT ? 'с карты жизни' : SOURCE_LABEL[source]}
           {' · '}{scope === 'unknown' ? 'бюджет требует сверки' : weekly ? 'из недельного бюджета' : 'вне недельного бюджета'}</>}
@@ -243,9 +277,6 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
           <Trash2 size={16} strokeWidth={1.5} /> Удалить
         </SecondaryButton>
       )}
-      <PrimaryButton type="submit" disabled={!valid || (source === 'credit' && !card)}>
-        {edit ? 'Сохранить' : !value ? 'Введите сумму' : category ? `Записать ${rub(value)}` : 'Выберите категорию'}
-      </PrimaryButton>
       {!edit && <details className="rounded-xl bg-surface-2 px-3">
         <summary className="flex min-h-11 cursor-pointer items-center text-[13px] font-medium text-sea">Другие действия</summary>
         <div className="grid grid-cols-2 gap-1 pb-2 text-left text-[13px]">
@@ -257,6 +288,23 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
           <button type="button" className="min-h-11 text-left" onClick={() => openAlternative(() => runQuick('sync'))}>Чат</button>
         </div>
       </details>}
+      </div>
+      <div className="pb-safe shrink-0 border-t border-line bg-bg px-5 pt-2">
+        <div className="grid grid-cols-3 gap-1.5" role="group" aria-label="Клавиатура суммы">
+          {AMOUNT_KEYS.map(key => (
+            <button key={key} type="button" onClick={() => { pressAmount(key); haptic(); }}
+              aria-label={key === 'Backspace' ? 'Стереть' : key === ',' ? 'Запятая' : key}
+              className="figure grid min-h-11 touch-manipulation select-none place-items-center rounded-[15px] bg-surface text-[23px] outline-none focus-visible:ring-2 focus-visible:ring-sea active:bg-surface-2 motion-safe:transition-transform motion-safe:active:scale-[.97]">
+              {key === 'Backspace' ? <Delete size={22} strokeWidth={1.6} aria-hidden="true" /> : key}
+            </button>
+          ))}
+        </div>
+        <div className="pt-2 pb-2.5">
+          <PrimaryButton type="submit" disabled={!valid || (source === 'credit' && !card)}>
+            {edit ? 'Сохранить' : !value ? 'Введите сумму' : category ? <>Записать <Money value={value} kopecks /></> : 'Выберите категорию'}
+          </PrimaryButton>
+        </div>
+      </div>
     </form>
   );
 }
