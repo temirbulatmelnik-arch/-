@@ -206,7 +206,7 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
   const accounts = input.accountBook?.paymentAccounts;
   const singleCard = input.accountBook?.paymentRouting === 'life';
   const confirmedAccounts = new Map(input.accountBook?.operations.flatMap(op =>
-    op.status === 'confirmed' && op.eventKey ? [[op.eventKey, op.accountId] as const] : []));
+    op.status === 'confirmed' && !op.legacy && op.eventKey ? [[op.eventKey, op.accountId] as const] : []));
   const rank = { payment: 0, weekly: 1, income: 2 } as const;
   const dated = out
     .filter(e => !replaced.has(e.key))

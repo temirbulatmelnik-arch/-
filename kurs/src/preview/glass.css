@@ -1,0 +1,213 @@
+:root {
+  --nv-harbor-light:#eef5f7;
+  --nv-harbor-deep:#e3edf0;
+  --nv-harbor-dusk:#e6e9f1;
+  --nv-harbor-join:#eaf1f5;
+  --nv-current-teal:#74b9c838;
+  --nv-current-violet:#a19bc748;
+  --nv-current-foam:#4a8ba69c;
+  --nv-current-gold:#ab8058b3;
+  --nv-icon-fill:rgb(246 251 253 / .80);
+  --nv-edge:rgb(56 97 121 / .19);
+  --nv-lip:rgb(255 255 255 / .88);
+  --nv-wash:rgb(250 253 255 / .48);
+  --nv-heel:rgb(97 140 165 / .19);
+  --nv-shadow:rgb(36 62 82 / .23);
+  --nv-dock:rgb(239 248 251 / .97);
+  --nv-balance-glass:rgb(245 251 254 / .66);
+  --nv-balance-depth:rgb(243 249 252 / .44);
+}
+.dark {
+  --nv-harbor-light:#122a38;
+  --nv-harbor-deep:#0d202c;
+  --nv-harbor-dusk:#151f30;
+  --nv-harbor-join:#112734;
+  --nv-current-teal:#3b9eb940;
+  --nv-current-violet:#6d61a842;
+  --nv-current-foam:#81c7d89c;
+  --nv-current-gold:#e6af84ac;
+  --nv-icon-fill:rgb(19 39 53 / .84);
+  --nv-edge:rgb(142 193 220 / .24);
+  --nv-lip:rgb(199 233 250 / .32);
+  --nv-wash:rgb(162 220 242 / .065);
+  --nv-heel:rgb(95 151 187 / .15);
+  --nv-shadow:rgb(0 7 14 / .61);
+  --nv-dock:rgb(11 29 42 / .98);
+  --nv-balance-glass:rgb(11 28 42 / .53);
+  --nv-balance-depth:rgb(15 33 48 / .31);
+}
+.nv-live-app {
+  --nv-dock-space:9rem;
+  isolation:isolate;
+  background:linear-gradient(170deg,var(--nv-harbor-deep),var(--bg) 63%);
+  padding-bottom:var(--nv-dock-space);
+}
+.nv-live-app[data-tab="week"] {padding-bottom:0;}
+.nv-today-view {
+  display:flex;
+  flex-direction:column;
+  min-height:calc(100dvh - env(safe-area-inset-top,0px));
+}
+/* A shallow overlap keeps the river visible through the balance card.
+   The panorama moves on one browser-driven transform, while the glass and its
+   optics remain in the deck's own coordinate system. */
+@supports (animation-timeline:scroll()) {
+  @keyframes nv-deck-parallax {to {transform:translate3d(0,clamp(98px,37vw,148px),0)}}
+  .nv-live-app .sc-parallax {
+    animation:nv-deck-parallax linear both;
+    animation-timeline:scroll(root);
+    animation-range:0px 380px;
+  }
+}
+.nv-home-deck {
+  flex:1 0 auto;
+  isolation:isolate;
+  background:linear-gradient(180deg,transparent 84px,var(--nv-harbor-join) 146px);
+  padding-bottom:calc(18px + var(--nv-dock-space));
+}
+.nv-live-app .rc-today-sticky {
+  height:0;
+  background:transparent;
+}
+.nv-live-app .rc-today-sticky>button {
+  padding-inline:12px;
+  background:var(--bg);
+  border-radius:0 0 12px 12px;
+  box-shadow:0 6px 18px -12px var(--nv-shadow);
+}
+.nv-scene-backdrop,.nv-dock-decoration,.nv-harbor-currents {
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  z-index:-1;
+  pointer-events:none;
+}
+/* Keep the decoration out of the deck's vertical spacing. */
+.nv-home-deck > :is(.nv-scene-backdrop,.nv-harbor-currents) {margin:0;}
+.nv-harbor-currents {
+  overflow:clip;
+  opacity:.40;
+  mask-image:linear-gradient(180deg,transparent,#000 132px);
+}
+.nv-current {position:absolute;inset:-5% -17%;}
+.nv-current svg {display:block;width:100%;height:100%;}
+@keyframes nv-current-drift {
+  from {transform:translate3d(-5%,1%,0);}
+  to {transform:translate3d(5%,-2%,0);}
+}
+@media (prefers-reduced-motion:no-preference) {
+  .nv-current {
+    animation:nv-current-drift 9s cubic-bezier(.44,0,.56,1) -3s infinite alternate paused;
+  }
+  .nv-current-deep {animation-duration:13s;animation-delay:-8s;animation-direction:alternate-reverse;}
+  .nv-harbor-currents[data-wave-running] .nv-current {animation-play-state:running;}
+}
+
+.nv-glass,.nv-tank,.nv-glyph,.nv-jump,.nv-sky-button,.nv-sky-lens,
+.nv-iconbtn,.nv-category,.nv-period button,.nv-home-deck [aria-label="Быстрые траты"] button {
+  border:1px solid var(--nv-edge);
+  background:var(--nv-wash);
+  box-shadow:inset 0 1px 1px var(--nv-lip),inset 0 -1px 0 var(--nv-heel),0 8px 20px -14px var(--nv-shadow);
+}
+.nv-glass,.nv-glyph,.nv-jump,.nv-category,.nv-sky-button,.nv-sky-lens {position:relative;}
+.nv-vessels {
+  background:linear-gradient(156deg,var(--nv-balance-glass),var(--nv-balance-depth) 74%);
+}
+.nv-tank {
+  border-color:color-mix(in srgb,var(--nv-tone,var(--nv-aqua)) 24%,var(--nv-edge));
+}
+.nv-tank .nv-glyph {--nv-optic-wash:rgb(248 253 255 / .2);}
+.dark .nv-tank .nv-glyph {--nv-optic-wash:rgb(145 216 243 / .10);}
+.nv-tank-water {
+  --nv-water-line:color-mix(in srgb,var(--nv-tone,var(--nv-aqua)),white 8%);
+  background:linear-gradient(180deg,var(--nv-water-top),color-mix(in srgb,var(--nv-tone,var(--nv-aqua)),transparent 60%));
+}
+.nv-sky-lens,.nv-sky-button {
+  --nv-optic-wash:rgb(247 254 255 / .16);
+  box-shadow:inset 0 1px 2px var(--nv-lip),inset 0 -2px 3px var(--nv-heel),0 4px 8px -5px var(--nv-shadow);
+}
+.dark .nv-sky-lens,.dark .nv-sky-button {--nv-optic-wash:rgb(13 23 42 / .21);color:#f4f8ff;}
+:is(.nv-glyph,.nv-sky-lens,.nv-sky-button,.nv-live-app .sun):has(> .nv-optic) {
+  isolation:isolate;
+  background:var(--nv-optic-base,transparent);
+}
+.nv-optic {
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  border-radius:inherit;
+  overflow:hidden;
+  pointer-events:none;
+  z-index:-1;
+}
+.nv-optic canvas {display:block;width:100%;height:100%;}
+.nv-optic::after {content:"";position:absolute;inset:0;background:var(--nv-optic-wash);}
+.nv-home-deck .nv-glyph {
+  --nv-optic-base:var(--nv-icon-fill);
+  background:var(--nv-icon-fill);
+}
+
+.nv-glance .nv-jump {background:transparent;border-color:transparent;box-shadow:none;}
+.nv-donut-svg {filter:drop-shadow(0 4px 5px var(--nv-shadow));}
+.nv-donut-center {border-radius:50%;box-shadow:inset 0 -1px 1px var(--nv-lip);}
+.nv-switch {border:1px solid var(--nv-edge);background:color-mix(in srgb,var(--bg),transparent 18%);}
+.nv-switch button[aria-pressed=true],.nv-period button[aria-pressed=true],
+.nv-mode[aria-pressed=true],.nv-category[aria-pressed=true] {
+  color:var(--ink);
+  background:color-mix(in srgb,var(--nv-aqua) 11%,transparent);
+  box-shadow:inset 0 1px 1px var(--nv-lip),inset 0 0 0 1px var(--nv-edge);
+}
+.nv-category[aria-pressed=true] {border-color:var(--category);}
+.nv-mode[aria-pressed=true],.nv-receipt[aria-pressed=true] {border-color:var(--nv-aqua);}
+.nv-primary {
+  color:var(--ink);
+  background:color-mix(in srgb,var(--nv-aqua) 25%,var(--surface));
+  box-shadow:inset 0 1px 1px var(--nv-lip),0 7px 14px -9px var(--nv-shadow);
+}
+.nv-debt-shell.deep-card.deep-dusk {
+  color:var(--ink);
+  --card-muted:var(--muted);
+  --card-sea:var(--nv-aqua);
+  border:1px solid var(--nv-edge);
+  background:linear-gradient(150deg,color-mix(in srgb,var(--nv-iris) 20%,var(--surface)),var(--surface));
+  box-shadow:inset 0 1px 1px var(--nv-lip),0 12px 22px -16px var(--nv-shadow);
+}
+.nv-calendar-waves > button {
+  border-color:var(--nv-edge);
+  background:color-mix(in srgb,var(--surface) 76%,transparent);
+  box-shadow:inset 0 1px 0 var(--nv-lip);
+}
+.nv-live-app .bar-glass {
+  isolation:isolate;
+  background:var(--nv-dock);
+  -webkit-backdrop-filter:none;
+  backdrop-filter:none;
+  border:1px solid var(--nv-edge);
+  box-shadow:inset 0 1px 1px var(--nv-lip),0 9px 19px -9px var(--nv-shadow);
+}
+.nv-tab-lens {
+  background:color-mix(in srgb,var(--nv-aqua) 13%,transparent);
+  box-shadow:inset 0 1px 1px var(--nv-lip),inset 0 0 0 1px var(--nv-edge);
+}
+.nv-live-app .sun {
+  --nv-optic-wash:rgb(255 238 216 / .78);
+  color:#452c20;
+  border:1px solid var(--nv-edge);
+  background:var(--nv-optic-wash);
+  box-shadow:inset 0 1px 2px var(--nv-lip),inset 0 -2px 3px var(--nv-heel),0 7px 18px -8px var(--nv-shadow);
+}
+.dark .nv-live-app .sun {--nv-optic-wash:rgb(44 54 68 / .92);color:#ffdac0;}
+.nv-glass-sheet {
+  background:var(--surface);
+  box-shadow:inset 0 1px 0 var(--nv-lip),0 -16px 42px -14px var(--nv-shadow);
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .nv-live-app .sc-parallax {animation:none;}
+  .nv-home-deck {--nv-icon-fill:var(--surface);background:var(--nv-harbor-join);}
+  .nv-optic,.nv-dock-decoration,.nv-scene-backdrop,.nv-harbor-currents {display:none;}
+  .nv-live-app .bar-glass,.dark .nv-live-app .bar-glass,.nv-live-app .sun,.dark .nv-live-app .sun,
+  .nv-glass,.nv-tank,.nv-glyph,.nv-sky-lens,.nv-sky-button,.nv-jump,.nv-category,
+  .nv-debt-shell.deep-card.deep-dusk,.nv-calendar-waves>button {background:var(--surface);color:var(--ink);}
+}

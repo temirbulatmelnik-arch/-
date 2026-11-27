@@ -6,6 +6,7 @@ import { NARROW, type DayMoney } from '../domain/coverage';
 import { dayMonth, fromKey, lastDay, weekday } from '../domain/dates';
 import { num } from '../domain/money';
 import { isWorkday } from '../domain/workdays';
+import { useVisibleWaves, WaterSurface } from '../preview/WaterSurface';
 
 export type { DayMoney };
 
@@ -15,8 +16,6 @@ export function short(n: number): string {
   const s = a < 1000 ? String(Math.round(a)) : `${(a / 1000).toFixed(1).replace('.', ',').replace(',0', '')}к`;
   return `${n < 0 ? '−' : '+'}${s}`;
 }
-
-const WAVE = 'M0 4 Q7.5 1 15 4 T30 4 T45 4 T60 4 T75 4 T90 4 T105 4 T120 4';
 
 /** Ячейка дня и зазор между ними, px: по ним высота месяца считается без измерений (лента месяцев на «Платежах») */
 const CELL = 54, GAP = 4;
@@ -36,10 +35,11 @@ export function Weekdays() {
   );
 }
 
-export function MonthGrid({ month, days, top, now, selected, still = false, onSelect, onOpen }: {
+export function MonthGrid({ month, days, top, now, selected, still = false, active, onSelect, onOpen }: {
   month: string; days: DayMoney[]; top: number; now: string; selected: string;
   /** без наполнения водой: соседние месяцы ленты приезжают уже налитыми */
   still?: boolean;
+  active: boolean;
   onSelect: (d: string) => void;
   /** нажатие на день — раскрыть его карточку прямо из ячейки: from — где ячейка на экране */
   onOpen?: (d: string, from: DOMRect) => void;
@@ -49,12 +49,13 @@ export function MonthGrid({ month, days, top, now, selected, still = false, onSe
   const [filled, setFilled] = useState(still);
   const ends = useRef(0);
   const fills = days.filter(d => d.total != null).length;
+  const waves = useVisibleWaves<HTMLDivElement>(active && fills > 0);
   // обработчик нажатия — один и тот же между перерисовками, иначе запомненные ячейки перерисовывались бы все
   const cb = useRef({ onSelect, onOpen });
   cb.current = { onSelect, onOpen };
   const tap = useCallback((date: string, from: DOMRect) => { cb.current.onSelect(date); cb.current.onOpen?.(date, from); }, []);
   return (
-    <div className={`grid grid-cols-7 gap-1 ${filled ? 'sc-once' : ''}`}
+    <div ref={waves} className={`nv-calendar-waves grid grid-cols-7 gap-1 ${filled ? 'sc-once' : ''}`}
       onAnimationEnd={e => { if (e.animationName === 'sc-fill' && ++ends.current >= fills) setFilled(true); }}>
       {Array.from({ length: lead(month) }, (_, i) => <span key={`e${i}`} />)}
       {days.map((d, i) => <DayCell key={d.date} d={d} i={i} top={top} on={d.date === selected} isToday={d.date === now} onTap={tap} />)}
@@ -62,9 +63,7 @@ export function MonthGrid({ month, days, top, now, selected, still = false, onSe
   );
 }
 
-/** Ячейка дня. Запомнена (memo): при нажатии на день перерисовываются две ячейки — старый и новый выбор, а не все 30.
- *  Волна качается только в выбранной: бесконечная анимация в каждой из 30 скруглённых ячеек — 30 слоёв с масками
- *  на видеокарте iPhone, от них календарь и подвисал */
+/** Ячейка дня. Волны активируются общей меткой видимости на сетке текущего месяца. */
 const DayCell = memo(function DayCell({ d, i, top, on, isToday, onTap }: {
   d: DayMoney; i: number; top: number; on: boolean; isToday: boolean; onTap: (date: string, from: DOMRect) => void;
 }) {
@@ -81,9 +80,7 @@ const DayCell = memo(function DayCell({ d, i, top, on, isToday, onTap }: {
           height: `${level}%`, animationDelay: `${0.1 + i * 0.03}s`, opacity: d.past ? 0.5 : 1,
           background: `linear-gradient(180deg, var(${low ? '--water-low-a' : '--water-a'}), var(${low ? '--water-low-b' : '--water-b'}))`,
         }}>
-          <svg className={`absolute -top-1 left-0 h-1.5 w-[200%] ${on ? 'sc-wave' : ''}`} viewBox="0 0 120 8" preserveAspectRatio="none" aria-hidden="true">
-            <path d={WAVE} fill="none" strokeWidth="1.3" style={{ stroke: low ? 'var(--mark-out)' : 'var(--sea)' }} />
-          </svg>
+          <WaterSurface color={low ? 'var(--mark-out)' : 'var(--sea)'} />
           <span className="absolute -top-px left-[34%] h-0.5 w-[34%] rounded-full bg-[linear-gradient(90deg,transparent,rgba(255,150,100,.95),transparent)]" />
         </span>
       )}

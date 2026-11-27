@@ -16,7 +16,8 @@ export function annualIncome(input: CalendarInput, year: number, now: string, sc
   const from = `${year}-01-01`, to = `${year}-12-31`;
   const all = eventsBetween(input, from, to);
   const byKey = new Map(all.map(event => [event.key, event]));
-  const journal = input.accountBook?.operations ?? [];
+  // Archived marks still use their calendar classification and evidence when reporting income.
+  const journal = input.accountBook?.operations.filter(op => !op.legacy) ?? [];
   const parts = payrollReceiptParts(journal);
   const paidByKey = new Map(journal.filter(op => op.status === 'confirmed' && op.eventKey).map(op => [op.eventKey!, op]));
   const entries: { date: string; amount: number; actual: boolean; documentary: boolean; conditional: boolean; group: IncomeGroup }[] = [];

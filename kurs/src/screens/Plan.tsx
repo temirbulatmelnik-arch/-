@@ -1,6 +1,6 @@
-import { useCoverage } from '../components/Coverage';
-import { ForecastNotice } from '../components/ForecastNotice';
-import { horizonUnverified } from '../domain/financialView';
+import { ForecastCard } from '../preview/Tide';
+import { Simulator } from '../preview/Simulator';
+import { VoyageActions } from '../preview/Visuals';
 import { monthDebtActivity } from '../domain/accounts';
 import { useLedger } from './Checkup';
 // «Долги» — тает ли долг. Общий долг досчитывает вниз от начального, фарватер: долги буями по порядку закрытия,
@@ -41,6 +41,7 @@ export function Plan() {
   const [checklist, checks] = useStore(useShallow(s => [s.checklist, s.checks] as const));
   const set = useUi(s => s.set);
   const view = useUi(s => s.planView);
+  const [simulate, setSimulate] = useState(false);
   const open = checklist.filter(c => !(checks[c.id]?.done ?? c.done)).length;
 
   return (
@@ -49,7 +50,14 @@ export function Plan() {
         <motion.button type="button" whileTap={{ scale: 0.97 }} onClick={() => set({ bonus: {} })} className="flex h-11 items-center gap-1.5 rounded-full bg-ink px-4 text-[13.5px] font-medium text-bg"><Gift size={15} strokeWidth={1.8} /> Пришла премия</motion.button>
       } />
       <DebtHero />
-      <FinanceOverview />
+      <div className="nv-page nv-stack">
+        <VoyageActions explore={() => setSimulate(true)} openPrepay={() => {
+          set({ planView:'debts' });
+          requestAnimationFrame(() => document.getElementById('kurs-prepayment')?.scrollIntoView({ block:'center' }));
+        }} />
+        <ForecastCard />
+      </div>
+      {simulate && <Simulator close={() => setSimulate(false)} />}
       <Pager<PlanView> className="mt-5" value={view} onChange={v => set({ planView: v })} pages={[
         { id: 'debts', label: 'Долги', render: () => <DebtsView /> },
         { id: 'strategy', label: 'План', render: () => <StrategyView /> },
@@ -57,21 +65,6 @@ export function Plan() {
       ]} />
     </div>
   );
-}
-
-function FinanceOverview() {
-  const set = useUi(s => s.set);
-  const scenario = useUi(s => s.scenario);
-  const { input, cov } = useCoverage();
-  return <div className="mx-4 mt-3 space-y-2">
-    <ForecastNotice cov={cov} scenario={scenario} verified={!horizonUnverified(input)} onOpen={() => {
-      useUi.getState().setTab('payments'); set({ payView: 'cover' });
-    }} />
-    <div className="flex flex-wrap gap-x-4 text-[13px] text-sea">
-      <button type="button" className="min-h-11" onClick={() => set({ finance: true })}>Счета и операции</button>
-      <button type="button" className="min-h-11" onClick={() => set({ workSheet: true })}>Работа и доходы</button>
-    </div>
-  </div>;
 }
 
 /** Прогноз по модели плана — один на вкладку и сохраняется между открытиями: те же данные — тот же ответ */
@@ -111,7 +104,7 @@ function DebtHero() {
   const pts = route.map((_, i) => pos(i));
   const path = pts.reduce((d, p, i) => (i ? `${d} S${p.x - step / 2} ${p.y + (i % 2 ? 22 : -22)} ${p.x} ${p.y}` : `M8 ${p.y + 6} Q${p.x / 2} ${p.y + 14} ${p.x} ${p.y}`), '') + ` S${W - 70} 48 ${W - 40} 62`;
   return (
-    <section className="deep-card deep-dusk mx-4 mt-3 pt-5 pb-3">
+    <section className="nv-debt-shell deep-card deep-dusk mx-4 mt-3 pt-5 pb-3">
         <span aria-hidden="true" className="deep-sheen" />
       <div className="px-5">
         <div className="text-[13px] text-card-muted">Общий долг по учёту · оценка</div>
@@ -235,7 +228,7 @@ function DebtsView() {
 
   return (
     <>
-      <PrepaymentCard />
+      <div id="kurs-prepayment"><PrepaymentCard /></div>
 
       {target && (
         <div className="mx-4 mt-3 flex items-start gap-3 rounded-[22px] border border-sea/30 bg-sea/8 px-4 py-3.5">

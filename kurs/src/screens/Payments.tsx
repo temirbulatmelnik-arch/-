@@ -159,7 +159,7 @@ function MonthView({ months, selected, onSelect, onShift, flip }: {
         {/* лента месяцев: идёт за пальцем, соседние месяцы уже собраны по бокам */}
         <Flip className="-mx-3 mt-1.5" keys={keys} heightOf={monthHeight} onShift={onShift} control={flip} render={(k, slot) => {
           const m = byKey.get(k)!;
-          return <MonthGrid month={k} days={m.days} top={topOf(m.days)} now={now} selected={slot === 0 ? selected : ''} still={k !== first.current}
+          return <MonthGrid month={k} days={m.days} top={topOf(m.days)} now={now} selected={slot === 0 ? selected : ''} still={k !== first.current} active={slot === 0}
             onSelect={onSelect} onOpen={open} />;
         }} />
       </section>

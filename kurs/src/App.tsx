@@ -27,14 +27,14 @@ import { migrationProblem, subscribeMigration } from './store/financeStorage';
 import { downloadFile } from './domain/ics';
 import { useUi, type Tab } from './store/ui';
 
-const History = lazy(() => import('./screens/History').then(m => ({ default: m.History })));
+const History = lazy(() => import('./preview/HistoryStudio').then(m => ({ default: m.HistoryStudio })));
 const Payments = lazy(() => import('./screens/Payments').then(m => ({ default: m.Payments })));
 const Plan = lazy(() => import('./screens/Plan').then(m => ({ default: m.Plan })));
 const ImportSheet = lazy(() => import('./screens/Import').then(m => ({ default: m.ImportSheet })));
 const SettingsSheet = lazy(() => import('./screens/Settings').then(m => ({ default: m.SettingsSheet })));
 const HubSheet = lazy(() => import('./screens/Hub').then(m => ({ default: m.HubSheet })));
 const FinanceSheet = lazy(() => import('./screens/FinanceSheet').then(m => ({ default: m.FinanceSheet })));
-const WorkSheet = lazy(() => import('./screens/WorkSheet').then(m => ({ default: m.WorkSheet })));
+const WorkSheet = lazy(() => import('./preview/WorkStudio').then(m => ({ default: m.WorkStudio })));
 
 function DeferredSheets() {
   const scan = useUi(s => s.scan);
@@ -208,7 +208,7 @@ export default function App() {
 
   return (
     <MotionConfig reducedMotion="user">
-      <div className="pt-safe relative mx-auto min-h-dvh w-full max-w-md overflow-x-clip pb-36">
+      <div className="nv-live-app pt-safe relative mx-auto min-h-dvh w-full max-w-md overflow-x-clip" data-tab={tab}>
         <Salute />
         <div aria-hidden="true" className="fixed inset-x-0 top-0 z-40 h-[env(safe-area-inset-top)]" style={{ background: 'var(--sky-1)' }} />
         {/* Все вкладки живут сразу, скрытые — блоками с hidden: переключение только показывает готовое, без

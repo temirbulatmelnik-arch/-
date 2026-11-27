@@ -34,7 +34,7 @@ export function payrollRegister(input: CalendarInput, first: number, last: numbe
   function row(e: (typeof events)[number], nominalDate: string, accrualPeriod: string) {
     const marked = input.marks?.[e.key];
     const pay = e.payroll;
-    const booked = input.accountBook?.operations.find(op => op.status === 'confirmed' && op.type === 'income' && op.eventKey === e.key);
+    const booked = input.accountBook?.operations.find(op => !op.legacy && op.status === 'confirmed' && op.type === 'income' && op.eventKey === e.key);
     const part = parts.get(e.key);
     const actualPayDate = part?.date ?? booked?.date ?? (marked?.done ? marked.paidDate ?? e.date : pay?.actualPayDate ?? null);
     const date = actualPayDate ?? e.date;

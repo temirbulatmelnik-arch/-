@@ -5,6 +5,7 @@ import { eventsBetween } from './calendar';
 import { coverage, coverageInput, safePrepayment } from './coverage';
 import { applyExchange, buildExchange, exchangeRevision, prepareExchange, type ExchangeFile, type ExchangeState } from './exchange';
 import { paymentPreparations } from './funds';
+import { materializeJournal } from './journal';
 import { possibleSubscriptionDuplicate } from './paymentRoutes';
 import { workPayments, type PayrollProfile } from './payroll';
 import { payrollRegister } from './payrollRegister';
@@ -62,6 +63,30 @@ describe('единый регистр и денежный год', () => {
     const recorded = annualIncome({ ...s, marks: { [key]: { done: true, at: today, paidDate: '2026-10-24', amount: 11230 } } }, 2026, today, 'base');
     expect(recorded.actual).toBe(11230);
     expect(recorded.documentary).toBe(0);
+  });
+
+  it('сохраняет годовой доход, источник листка и привязки при переносе старых отметок в журнал', () => {
+    const salary = 'inc:salary:2026-11';
+    const review = 'chat:review-income';
+    const bill = 'chat:historical-bill';
+    const source = {
+      ...state({ ...model, actual: { [salary]: { asOf: today, payDate: '2026-11-10', net: 1000, source: 'Листок' } } }),
+      accountBook: { ...EMPTY_BOOK, paymentRouting: 'life' as const },
+      reserveLog: [],
+      oneOff: [
+        { key: review, date: '2026-11-17', dateMode: 'exact', amount: 80, title: 'Зачисление на проверке', kind: 'income', projection: 'review' },
+        { key: bill, date: '2026-11-18', dateMode: 'exact', amount: 60, title: 'Оплата', kind: 'payment' },
+      ] satisfies CalEvent[],
+      marks: {
+        [salary]: { done: true, paidDate: '2026-11-10', amount: 1000, at: '2026-11-10T10:00:00Z' },
+        [review]: { done: true, paidDate: '2026-11-17', amount: 80, at: '2026-11-17T10:00:00Z' },
+        [bill]: { done: true, paidDate: '2026-11-18', amount: 60, at: '2026-11-18T10:00:00Z' },
+      },
+    };
+    const migrated = materializeJournal(source);
+    expect(migrated.accountBook.operations.filter(op => op.legacy === 'mark')).toHaveLength(3);
+    expect(annualIncome(migrated, 2026, today, 'base').actual).toBe(1000);
+    expect(buildExchange(migrated, today)).toEqual(buildExchange(source, today));
   });
 });
 

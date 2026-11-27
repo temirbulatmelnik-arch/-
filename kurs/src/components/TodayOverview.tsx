@@ -1,119 +1,66 @@
-import { ArrowDownRight, ArrowRight, ArrowUpRight, ChevronRight, CircleCheck, WalletCards } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { ArrowDownLeft, CalendarClock, CircleCheck, Radar, TriangleAlert, WalletCards } from 'lucide-react';
+import type { CSSProperties, ReactNode } from 'react';
 import { cents, rubles } from '../domain/accounts';
-import { ForecastNotice } from './ForecastNotice';
-import type { Coverage, Scenario, positionBeforeIncome } from '../domain/coverage';
 import { dayMonth } from '../domain/dates';
+import type { Coverage, Scenario, positionBeforeIncome } from '../domain/coverage';
+import { SCENARIO_LABEL } from '../domain/financialView';
 import type { PaymentPreparation } from '../domain/funds';
 import type { Ledger } from '../domain/ledger';
+import { useUi } from '../store/ui';
+import { ActionArrow, Glyph, IconLabel, Jump, Vessels } from '../preview/Visuals';
 import { Money } from './ui';
-import './TodayOverview.css';
 
 type Horizon = ReturnType<typeof positionBeforeIncome>;
-type Cash = Pick<Ledger, 'card' | 'cardFrom' | 'lifeAvailable' | 'heldOnCard' | 'reserve' | 'reserveVerified' | 'cashAccounts' | 'totalCash'>;
-
-const shortMonth = new Intl.DateTimeFormat('ru-RU', { month: 'short', timeZone: 'UTC' });
-
-function DateTile({ date, tone }: { date?: string; tone: 'bill' | 'income' }) {
-  if (!date) return <span className="today-date" data-tone={tone} aria-hidden="true"><ArrowUpRight size={20} /></span>;
-  return <time className="today-date" data-tone={tone} dateTime={date} aria-label={dayMonth(date)}>
-    <span className="today-date-day" aria-hidden="true">{Number(date.slice(8))}</span>
-    <span className="today-date-month" aria-hidden="true">{shortMonth.format(new Date(date + 'T12:00:00Z')).replace('.', '')}</span>
-  </time>;
-}
-
-function Funds({ cash, reserveDate, onAccounts, onCard, onReserve }: { cash: Cash; reserveDate?: string; onAccounts: () => void; onCard: () => void; onReserve: () => void }) {
-  const extras = cash.cashAccounts;
-  const other = extras.some(item => item.expected == null) ? null : rubles(extras.reduce((sum, item) => sum + cents(item.expected!), 0));
-  const parts = [
-    { key: 'card', label: 'Свободно на карте', value: cash.lifeAvailable, approx: false, action: onCard },
-    { key: 'reserve', label: 'В резерве', value: cash.reserve, approx: !cash.reserveVerified, action: onReserve },
-    ...(cash.heldOnCard > 0 ? [{ key: 'prepared', label: 'На карте под платежи', value: cash.heldOnCard, approx: false, action: onCard }] : []),
-    ...(extras.length ? [{ key: 'other', label: 'На других счетах', value: other, approx: false, action: onAccounts }] : []),
-  ];
-  const total = cash.totalCash == null ? null : cents(cash.totalCash);
-  const showBreakdown = total != null && total > 0 && parts.every(part => part.value != null && part.value >= 0) && parts.reduce((sum, part) => sum + cents(part.value ?? 0), 0) === total;
-
-  return <section className="today-cash" aria-label="Свои деньги">
-    <div className="today-cash-main">
-      <div className="min-w-0">
-        <h2 className="today-cash-label"><WalletCards size={17} strokeWidth={1.8} aria-hidden="true" /> Свои деньги</h2>
-        {cash.totalCash == null ? <p className="today-cash-unknown">Уточните остатки</p> :
-          <p className="today-cash-total figure"><Money value={cash.totalCash} approx={!cash.reserveVerified} kopecks /></p>}
-      </div>
-      <button type="button" className="today-action today-cash-link" onClick={onAccounts}>
-        Счета <ArrowUpRight size={15} strokeWidth={1.8} aria-hidden="true" />
-      </button>
-    </div>
-    {showBreakdown && <div className="today-cash-breakdown" aria-hidden="true">
-      {parts.filter(part => part.value! > 0).map(part => <span key={part.key} data-part={part.key}
-        style={{ flexGrow: cents(part.value!) }} />)}
-    </div>}
-    <div className="today-cash-parts">
-      {parts.map(part => <button type="button" key={part.key} className="today-action today-cash-part" onClick={part.action}>
-        <span className="today-cash-part-label"><i data-part={part.key} aria-hidden="true" />{part.label}</span>
-        {part.value == null ? <span className="today-cash-part-value">Сверить</span> :
-          <Money className="today-cash-part-value" value={part.value} approx={part.approx} kopecks />}
-      </button>)}
-    </div>
-    {(!cash.reserveVerified || !cash.cardFrom) && <p className="px-1 pb-2 text-[12px] text-muted">
-      {cash.cardFrom ? 'Карта сверена ' + dayMonth(cash.cardFrom.date) : 'Карта ждёт сверки'}
-      {' · '}{cash.reserveVerified && reserveDate ? 'резерв сверён ' + dayMonth(reserveDate) : 'резерв по учёту, нужна сверка'}
-    </p>}
-  </section>;
-}
+type Cash = Pick<Ledger, 'cardFrom' | 'lifeAvailable' | 'heldOnCard' | 'reserve' | 'reserveVerified' | 'cashAccounts' | 'totalCash'>;
 
 export function TodayOverview({ cash, reserveDate, payment, horizon, cov, scenario, provisional, children, onAccounts, onCard, onReserve, onPayment, onForecast }: {
-  cash: Cash;
-  payment?: PaymentPreparation;
-  horizon: Horizon;
-  reserveDate?: string;
-  cov: Coverage;
-  scenario: Scenario;
-  provisional: boolean;
-  children?: ReactNode;
-  onAccounts: () => void;
-  onCard: () => void;
-  onReserve: () => void;
-  onPayment: () => void;
-  onForecast: () => void;
+  cash: Cash; reserveDate?: string; payment?: PaymentPreparation; horizon: Horizon; cov: Coverage; scenario: Scenario; provisional: boolean;
+  children?: ReactNode; onAccounts: () => void; onCard: () => void; onReserve: () => void; onPayment: () => void; onForecast: () => void;
 }) {
-  return <div className="today-overview">
-    <Funds cash={cash} reserveDate={reserveDate} onAccounts={onAccounts} onCard={onCard} onReserve={onReserve} />
-    <section className="today-flow" aria-label="Что дальше">
-      <h2 className="px-3.5 pt-3 text-[14px] font-semibold">Что дальше</h2>
-      <button type="button" className="today-action today-flow-item" onClick={onPayment}>
-        <DateTile date={payment?.date} tone="bill" />
-        <span className="today-flow-copy">
-          <span className="today-flow-label">Ближайший платёж</span>
-          {payment ? <>
-            <span className="today-flow-title">{payment.events.length === 1 ? payment.events[0].title : `Платежи за день · ${payment.events.length}`}</span>
-            <span className="today-flow-payment">
-              <Money value={payment.total} approx={payment.events.some(event => event.approx)} kopecks />
-              {payment.prepared >= payment.total && <span className="today-flow-ready"><CircleCheck size={13} aria-hidden="true" />Подготовлено</span>}
-            </span>
-          </> : <span className="today-flow-title">В ближайшие 45 дней платежей нет</span>}
-        </span>
-        <ChevronRight className="today-flow-arrow" size={17} strokeWidth={1.8} aria-hidden="true" />
+  const set = useUi(s => s.set);
+  const funded = payment ? payment.prepared >= payment.total : false;
+  const shortage = horizon.shortage ?? cov.shortage;
+  const flagged = provisional || shortage || horizon.accountRisk;
+  const others = cash.cashAccounts.reduce<number | null>((sum, account) =>
+    sum == null || account.expected == null ? null : sum + cents(account.expected), 0);
+  return <div className="nv-stack">
+    <Vessels total={cash.totalCash} parts={[cash.lifeAvailable, cash.heldOnCard, cash.reserve]}
+      reserveVerified={cash.reserveVerified} open={[onCard, onAccounts, onReserve]}>
+      {cash.cashAccounts.length > 0 && <Jump icon={WalletCards} label="На других счетах" onClick={onAccounts}>
+        {others == null ? 'Уточнить остатки' : <Money value={rubles(others)} kopecks />}
+      </Jump>}
+      {(!cash.reserveVerified || !cash.cardFrom) && <p className="nv-meta mt-2">
+        {cash.cardFrom ? 'Карта сверена ' + dayMonth(cash.cardFrom.date) : 'Карта ждёт сверки'}
+        {' · '}{cash.reserveVerified && reserveDate ? 'резерв сверён ' + dayMonth(reserveDate) : 'резерв по учёту'}
+      </p>}
+    </Vessels>
+    <div className="nv-flow-grid">
+      <button type="button" className="nv-flow nv-glass nv-press" data-tone="amber" onClick={onPayment}>
+        <Glyph icon={CalendarClock} tone="amber" />
+        <span className="nv-meta">{payment ? dayMonth(payment.date) : 'Нет ближайших'}</span>
+        <strong>{payment ? <Money value={payment.total} approx={payment.events.some(form => form.approx)} kopecks /> : 'Платежи'}</strong>
+        <span className="nv-flow-title">{payment?.events.length === 1 ? payment.events[0].title : 'Обязательные платежи'}</span>
+        {payment && <div className="nv-funding" role="meter" aria-label="Подготовлено к платежу" aria-valuemin={0} aria-valuemax={payment.total} aria-valuenow={payment.prepared}>
+          <span style={{ '--fill': `${Math.min(100, 100 * payment.prepared / payment.total)}%` } as CSSProperties} />
+        </div>}
+        {payment && <small>{funded ? 'Подготовлено' : payment.toFund == null ? 'Проверить счёт' : <>Подготовить <Money value={payment.toFund} kopecks /></>}</small>}
       </button>
-
-      <button type="button" className="today-action today-flow-item" onClick={onForecast}>
-        <DateTile date={horizon.until} tone="income" />
-        <span className="today-flow-copy">
-          <span className="today-flow-label">{horizon.income ? 'До следующего поступления' : 'Прогноз на 45 дней'}</span>
-          {horizon.income && <span className="today-flow-income">
-            <ArrowDownRight size={14} strokeWidth={2} aria-hidden="true" />
-            <span className="min-w-0">{horizon.income.title}</span>
-            <Money value={horizon.income.amount} approx={horizon.income.approx} kopecks />
-          </span>}
-          <span className="today-flow-detail">{provisional ? 'Доступность до сверки не подтверждена' :
-            horizon.shortage ? 'До поступления не хватает ' + horizon.shortage.amount.toLocaleString('ru-RU') + ' ₽' :
-            horizon.accountRisk ? 'До поступления нужно проверить счёт' : 'До поступления хватает по осторожной оценке'}</span>
-        </span>
-        <ArrowRight className="today-flow-arrow" size={17} strokeWidth={1.8} aria-hidden="true" />
+      <button type="button" className="nv-flow nv-glass nv-press" data-tone="aqua" onClick={() => set({ workSheet: true })}>
+        <Glyph icon={ArrowDownLeft} />
+        <span className="nv-meta">{horizon.until ? dayMonth(horizon.until) : 'Ожидается'}</span>
+        <strong>{horizon.income ? <Money value={horizon.income.amount} approx={horizon.income.approx} kopecks /> : 'Доходы'}</strong>
+        <span className="nv-flow-title">{horizon.income?.title ?? 'Календарь выплат'}</span>
+        <span className="nv-flow-go">К выплатам <ActionArrow /></span>
       </button>
-      <div className="border-t border-line px-2.5 py-2"><ForecastNotice cov={cov} scenario={scenario} verified={!provisional} onOpen={onForecast} /></div>
-      {children && <div className="border-t border-line py-2">{children}</div>}
-    </section>
+    </div>
+    <div className="nv-glass nv-glance">
+      <Jump icon={flagged ? TriangleAlert : CircleCheck} label={provisional ? 'Сверить доступные деньги' : horizon.shortage ? 'Разрыв до ближайшей выплаты' : horizon.accountRisk ? 'Уточнить счёт списания' : cov.shortage ? 'В прогнозе есть кассовый разрыв' : `По прогнозу хватает до ${dayMonth(horizon.until)}`}
+        tone={flagged ? 'amber' : 'aqua'} onClick={onForecast}>
+        <IconLabel icon={Radar}>{shortage && !provisional
+          ? <>{SCENARIO_LABEL[horizon.shortage ? 'cautious' : scenario]} · {dayMonth(shortage.date)} · <Money value={shortage.amount} kopecks /></>
+          : 'Прогноз резерва'}</IconLabel>
+      </Jump>
+    </div>
+    {children}
   </div>;
 }

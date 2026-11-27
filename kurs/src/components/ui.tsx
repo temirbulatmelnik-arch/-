@@ -166,7 +166,7 @@ export function Sheet({ open, onClose, title, subtitle, children, footer, compac
             initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%', transition: { duration: 0.26, ease: [0.32, 0.72, 0, 1] } }}
             transition={{ duration: 0.45, ease: [0.32, 0.72, 0, 1] }}>
           <motion.div style={{ y: pull }}
-            className={`flex flex-col rounded-t-[30px] border-t border-line bg-bg shadow-[0_-18px_48px_-24px_rgba(4,14,22,.55)] ${compact ? 'max-h-[78dvh]' : 'max-h-[94dvh]'}`}>
+            className={`nv-glass-sheet flex flex-col rounded-t-[30px] border-t border-line ${compact ? 'max-h-[78dvh]' : 'max-h-[94dvh]'}`}>
             {/* за шапку лист тянется вниз — как в iOS */}
             <div {...pan} className="cursor-grab touch-none select-none active:cursor-grabbing">
               <div className="mx-auto mt-2.5 h-[5px] w-10 rounded-full bg-line" />

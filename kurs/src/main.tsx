@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import '@fontsource-variable/geologica';
 import '@fontsource-variable/unbounded';
 import './index.css';
+import './preview/widgets.css';
+import './preview/glass.css';
 import App from './App';
 import { useUi } from './store/ui';
 

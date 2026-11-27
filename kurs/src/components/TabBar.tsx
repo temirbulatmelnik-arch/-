@@ -1,3 +1,4 @@
+import { GlassLens } from '../preview/GlassLens';
 // Нижняя панель: четыре вкладки по вопросам и «плюс» посередине — записать трату одним нажатием.
 // Удержание «плюса» раскрывает веер: из банка, сверка, чат «Финансы», премия.
 import { AnimatePresence, motion } from 'motion/react';
@@ -117,13 +118,24 @@ export function TabBar() {
       </AnimatePresence>
 
       <nav className="pb-safe pointer-events-none fixed inset-x-0 bottom-0 z-40" aria-label="Разделы">
-        <div className="pointer-events-auto relative mx-auto mb-2.5 w-[min(94%,404px)]">
+        <div data-glass-scene className="pointer-events-auto relative mx-auto mb-2.5 w-[min(94%,404px)]">
           <div className="bar-glass relative grid grid-cols-5 items-end rounded-[28px] p-1.5">
+            <svg className="nv-dock-decoration" aria-hidden="true" focusable="false">
+              <svg id="nv-dock-art" data-glass-source width="100%" height="100%" viewBox="0 0 390 72" preserveAspectRatio="none">
+                <defs><linearGradient id="nv-dock-light">
+                  <stop offset=".15" stopColor="var(--nv-harbor-line)" stopOpacity="0" />
+                  <stop offset=".54" stopColor="var(--nv-harbor-line)" stopOpacity=".72" />
+                  <stop offset=".8" stopColor="var(--nv-harbor-reflection)" stopOpacity=".3" />
+                  <stop offset=".95" stopColor="var(--nv-harbor-reflection)" stopOpacity="0" />
+                </linearGradient></defs>
+                <path d="M-8 25C110 37 168 10 292 18S338 24 400 14" stroke="url(#nv-dock-light)" strokeWidth="1.15" fill="none" />
+              </svg>
+            </svg>
             {/* подложка активной вкладки едет за пальцем обычным CSS-переходом: только transform, на видеокарте.
                 Раньше это была общая layout-анимация motion — она пересчитывала положение сотен элементов страницы
                 при каждом переключении и давала заметную задержку */}
-            <span aria-hidden="true" className="pointer-events-none absolute inset-y-1.5 left-1.5 w-[calc((100%-12px)/5)] rounded-[22px] transition-transform duration-[380ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none"
-              style={{ transform: `translateX(${COL[tab] * 100}%)`, background: 'var(--bar-pill)' }} />
+            <span aria-hidden="true" className="nv-tab-lens pointer-events-none absolute inset-y-1.5 left-1.5 w-[calc((100%-12px)/5)] rounded-[22px] transition-transform duration-[380ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none"
+              style={{ transform: `translateX(${COL[tab] * 100}%)` }} />
             {TABS.slice(0, 2).map(tabButton)}
             <span aria-hidden="true" />
             {[TABS[3], TABS[2]].map(tabButton)}
@@ -133,6 +145,7 @@ export function TabBar() {
             onPointerDown={down} onPointerUp={up} onPointerLeave={cancel} onPointerCancel={cancel} onContextMenu={e => e.preventDefault()}
             whileTap={{ scale: 0.94 }} transition={snappy}
             className="sun absolute -top-[22px] left-1/2 grid size-[62px] -translate-x-1/2 place-items-center rounded-full select-none [-webkit-touch-callout:none]">
+            <GlassLens />
             {/* кольцо удержания: линейно, пока держат (это прогресс), назад — быстро */}
             <svg viewBox="0 0 72 72" className="pointer-events-none absolute -inset-[5px] size-[72px] -rotate-90" aria-hidden="true">
               <circle cx="36" cy="36" r="34" fill="none" strokeWidth="3" strokeLinecap="round" stroke="#fff"

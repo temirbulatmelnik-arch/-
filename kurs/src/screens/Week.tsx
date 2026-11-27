@@ -8,7 +8,8 @@ import { flyCoin, NextStep, QuickSpends, type Step } from '../components/Home';
 import { DayRing } from '../components/DayRing';
 import { horizonUnverified } from '../domain/financialView';
 import { TodayOverview } from '../components/TodayOverview';
-import { bridgeControl, lampAt, setSceneHidden, SkyButton, WeekScene } from '../components/Petersburg';
+import { bridgeControl, GlassBackdrop, lampAt, setSceneHidden, SkyButton, WeekScene } from '../components/Petersburg';
+import { HarborCurrents } from '../preview/WaterSurface';
 import { useCoverage } from '../components/Coverage';
 import { haptic } from '../components/haptics';
 import { Roll } from '../components/motion';
@@ -40,9 +41,8 @@ export function Week() {
   // только нужное из состояния интерфейса: иначе весь экран перерисовывался бы при каждом переключении вкладки и листе
   const ui = { set: useUi(s => s.set), setTab: useUi(s => s.setTab) };
   const todayIdx = (fromKey(now).getDay() + 6) % 7;
-  // сцена уходит медленнее страницы, сверху проявляется стеклянная полоса с остатком
-  // без событий прокрутки (fixing-motion-performance): параллакс — CSS scroll-timeline (.sc-parallax),
-  // полоса и пауза бесконечных анимаций — по видимости сцены (IntersectionObserver)
+  // CSS handles the panorama's overlap. Its animation and the compact budget
+  // bar still use the original visibility tracking.
   const sceneRef = useRef<HTMLDivElement>(null);
   const [scenePassed, setScenePassed] = useState(false);
   useEffect(() => {
@@ -168,7 +168,7 @@ export function Week() {
     flyCoin(el);
   };
   return (
-    <div className="relative">
+    <div className="nv-today-view relative">
       <div ref={sceneRef} className="sc-parallax" style={{ background: 'var(--sky-1)' }}>
       <div ref={pullRef} className="relative">
       <AnimatePresence>
@@ -218,7 +218,9 @@ export function Week() {
           <span>{provisional ? 'Остаток по бюджету' : 'Можно сегодня'}</span><Money value={displayAvailable} kopecks />
         </button>
       </div>
-      <div className="relative z-[1] space-y-3 bg-bg px-4 pt-3">
+      <div data-glass-scene className="nv-home-deck relative z-[1] space-y-3 px-4 pt-3">
+        <GlassBackdrop />
+        <HarborCurrents />
         <TodayOverview cash={led} reserveDate={reserveDate} payment={nextBill} horizon={horizon}
           cov={cov} scenario={scenario} provisional={provisional}
           onAccounts={() => ui.set({ finance: true })}

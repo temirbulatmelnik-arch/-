@@ -294,8 +294,8 @@ export function WeekScene({ today, children, overlay }: { today: number; childre
   const height = 512 - skyTop;
   const lower = (y: number) => `${100 * (y - skyTop) / height}%`;
   return (
-    <div ref={host} className="relative [container-type:inline-size]">
-      <svg viewBox={`0 ${skyTop} 390 ${height}`} preserveAspectRatio="xMidYMin meet" className="block h-auto w-full" role="img"
+    <div ref={host} data-glass-scene className="relative [container-type:inline-size]">
+      <svg id="nv-week-art" data-glass-source viewBox={`0 ${skyTop} 390 ${height}`} preserveAspectRatio="xMidYMin meet" className="block h-auto w-full" role="img"
         aria-label="Нева на закате, Дворцовый мост разводится">
         <defs>
           <SkyGradients id="ws" />
@@ -409,8 +409,8 @@ export function SkyHeader({ title, subtitle, action, back, compact }: { title: R
     return () => io.disconnect();
   }, []);
   return (
-    <header ref={ref} className="relative overflow-hidden">
-      <svg viewBox="0 0 390 160" preserveAspectRatio={compact ? "xMidYMax slice" : undefined} className={compact ? "block h-[110px] w-full" : "block h-auto w-full"} aria-hidden="true">
+    <header ref={ref} data-glass-scene className="relative overflow-hidden">
+      <svg id={id + "art"} data-glass-source viewBox="0 0 390 160" preserveAspectRatio={compact ? "xMidYMax slice" : undefined} className={compact ? "block h-[110px] w-full" : "block h-auto w-full"} aria-hidden="true">
         <defs>
           <SkyGradients id={id} />
           <clipPath id={`${id}-skyclip`}><rect width="390" height="149" /></clipPath>
@@ -469,10 +469,28 @@ export function SkyHeader({ title, subtitle, action, back, compact }: { title: R
 export function SkyButton({ onClick, label, children }: { onClick: () => void; label: string; children: ReactNode }) {
   return (
     <button type="button" onClick={onClick} aria-label={label} title={label}
-      className="glass grid size-11 shrink-0 place-items-center rounded-full border border-black/15 bg-white/35 text-[#0a2433] backdrop-blur-md transition-transform duration-100 ease-out active:scale-[.97] dark:border-white/15 dark:bg-white/10 dark:text-[#f2f6f8]">
+      className="nv-sky-lens grid size-11 shrink-0 place-items-center rounded-full border border-black/15 bg-white/35 text-[#0a2433] transition-transform duration-100 ease-out active:scale-[.97] dark:border-white/15 dark:bg-white/10 dark:text-[#f2f6f8]">
       {children}
     </button>
   );
+}
+
+/** Low-detail river texture painted behind the savings controls. */
+export function GlassBackdrop() {
+  return <svg className="nv-scene-backdrop" aria-hidden="true" focusable="false">
+    <svg id="nv-deck-art" data-glass-source width="100%" height="100%" viewBox="0 0 390 535" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="nv-deck-water" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="var(--nv-harbor-light)" stopOpacity="0" />
+          <stop offset=".16" stopColor="var(--nv-harbor-light)" stopOpacity=".03" />
+          <stop offset=".28" stopColor="var(--nv-harbor-deep)" stopOpacity=".64" />
+          <stop offset=".40" stopColor="var(--nv-harbor-deep)" />
+          <stop offset="1" stopColor="var(--nv-harbor-dusk)" />
+        </linearGradient>
+      </defs>
+      <rect width="390" height="535" fill="url(#nv-deck-water)" />
+    </svg>
+  </svg>;
 }
 
 /* ---------- значки нижней панели ---------- */
