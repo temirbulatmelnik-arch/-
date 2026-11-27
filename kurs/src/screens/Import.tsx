@@ -3,9 +3,9 @@ import type { BankImportBatch } from '../domain/accounts';
 import { accountOptions, cashAccount, cents, LIFE_ACCOUNT, RESERVE_ACCOUNT, rubles } from '../domain/accounts';
 // Выписка и скриншоты из банка → что на них → что обновить: траты по категориям, оплаченные платежи,
 // поступления (премия сразу открывает распределение), остаток на карте. После — итог недели.
-import { AlertTriangle, Camera, Check, ClipboardPaste, FileSpreadsheet, FileText, Loader2 } from 'lucide-react';
-import { useRef, useState, type ReactNode } from 'react';
-import { Chip, Money, PrimaryButton, SecondaryButton, Sheet, Tile } from '../components/ui';
+import { AlertTriangle, Camera, Check, ClipboardPaste, FileText, Loader2 } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Chip, Money, PrimaryButton, SecondaryButton, Sheet } from '../components/ui';
 import { reconcileStatement, type StatementCheck } from '../domain/bankReconciliation';
 import { ledger } from '../domain/ledger';
 import { ddmm, fromKey, today } from '../domain/dates';
@@ -31,7 +31,7 @@ export function ImportSheet() {
   );
 }
 
-type Review = { summary: string; warnings: string[]; items: AnyProposal[]; batch?: BankImportBatch; statement?: StatementCheck; accountId?: string };
+type Review = { duplicates?: ReturnType<typeof fromDrafts>['duplicates']; summary: string; warnings: string[]; items: AnyProposal[]; batch?: BankImportBatch; statement?: StatementCheck; accountId?: string; rejected?: number };
 type Step = { s: 'pick' } | { s: 'text' } | { s: 'busy'; label: string } | { s: 'review'; review: Review } | { s: 'routes'; labels: string[]; done: (routes: Record<string, string>) => void } | { s: 'screenshots'; images: ImageOCR[] } | { s: 'error'; text: string };
 
 async function sha256Hex(data: BufferSource) {
@@ -69,9 +69,8 @@ function Flow() {
   const apiKey = useStore(s => s.settings.apiKey);
   const model = useStore(s => s.settings.model);
   const pdf = useRef<HTMLInputElement>(null);
-  const pdfLocal = useRef<HTMLInputElement>(null);
+  const statementFile = useRef<HTMLInputElement>(null);
   const shots = useRef<HTMLInputElement>(null);
-  const csv = useRef<HTMLInputElement>(null);
 
   const fail = (e: unknown, AiError?: new (...a: never[]) => Error) =>
     setStep({ s: 'error', text: AiError && e instanceof AiError ? e.message : `Не получилось: ${(e as Error).message}` });
@@ -126,7 +125,7 @@ function Flow() {
           fingerprint: JSON.stringify(['csv:file', fileHash, index]) };
       });
       const review = fromDrafts(rows, ctx(), `Выписка PDF: ${rows.length} операций.`);
-      setStep({ s: 'review', review: { ...review, statement, accountId: LIFE_ACCOUNT,
+      setStep({ s: 'review', review: { ...review, statement, rejected: st.rejected, accountId: LIFE_ACCOUNT,
         batch: { id: fileHash, fileHash, bank: /ВТБ|VTB/i.test(st.raw) ? 'vtb' : 'pdf', importedAt: new Date().toISOString(),
           parserVersion: 'kurs-pdf-2', rowCount: rows.length } } });
     } catch (e) { fail(e); }
@@ -170,7 +169,7 @@ function Flow() {
           r.rejected + (accountLabels.length > 1 ? 1 : 0));
         const accountId = accountLabels.length > 1 ? undefined : routes?.[accountLabels[0]] ??
           (/накопительн|резерв/i.test(accountLabels[0] ?? '') ? RESERVE_ACCOUNT : LIFE_ACCOUNT);
-        setStep({ s: 'review', review: { ...review, warnings,
+        setStep({ s: 'review', review: { ...review, warnings, rejected: r.rejected,
           ...(r.bounds.opening != null || r.bounds.closing != null ? { statement, accountId } : {}),
           batch: { id: fileHash, fileHash, bank: r.bank, importedAt: new Date().toISOString(),
             parserVersion: xlsx ? 'kurs-xlsx-1' : 'kurs-csv-2', rowCount: routed.length } } });
@@ -213,67 +212,35 @@ function Flow() {
 
   if (step.s === 'text') return <TextPaste onDone={review => setStep({ s: 'review', review })} onBack={() => setStep({ s: 'pick' })} />;
 
+  const demo = !!import.meta.env.VITE_DEMO;
   return (
-    <div className="space-y-2.5 pt-1">
-      <input ref={pdf} type="file" accept="application/pdf" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void runAi([f]); }} />
-      <input ref={pdfLocal} type="file" accept="application/pdf" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; void runPdfLocal(f); }} />
-      <input ref={shots} type="file" accept="image/*" multiple hidden onChange={e => { const f = [...(e.target.files ?? [])]; e.target.value = ''; void runScreenshots(f); }} />
-      <input ref={csv} type="file" accept=".csv,.xlsx,text/csv,text/plain,.txt" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; void runCsv(f); }} />
-
-      <SecondaryButton className="w-full" onClick={() => shots.current?.click()}><Camera size={18} /> Выбрать скриншот</SecondaryButton>
-      <p className="px-1 text-[12px] text-muted">Изображение распознаётся на устройстве. Перед записью можно поправить каждую операцию.</p>
-      {/* главный способ: скопировать текст со снимка банка в «Фото» и вставить одним касанием */}
-      <button type="button" onClick={pasteBank} className="deep-card flex w-full items-center gap-3.5 px-5 py-4 text-left transition-transform duration-100 active:scale-[.98]">
-        <span aria-hidden="true" className="deep-sheen" />
-        <span className="grid size-12 shrink-0 place-items-center rounded-[15px] bg-white/18"><ClipboardPaste size={23} strokeWidth={1.8} /></span>
-        <span className="relative min-w-0 flex-1">
-          <span className="block text-[17px] font-medium">Вставить из банка</span>
-          <span className="mt-0.5 block text-[13px] leading-snug text-card-muted">В «Фото» удержите палец на тексте снимка → «Скопировать» → нажмите здесь</span>
-        </span>
-      </button>
-      <button type="button" onClick={() => setStep({ s: 'text' })} className="h-11 w-full rounded-2xl border border-line bg-surface text-[14px] font-medium">Вставить или набрать текст вручную</button>
-
-      <details className="pt-1">
-        <summary className="cursor-pointer list-none px-1 py-2 text-[13.5px] font-medium text-sea [&::-webkit-details-marker]:hidden">Другие способы: выписка PDF, скриншоты, таблица</summary>
-        <div className="space-y-2.5 pt-1">
-      <Option icon={<FileText size={19} strokeWidth={1.9} />} color="#f0603a" title="Выписка PDF" tag="на телефоне"
-        lead="Файл выписки за неделю — самый точный способ"
-        text="В приложении банка: карта → «Выписка» → период «неделя» → поделиться PDF → «Сохранить в Файлы». Затем выберите файл здесь."
-        onClick={() => pdfLocal.current?.click()}>
-        {apiKey && <button type="button" onClick={e => { e.stopPropagation(); pdf.current?.click(); }} className="mt-2 text-[12.5px] font-medium text-sea">Отправить в Claude для разбора</button>}
-      </Option>
-
-      <Option icon={<FileSpreadsheet size={19} strokeWidth={1.9} />} color="#2ba36a" title="Файл CSV или XLSX" tag="на телефоне"
-        lead="Таблица операций из банка"
-        text="Если банк выгружает таблицу: даты, суммы и описания найдутся по заголовкам."
-        onClick={() => csv.current?.click()} />
-
-        </div>
-      </details>
-
-      <p className="px-1 pt-2 text-[11.5px] leading-snug text-faint">Ничего не меняется без «Применить». Переводы между своими счетами и погашения кредитов не считаются тратами — погашения отмечаются в календаре платежей.</p>
-    </div>
-  );
-}
-
-/** Способ загрузки: цветной значок, одна строка «что это»; подробности «как» — по нажатию, чтобы не читать стену текста */
-function Option({ icon, color, title, tag, lead, text, onClick, disabled, children }: {
-  icon: ReactNode; color: string; title: string; tag: string; lead: string; text: string; onClick: () => void; disabled?: boolean; children?: ReactNode;
-}) {
-  return (
-    <div role="button" tabIndex={0} onClick={onClick} onKeyDown={e => e.key === 'Enter' && e.target === e.currentTarget && onClick()} className={`card block w-full p-4 text-left transition active:scale-[0.99] ${disabled ? '' : 'cursor-pointer'}`}>
-      <div className="flex items-start gap-3">
-        <Tile c={color}>{icon}</Tile>
-        <span className="min-w-0 flex-1">
-          <span className="flex flex-wrap items-center gap-2"><span className="text-[15px] font-medium">{title}</span><Chip tone={tag === 'Claude' ? 'info' : 'neutral'}>{tag}</Chip></span>
-          <span className="mt-0.5 block text-[13px] leading-snug text-muted">{lead}</span>
-          <details className="mt-1.5 text-[12.5px] leading-snug text-muted" onClick={e => e.stopPropagation()}>
-            <summary className="cursor-pointer list-none font-medium text-sea [&::-webkit-details-marker]:hidden">Как это сделать</summary>
-            <p className="mt-1">{text}</p>
-          </details>
-        </span>
+    <div className="space-y-3 pt-1">
+      {!demo && <>
+        <input ref={statementFile} type="file" accept=".pdf,.csv,.xlsx,application/pdf,text/csv" hidden onChange={e => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          if (file && (/\.pdf$/i.test(file.name) || file.type === 'application/pdf')) void runPdfLocal(file);
+          else void runCsv(file);
+        }} />
+        <input ref={pdf} type="file" accept="application/pdf" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void runAi([f]); }} />
+        <input ref={shots} type="file" accept="image/*" multiple hidden onChange={e => { const f = [...(e.target.files ?? [])]; e.target.value = ''; void runScreenshots(f); }} />
+      </>}
+      <div className="card space-y-2 p-4">
+        <PrimaryButton className="w-full" onClick={() => demo
+          ? void runCsv(new File(['Дата;Сумма;Описание\n' + today() + ';-189,50;Учебная покупка'], 'uchebnaya-vypiska.csv', { type: 'text/csv' }))
+          : statementFile.current?.click()}><FileText size={18} /> {demo ? 'Открыть учебную выписку' : 'Выбрать выписку'}</PrimaryButton>
+        <p className="text-[13px] text-muted">{demo ? 'Демо использует учебную выписку. Личные файлы здесь отключены.'
+          : 'PDF, CSV и XLSX разбираются на устройстве. Операции можно проверить перед записью.'}</p>
       </div>
-      {children}
+      {!demo && <details className="card p-3">
+        <summary className="min-h-11 cursor-pointer py-2 text-sm font-medium">Скриншот или текст</summary>
+        <div className="grid gap-2">
+          <SecondaryButton onClick={() => shots.current?.click()}><Camera size={18} /> Выбрать скриншот</SecondaryButton>
+          <SecondaryButton onClick={pasteBank}><ClipboardPaste size={18} /> Вставить скопированный текст</SecondaryButton>
+          <SecondaryButton onClick={() => setStep({ s: 'text' })}>Ввести текст вручную</SecondaryButton>
+          {apiKey && <button type="button" onClick={() => pdf.current?.click()} className="min-h-11 text-[13px] text-sea">Передать PDF в Claude для разбора</button>}
+        </div>
+      </details>}
     </div>
   );
 }
@@ -319,6 +286,11 @@ function ReviewList({ review, onBack }: { review: Review; onBack: () => void }) 
   const set = useUi(s => s.set);
   const patch = (id: string, p: Partial<AnyProposal>) => setItems(list => list.map(i => (i.id === id ? ({ ...i, ...p } as AnyProposal) : i)));
   const on = items.filter(i => i.on && (i.type !== 'income' || i.event) && (i.type !== 'tx' || (!(i.tx.structured && i.tx.skip) && (!i.tx.duplicate || i.tx.needsDuplicateReview))));
+  const [showAll, setShowAll] = useState(!review.batch);
+  const duplicates = review.duplicates?.length ?? items.filter(i => i.type === 'tx' && i.tx.duplicate && !i.tx.needsDuplicateReview).length;
+  const exceptions = items.filter(i => !on.includes(i) && (i.type === 'person' || i.type === 'income' ||
+    i.type === 'posting' || i.type === 'tx' && (!i.tx.duplicate || i.tx.needsDuplicateReview) && !i.tx.skip));
+  const displayed = showAll ? items : exceptions;
   const spent = on.reduce((s, i) => s + (i.type === 'tx' ? i.tx.amount : 0), 0);
 
   const apply = () => {
@@ -411,10 +383,23 @@ function ReviewList({ review, onBack }: { review: Review; onBack: () => void }) 
   return (
     <div className="space-y-4 pt-1">
       <div className="rounded-2xl bg-surface-2 px-4 py-3 text-[13.5px] leading-snug">{review.summary || 'Готово.'}</div>
+      {review.batch && <p className="px-1 text-sm">К записи {on.length} · совпадений {duplicates} · проверить {exceptions.length}
+        {!!review.rejected && ` · ошибок ${review.rejected}`}</p>}
+      {!!review.duplicates?.length && <details className="card px-3 text-sm">
+        <summary className="min-h-11 cursor-pointer py-2.5 font-medium">Уже учтены · {review.duplicates.length}</summary>
+        <ul className="max-h-64 divide-y divide-line overflow-auto">
+          {review.duplicates.map(row => <li key={row.id} className="flex items-start gap-2 py-2 text-[13px]">
+            <span className="min-w-0 flex-1 break-words">{ddmm(row.date)} · {row.merchant}</span>
+            <Money value={row.amount} kopecks className="shrink-0" />
+          </li>)}
+        </ul>
+      </details>}
+      {review.batch && review.statement?.closingMinor == null && <p className="px-1 text-sm text-muted">В выписке нет остатка.</p>}
       {review.statement && <section aria-label="Сверка выписки" className="card space-y-1 p-3 text-[13px]">
         <p className="font-medium">{review.statement.status === 'matched' ? 'Строки выписки сходятся с конечным остатком'
           : review.statement.status === 'mismatch' ? 'Строки выписки расходятся с конечным остатком' : 'В выписке недостаточно данных для сверки'}</p>
         {review.statement.closingMinor != null && <p>В банке на конец периода <Money value={rubles(review.statement.closingMinor)} kopecks /></p>}
+        {review.statement.calculatedMinor != null && <p>По строкам выписки <Money value={rubles(review.statement.calculatedMinor)} kopecks /></p>}
         {review.statement.differenceMinor != null && review.statement.differenceMinor !== 0 &&
           <p className="text-warn">Разница <Money value={rubles(review.statement.differenceMinor)} kopecks /></p>}
         <p className="text-muted">После записи приложение сравнит расчётный остаток с выпиской. Контрольный остаток меняется в разделе сверки.</p>
@@ -424,14 +409,17 @@ function ReviewList({ review, onBack }: { review: Review; onBack: () => void }) 
       ))}
       {items.length === 0 && <p className="rounded-2xl bg-surface-2 p-4 text-[14px] text-muted">Обновлять нечего: не нашлось операций, остатков или платежей.</p>}
 
+      {review.batch && items.length > exceptions.length && <SecondaryButton className="w-full" onClick={() => setShowAll(value => !value)}>
+        {showAll ? 'Только исключения' : 'Показать все строки'}
+      </SecondaryButton>}
       {groups.map(([title, types]) => {
-        const list = items.filter(i => types.includes(i.type));
+        const list = displayed.filter(i => types.includes(i.type));
         if (!list.length) return null;
         return (
           <section key={title}>
             <div className="mb-2 flex items-center justify-between px-1">
               <span className="eyebrow text-muted">{title}</span>
-              {title === 'Траты' && <button type="button" onClick={() => setItems(all => all.map(i => (i.type === 'tx' ? { ...i, on: !list.every(x => x.on) } : i)))} className="text-[12.5px] font-medium text-sea">{list.every(x => x.on) ? 'Снять все' : 'Выбрать все'}</button>}
+              {title === 'Траты' && showAll && <button type="button" onClick={() => setItems(all => all.map(i => (i.type === 'tx' ? { ...i, on: !list.every(x => x.on) } : i)))} className="text-[12.5px] font-medium text-sea">{list.every(x => x.on) ? 'Снять все' : 'Выбрать все'}</button>}
             </div>
             <div className="card divide-hair overflow-hidden">
               {list.map(i => (

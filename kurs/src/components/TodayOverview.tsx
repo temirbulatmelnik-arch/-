@@ -1,7 +1,8 @@
-import { ArrowDownRight, ArrowRight, ArrowUpRight, ChevronRight, CircleCheck, CircleHelp, WalletCards } from 'lucide-react';
+import { ArrowDownRight, ArrowRight, ArrowUpRight, ChevronRight, CircleCheck, WalletCards } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { cents, rubles } from '../domain/accounts';
-import type { positionBeforeIncome } from '../domain/coverage';
+import { ForecastNotice } from './ForecastNotice';
+import type { Coverage, Scenario, positionBeforeIncome } from '../domain/coverage';
 import { dayMonth } from '../domain/dates';
 import type { PaymentPreparation } from '../domain/funds';
 import type { Ledger } from '../domain/ledger';
@@ -9,7 +10,7 @@ import { Money } from './ui';
 import './TodayOverview.css';
 
 type Horizon = ReturnType<typeof positionBeforeIncome>;
-type Cash = Pick<Ledger, 'card' | 'reserve' | 'reserveVerified' | 'cashAccounts' | 'totalCash'>;
+type Cash = Pick<Ledger, 'card' | 'cardFrom' | 'lifeAvailable' | 'heldOnCard' | 'reserve' | 'reserveVerified' | 'cashAccounts' | 'totalCash'>;
 
 const shortMonth = new Intl.DateTimeFormat('ru-RU', { month: 'short', timeZone: 'UTC' });
 
@@ -21,16 +22,17 @@ function DateTile({ date, tone }: { date?: string; tone: 'bill' | 'income' }) {
   </time>;
 }
 
-function Funds({ cash, onAccounts, onCard, onReserve }: { cash: Cash; onAccounts: () => void; onCard: () => void; onReserve: () => void }) {
+function Funds({ cash, reserveDate, onAccounts, onCard, onReserve }: { cash: Cash; reserveDate?: string; onAccounts: () => void; onCard: () => void; onReserve: () => void }) {
   const extras = cash.cashAccounts;
   const other = extras.some(item => item.expected == null) ? null : rubles(extras.reduce((sum, item) => sum + cents(item.expected!), 0));
   const parts = [
-    { key: 'card', label: 'На карте жизни', value: cash.card, approx: false, action: onCard },
+    { key: 'card', label: 'Свободно на карте', value: cash.lifeAvailable, approx: false, action: onCard },
     { key: 'reserve', label: 'В резерве', value: cash.reserve, approx: !cash.reserveVerified, action: onReserve },
+    ...(cash.heldOnCard > 0 ? [{ key: 'prepared', label: 'На карте под платежи', value: cash.heldOnCard, approx: false, action: onCard }] : []),
     ...(extras.length ? [{ key: 'other', label: 'На других счетах', value: other, approx: false, action: onAccounts }] : []),
   ];
   const total = cash.totalCash == null ? null : cents(cash.totalCash);
-  const showBreakdown = total != null && total > 0 && parts.every(part => part.value != null && part.value >= 0);
+  const showBreakdown = total != null && total > 0 && parts.every(part => part.value != null && part.value >= 0) && parts.reduce((sum, part) => sum + cents(part.value ?? 0), 0) === total;
 
   return <section className="today-cash" aria-label="Свои деньги">
     <div className="today-cash-main">
@@ -54,36 +56,32 @@ function Funds({ cash, onAccounts, onCard, onReserve }: { cash: Cash; onAccounts
           <Money className="today-cash-part-value" value={part.value} approx={part.approx} kopecks />}
       </button>)}
     </div>
+    {(!cash.reserveVerified || !cash.cardFrom) && <p className="px-1 pb-2 text-[12px] text-muted">
+      {cash.cardFrom ? 'Карта сверена ' + dayMonth(cash.cardFrom.date) : 'Карта ждёт сверки'}
+      {' · '}{cash.reserveVerified && reserveDate ? 'резерв сверён ' + dayMonth(reserveDate) : 'резерв по учёту, нужна сверка'}
+    </p>}
   </section>;
 }
 
-function forecastStatus(horizon: Horizon): { kind: 'warn' | 'ok'; label: ReactNode; detail?: string } {
-  if (horizon.shortage) return { kind: 'warn', label: <>Не хватает <Money value={horizon.shortage.amount} kopecks /></>,
-    detail: dayMonth(horizon.shortage.date) + ' · ' + horizon.shortage.title };
-  if (horizon.accountRisk?.reason === 'insufficient') return { kind: 'warn',
-    label: horizon.accountRisk.amount == null ? 'Проверьте деньги на счёте' : <>На счёте не хватает <Money value={horizon.accountRisk.amount} kopecks /></>,
-    detail: horizon.accountRisk.title };
-  if (horizon.accountRisk?.reason === 'unassigned') return { kind: 'warn', label: 'Уточните счёт оплаты', detail: horizon.accountRisk.title };
-  if (horizon.accountRisk?.reason === 'unverified') return { kind: 'warn', label: 'Сверьте остаток на счёте', detail: horizon.accountRisk.title };
-  if (horizon.available == null) return { kind: 'warn', label: 'Сверьте карту и резерв' };
-  return { kind: 'ok', label: 'По плану хватит' };
-}
-
-export function TodayOverview({ cash, payment, horizon, onAccounts, onCard, onReserve, onPayment, onForecast }: {
+export function TodayOverview({ cash, reserveDate, payment, horizon, cov, scenario, provisional, children, onAccounts, onCard, onReserve, onPayment, onForecast }: {
   cash: Cash;
   payment?: PaymentPreparation;
   horizon: Horizon;
+  reserveDate?: string;
+  cov: Coverage;
+  scenario: Scenario;
+  provisional: boolean;
+  children?: ReactNode;
   onAccounts: () => void;
   onCard: () => void;
   onReserve: () => void;
   onPayment: () => void;
   onForecast: () => void;
 }) {
-  const status = forecastStatus(horizon);
-  const StatusIcon = status.kind === 'ok' ? CircleCheck : CircleHelp;
   return <div className="today-overview">
-    <Funds cash={cash} onAccounts={onAccounts} onCard={onCard} onReserve={onReserve} />
-    <section className="today-flow" aria-label="Ближайшие платежи и поступления">
+    <Funds cash={cash} reserveDate={reserveDate} onAccounts={onAccounts} onCard={onCard} onReserve={onReserve} />
+    <section className="today-flow" aria-label="Что дальше">
+      <h2 className="px-3.5 pt-3 text-[14px] font-semibold">Что дальше</h2>
       <button type="button" className="today-action today-flow-item" onClick={onPayment}>
         <DateTile date={payment?.date} tone="bill" />
         <span className="today-flow-copy">
@@ -108,13 +106,14 @@ export function TodayOverview({ cash, payment, horizon, onAccounts, onCard, onRe
             <span className="min-w-0">{horizon.income.title}</span>
             <Money value={horizon.income.amount} approx={horizon.income.approx} kopecks />
           </span>}
-          <span className="today-flow-status" data-status={status.kind}>
-            <StatusIcon size={15} strokeWidth={1.8} aria-hidden="true" /><span>{status.label}</span>
-          </span>
-          {status.detail && <span className="today-flow-detail">{status.detail}</span>}
+          <span className="today-flow-detail">{provisional ? 'Доступность до сверки не подтверждена' :
+            horizon.shortage ? 'До поступления не хватает ' + horizon.shortage.amount.toLocaleString('ru-RU') + ' ₽' :
+            horizon.accountRisk ? 'До поступления нужно проверить счёт' : 'До поступления хватает по осторожной оценке'}</span>
         </span>
         <ArrowRight className="today-flow-arrow" size={17} strokeWidth={1.8} aria-hidden="true" />
       </button>
+      <div className="border-t border-line px-2.5 py-2"><ForecastNotice cov={cov} scenario={scenario} verified={!provisional} onOpen={onForecast} /></div>
+      {children && <div className="border-t border-line py-2">{children}</div>}
     </section>
   </div>;
 }

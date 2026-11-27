@@ -1,4 +1,4 @@
-import { materializeJournal } from '../domain/journal';
+import { groupablePaymentMatches, journalReview, materializeJournal } from '../domain/journal';
 import { allocatePayrollReceipt, payrollReceiptParts } from '../domain/payrollReceipts';
 // Всё хранится только на телефоне (localStorage). Никаких аккаунтов и серверов.
 // Резервная копия — файл JSON (Настройки → Данные), календарь — файл .ics.
@@ -98,6 +98,7 @@ interface Actions {
   savePayoffTerms: (id: string, terms: PayoffTerms) => boolean;
   saveOperation: (op: AccountOperation) => boolean;
   linkPayrollReceipt: (id: string, keys: string[]) => boolean;
+  linkReviewedPayments: (pairs: { operationId: string; expenseId: string }[]) => boolean;
   linkPaymentExpense: (operationId: string, expenseId: string, budgetScope: 'weekly' | 'separate' | 'unknown') => boolean;
   setPaymentFunding: (operationId: string, scope: 'weekly' | 'separate') => boolean;
   setPaymentAccount: (key: string, accountId: string) => void;
@@ -262,6 +263,23 @@ export const useStore = create<State>()(
         if (staged) staged = { ...staged, ...apply(staged) };
         else commit(apply);
       };
+      const linkExpenses = (pairs: { operationId: string; expenseId: string }[], budgetScope: 'weekly' | 'separate' | 'unknown') => {
+        const s = get();
+        const links = new Map<string, AccountOperation>();
+        for (const { operationId, expenseId } of pairs) {
+          const op = s.accountBook.operations.find(row => row.id === operationId);
+          const expense = s.expenses.find(row => row.id === expenseId);
+          if (op?.type !== 'expense' || !op.eventKey || op.expenseId || op.status !== 'confirmed' || !expense ||
+              cents(op.amount) !== cents(expense.amount) || op.date !== expense.date ||
+              s.accountBook.operations.some(row => !row.legacyExpense && linkedExpenseId(row) === expenseId)) return false;
+          const budget = paymentBudget(op.amount, op.budget?.prepared ?? 0, budgetScope);
+          links.set(operationId, { ...op, expenseId, note: expense.note ?? op.note, category: expense.category, budget });
+        }
+        const operations = s.accountBook.operations.map(row => links.get(row.id) ?? row);
+        set({ accountBook: withExpenses(reviseOperations(s.accountBook, operations, nowIso(), 'Сверка расхода и платежа'), s.expenses) });
+        return true;
+      };
+
       return {
       ...EMPTY,
 
@@ -623,19 +641,15 @@ export const useStore = create<State>()(
         return { expenses, accountBook: withExpenses({ ...s.accountBook,
           expenseChanges: [...(s.accountBook.expenseChanges ?? []), { at: nowIso(), before: current }] }, expenses) };
       }),
-      linkPaymentExpense: (operationId, expenseId, budgetScope) => {
+      linkReviewedPayments: pairs => {
+        if (!pairs.length || new Set(pairs.map(p => p.operationId)).size !== pairs.length ||
+            new Set(pairs.map(p => p.expenseId)).size !== pairs.length) return false;
         const s = get();
-        const op = s.accountBook.operations.find(row => row.id === operationId);
-        const expense = s.expenses.find(row => row.id === expenseId);
-        if (op?.type !== 'expense' || !op.eventKey || op.expenseId || op.status !== 'confirmed' || !expense ||
-            cents(op.amount) !== cents(expense.amount) || op.date !== expense.date ||
-            s.accountBook.operations.some(row => !row.legacyExpense && linkedExpenseId(row) === expenseId)) return false;
-        const budget = paymentBudget(op.amount, op.budget?.prepared ?? 0, budgetScope);
-        const operations = s.accountBook.operations.map(row => row.id === operationId
-          ? { ...op, expenseId, note: expense.note ?? op.note, category: expense.category, budget } : row);
-        set({ accountBook: withExpenses(reviseOperations(s.accountBook, operations, nowIso(), 'Сверка расхода и платежа'), s.expenses) });
-        return true;
+        const candidates = groupablePaymentMatches(journalReview(s, s.accountBook.operations, moscowClock().date), s.expenses);
+        if (pairs.some(pair => !candidates.some(issue => issue.operationId === pair.operationId && issue.relatedId === pair.expenseId))) return false;
+        return linkExpenses(pairs, 'unknown');
       },
+      linkPaymentExpense: (operationId, expenseId, budgetScope) => linkExpenses([{ operationId, expenseId }], budgetScope),
       setPaymentFunding: (operationId, scope) => {
         const s = get();
         const op = s.accountBook.operations.find(row => row.id === operationId);

@@ -11,11 +11,12 @@ import { useLedger } from './Checkup';
 export function FinanceSheet() {
   const open = useUi(s => s.finance);
   const set = useUi(s => s.set);
-  return <Sheet open={open} title="Счета и операции" onClose={() => set({ finance: false })}>{open && <Body />}</Sheet>;
+  return <Sheet open={open} title="Счета и операции" onClose={() => set({ finance: false, financeView: undefined })}>{open && <Body />}</Sheet>;
 }
 
 function Body() {
-  const [tab, setTab] = useState<'accounts' | 'journal' | 'split'>('accounts');
+  const initial = useUi(s => s.financeView);
+  const [tab, setTab] = useState<'accounts' | 'journal' | 'split'>(initial ?? 'accounts');
   return <div className="space-y-4">
     <Segmented value={tab} onChange={setTab} options={[{ id: 'accounts', label: 'Счета' }, { id: 'journal', label: 'Операции' }, { id: 'split', label: 'Сплит' }]} />
     {tab === 'accounts' ? <Accounts /> : tab === 'journal' ? <Journal /> : <Split />}

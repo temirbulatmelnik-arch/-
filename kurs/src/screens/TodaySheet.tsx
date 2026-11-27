@@ -1,4 +1,4 @@
-import { useDailyLiquidityCap } from '../components/Coverage';
+import { useCoverage } from '../components/Coverage';
 // Траты за сегодня: окно по нажатию на кольцо дня и тело карточки «Сегодня» на «Неделе».
 // Сверху — сколько потрачено из лимита, ниже — покупки дня по всем источникам.
 import { Copy, Pencil, Plus, Trash2 } from 'lucide-react';
@@ -15,6 +15,8 @@ import type { Expense } from '../domain/types';
 import { useStore } from '../store/store';
 import { toast, useBudgetExpenses, useToday, useUi } from '../store/ui';
 import { useLedger } from './Checkup';
+import { horizonUnverified } from '../domain/financialView';
+import { positionBeforeIncome } from '../domain/coverage';
 import { CATEGORY } from '../domain/plan';
 
 export function useTodaySpends() {
@@ -48,12 +50,16 @@ export function dayNote(b: DayBudget): { text: string; over: boolean } {
 
 export function TodayDetails({ summary }: { summary?: boolean }) {
   // в листе строки свайпаются (фон листа под ними сплошной), в карточке стопки — просто нажимаются
-  const { budget: b, counted } = useTodaySpends();
+  const { now, budget: b, counted } = useTodaySpends();
   const set = useUi(s => s.set);
   const { lifeAvailable } = useLedger();
-  const liquidityCap = useDailyLiquidityCap();
+  const { input } = useCoverage('cautious');
+  const provisional = horizonUnverified(input);
+  const liquidityCap = positionBeforeIncome(input, now).available;
   const explanation = explainDailySpending(b, lifeAvailable, liquidityCap);
-  const note = lifeAvailable == null && b.mode === 'ok'
+  const note = provisional
+    ? { text: 'Показан остаток по дневному бюджету. Доступность денег с учётом платежей требует банковской сверки.', over: false }
+    : lifeAvailable == null && b.mode === 'ok'
     ? { text: 'Для суммы, доступной сегодня, нужен остаток карты по банку.', over: false }
     : liquidityCap != null && liquidityCap < b.canSpend && b.mode === 'ok'
       ? { text: 'Доступная сумма уменьшена с учётом ближайших платежей.', over: false }
@@ -81,7 +87,7 @@ export function TodayDetails({ summary }: { summary?: boolean }) {
       <details className="card mx-4 my-2 p-3 text-[13px]">
         <summary className="min-h-8 font-medium">Как рассчитано</summary>
         <dl className="space-y-1">
-          <div className="flex justify-between gap-2"><dt>Можно сегодня</dt><dd><Money value={explanation.value / 100} kopecks /></dd></div>
+          <div className="flex justify-between gap-2"><dt>{provisional ? 'Остаток по бюджету' : 'Можно сегодня'}</dt><dd><Money value={provisional ? b.canSpend : explanation.value / 100} kopecks /></dd></div>
           <div className="flex justify-between gap-2"><dt>Норма на день</dt><dd><Money value={b.day} kopecks /></dd></div>
           <div className="flex justify-between gap-2"><dt>Потрачено сегодня</dt><dd><Money value={b.spentToday} kopecks /></dd></div>
           <div className="flex justify-between gap-2"><dt>Остаток недели</dt><dd><Money value={b.weekLeft} kopecks /></dd></div>

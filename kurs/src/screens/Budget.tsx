@@ -1,4 +1,4 @@
-import { debtActivity } from '../domain/accounts';
+import { cents, debtActivity, rubles } from '../domain/accounts';
 // «Траты» — куда ушли деньги. Месяц против лимитов этапа: «прилив» из цветов категорий, категории с полосами,
 // недели месяца, поиск и фильтры, все траты по дням. Нажатие на категорию — фильтр; свайп влево — изменить, удалить.
 import { AnimatePresence, motion } from 'motion/react';
@@ -10,8 +10,10 @@ import { item, list as listAnim, Roll, spring, SwipeRow, useEnter } from '../com
 import { SkyButton, SkyHeader } from '../components/Petersburg';
 import { ExpenseRow } from '../components/rows';
 import { CAT_COLOR, CatIcon, Empty, Money } from '../components/ui';
-import { addDays, addMonths, ddmm, monthKey, monthName, weekday, weekStart } from '../domain/dates';
-import { CATEGORY, currentPhase } from '../domain/plan';
+import { addDays, addMonths, ddmm, daysBetween, monthKey, monthName, weekday, weekStart } from '../domain/dates';
+import { budgetTotals } from '../domain/budget';
+import { financialJournal } from '../domain/journal';
+import { CATEGORIES, CATEGORY, currentPhase } from '../domain/plan';
 import { bySource } from '../domain/sources';
 import { monthByCategory, weekSummary } from '../domain/summary';
 import type { CategoryId, Expense, Source } from '../domain/types';
@@ -37,15 +39,50 @@ export function Budget() {
       borrowed: debtActivity(book, expenses, monday, sunday).borrowed };
   }), [book, expenses, now]);
   const set = useUi(s => s.set);
+  const [period, setPeriod] = useState<'week' | 'month'>('week');
+  const [week, setWeek] = useState(weekStart(now));
   const [month, setMonth] = useState(monthKey(now));
+  const weekView = period === 'week';
+  const from = weekView ? week : month + '-01';
+  const end = weekView ? addDays(week, 6) : addDays(addMonths(month, 1) + '-01', -1);
+  const to = end > now ? now : end;
+  const elapsed = Math.max(0, daysBetween(from, to) + 1);
+  const prevFrom = weekView ? addDays(week, -7) : addMonths(month, -1) + '-01';
+  const prevEnd = addDays(from, -1);
+  const prevTo = addDays(prevFrom, elapsed - 1) > prevEnd ? prevEnd : addDays(prevFrom, elapsed - 1);
+  const previous = elapsed > 0 ? weekView
+    ? weekSummary(expenses.filter(row => row.date <= prevTo), debts, overrides, prevFrom).spent
+    : monthByCategory(expenses.filter(row => row.date <= prevTo), debts, monthKey(prevFrom)).reduce((sum, row) => sum + cents(row.spent), 0) / 100
+    : null;
+  const financialEntries = useStore(useShallow(s => [s.expenses, s.oneOff, s.marks, s.reserveLog] as const));
+  const breakdown = useMemo(() => {
+    const [entries, oneOff, marks, reserveLog] = financialEntries;
+    return financialJournal({ accountBook: book, expenses: entries, oneOff, marks, reserveLog }).entries.reduce((sum, op) => {
+      if (op.status !== 'confirmed' || op.date < from || op.date > to) return sum;
+      if (op.type === 'debt_payment') {
+        sum.obligations += cents(op.amount) - cents(op.budget?.weekly ?? 0);
+        sum.principal += cents(op.principal ?? 0);
+        sum.fees += cents(op.fee ?? 0) + cents(op.interest ?? 0);
+      } else if (op.type === 'expense' && op.eventKey) sum.obligations += cents(op.amount) - cents(op.budget?.weekly ?? 0);
+      else if (op.type === 'credit_purchase') sum.credit += cents(op.amount);
+      else if (op.type === 'interest' || op.type === 'fee') sum.fees += cents(op.amount);
+      else if (op.type === 'transfer') sum.transfers += cents(op.amount);
+      return sum;
+    }, { obligations: 0, principal: 0, fees: 0, credit: 0, transfers: 0 });
+  }, [book, financialEntries, from, to]);
   const [cat, setCat] = useState<CategoryId | null>(null);
   const [source, setSource] = useState<SourceFilter>('all');
   const [q, setQ] = useState('');
-  const rows = useMemo(() => monthByCategory(expenses, debts, month), [expenses, debts, month]);
-  const monthList = useMemo(() => expenses.filter(e => monthKey(e.date) === month), [expenses, month]);
+  const w = weekSummary(expenses.filter(e => e.date <= to), debts, overrides, week);
+  const monthList = useMemo(() => expenses.filter(e => e.date >= from && e.date <= to), [expenses, from, to]);
+  const rows = useMemo(() => {
+    if (!weekView) return monthByCategory(monthList, debts, monthKey(from));
+    const { byCategory } = budgetTotals(monthList);
+    return CATEGORIES.map(({ id }) => ({ id, spent: rubles(byCategory[id] ?? 0), limit: 0, baseline: 0 }));
+  }, [monthList, debts, from, weekView]);
   const phase = currentPhase(debts, `${month}-15`);
-  const spent = rows.reduce((s, r) => s + r.spent, 0);
-  const limit = rows.reduce((s, r) => s + r.limit, 0);
+  const spent = weekView ? w.spent : rubles(rows.reduce((s, r) => s + cents(r.spent), 0));
+  const limit = weekView ? w.limit : rows.reduce((s, r) => s + r.limit, 0);
   const baseline = rows.reduce((s, r) => s + r.baseline, 0);
   // откуда ушли деньги месяца: свои, в долг (кредитка) и из резерва
   const src = useMemo(() => bySource(monthList), [monthList]);
@@ -86,23 +123,28 @@ export function Budget() {
     <div>
       <SkyHeader back={{ label: 'Сегодня', onClick: () => useUi.getState().setTab('week') }}
         title="Траты"
-        subtitle={<button type="button" onClick={() => setMonth(monthKey(now))} className="text-left first-letter:uppercase">{monthName(month)}{month !== monthKey(now) ? ', к текущему' : ''}</button>}
+        subtitle={<button type="button" onClick={() => { setMonth(monthKey(now)); setWeek(weekStart(now)); }} className="min-h-11 text-left first-letter:uppercase">
+          {weekView ? `${ddmm(week)}–${ddmm(end)}` : monthName(month)}</button>}
         action={
           <div className="flex gap-2">
-            <SkyButton onClick={() => setMonth(addMonths(month, -1))} label="Предыдущий месяц"><ChevronLeft size={18} strokeWidth={1.7} /></SkyButton>
-            <SkyButton onClick={() => setMonth(addMonths(month, 1))} label="Следующий месяц"><ChevronRight size={18} strokeWidth={1.7} /></SkyButton>
+            <SkyButton onClick={() => weekView ? setWeek(addDays(week, -7)) : setMonth(addMonths(month, -1))} label="Предыдущий период"><ChevronLeft size={18} strokeWidth={1.7} /></SkyButton>
+            <SkyButton onClick={() => weekView ? setWeek(addDays(week, 7)) : setMonth(addMonths(month, 1))} label="Следующий период"><ChevronRight size={18} strokeWidth={1.7} /></SkyButton>
           </div>
         } />
 
+      <div className="mx-4 mt-3 flex gap-2" role="group" aria-label="Период статистики">
+        <button type="button" aria-pressed={weekView} className={`min-h-11 rounded-xl px-4 ${weekView ? 'bg-ink text-bg' : 'bg-surface-2'}`} onClick={() => setPeriod('week')}>Неделя</button>
+        <button type="button" aria-pressed={!weekView} className={`min-h-11 rounded-xl px-4 ${!weekView ? 'bg-ink text-bg' : 'bg-surface-2'}`} onClick={() => setPeriod('month')}>Месяц</button>
+      </div>
       <section className="deep-card mx-4 mt-3 px-5 pt-5 pb-4">
         <span aria-hidden="true" className="deep-sheen" />
         <div className="flex items-baseline justify-between gap-3">
-          <span className="text-[13px] text-card-muted">Потрачено за месяц</span>
-          <span className="text-[12.5px] text-card-muted">лимит этапа {phase.id}: <Money value={limit} className="text-card" /></span>
+          <span className="text-[13px] text-card-muted">{weekView ? 'Траты по бюджету за неделю' : 'Траты за месяц'}</span>
+          <span className="text-[12.5px] text-card-muted">{weekView ? 'лимит недели' : `лимит этапа ${phase.id}`} · <Money value={limit} className="text-card" /></span>
         </div>
         <span className={`figure mt-1 block text-[42px] leading-none ${spent > limit ? 'text-[#f2a596]' : ''}`}><Roll value={spent} /></span>
         {/* прилив: доли категорий в лимите месяца; нажатие на полосу — фильтр */}
-        <div className="mt-5 flex h-3.5 overflow-hidden rounded-full bg-card/12" role="group" aria-label="Категории месяца">
+        <div className="mt-5 flex h-3.5 overflow-hidden rounded-full bg-card/12" role="group" aria-label="Категории периода">
           {shown.map((r, i) => (
             <motion.button key={r.id} type="button" onClick={() => setCat(cat === r.id ? null : r.id)} aria-label={`${CATEGORY[r.id].short}: ${Math.round(r.spent)} ₽`}
               initial={{ width: 0 }} animate={{ width: `${(r.spent / Math.max(limit, spent, 1)) * 100}%`, opacity: !cat || cat === r.id ? 1 : 0.3 }}
@@ -111,7 +153,7 @@ export function Budget() {
         </div>
         <div className="mt-2.5 flex justify-between text-[12px] text-card-muted">
           <span>{spent <= limit ? <>осталось <Money value={limit - spent} className="text-card" /></> : <>сверх лимита <Money value={spent - limit} className="text-[#f2a596]" /></>}</span>
-          {baseline > 0 && <span>до плана уходило <Money value={baseline} className="text-card" /></span>}
+          {!weekView && baseline > 0 && <span>до плана уходило <Money value={baseline} className="text-card" /></span>}
         </div>
         {/* откуда деньги: сплошная — свои, штриховка — в долг, сумерки — из резерва (в лимит не входит) */}
         {(src.credit > 0 || src.reserve > 0) && (
@@ -130,6 +172,14 @@ export function Budget() {
         )}
       </section>
 
+      <section className="card mx-4 mt-4 space-y-2 p-4 text-[13px]">
+        {previous != null && <p>К предыдущему периоду за те же дни <Money value={rubles(cents(spent) - cents(previous))} kopecks sign /></p>}
+        <dl className="space-y-1 text-muted">
+          {([['Обязательства вне недельного бюджета', breakdown.obligations], ['Из них погашено основного долга', breakdown.principal],
+            ['Проценты и комиссии', breakdown.fees], ['Покупки в кредит', breakdown.credit], ['Внутренние переводы', breakdown.transfers]] as const)
+            .map(([label, amount]) => <div key={label} className="flex justify-between gap-2"><dt>{label}</dt><dd><Money value={rubles(amount)} kopecks /></dd></div>)}
+        </dl>
+      </section>
       <section className="card mx-4 mt-5 overflow-hidden text-[13px]">
         <h3 className="px-4 pt-3 font-medium">Последние четыре полные недели</h3>
         <table className="w-full text-right">
@@ -141,7 +191,7 @@ export function Budget() {
           </tr>)}</tbody>
         </table>
       </section>
-      {weeks.length > 0 && (
+      {!weekView && weeks.length > 0 && (
         <section className="mt-5">
           <div className="mb-2 px-5 text-[14px] font-medium">Недели</div>
           <div className="no-scrollbar flex gap-2 overflow-x-auto px-4 pb-1">
@@ -170,7 +220,7 @@ export function Budget() {
         </div>
         <motion.div className="card divide-hair mx-4 overflow-hidden" variants={listAnim} initial={false} animate="show">
           {rows.filter(r => r.spent > 0).sort((a, b) => b.spent - a.spent).map(r => {
-            const over = r.spent > r.limit;
+            const over = r.limit > 0 && r.spent > r.limit;
             const on = cat === r.id;
             return (
               <motion.button key={r.id} variants={item} type="button" onClick={() => setCat(on ? null : r.id)} whileTap={{ scale: 0.985 }}
@@ -179,10 +229,10 @@ export function Budget() {
                 <span className="relative min-w-0 flex-1">
                   <span className="flex items-baseline justify-between gap-2">
                     <span className="truncate text-[14px]">{CATEGORY[r.id].short}</span>
-                    <span className="shrink-0 text-[13.5px]"><Money value={r.spent} className={over ? 'text-neg' : ''} /><span className="text-faint"> из <Money value={r.limit} /></span></span>
+                    <span className="shrink-0 text-[13.5px]"><Money value={r.spent} className={over ? 'text-neg' : ''} />{!weekView && <span className="text-faint"> из <Money value={r.limit} /></span>}</span>
                   </span>
                   <span className="mt-2 block h-[5px] overflow-hidden rounded-full bg-line">
-                    <motion.span className="block h-full rounded-full" initial={{ width: 0 }} animate={{ width: `${Math.min(100, r.limit ? (r.spent / r.limit) * 100 : r.spent ? 100 : 0)}%` }}
+                    <motion.span className="block h-full rounded-full" initial={{ width: 0 }} animate={{ width: `${Math.min(100, r.limit ? (r.spent / r.limit) * 100 : (r.spent / Math.max(1, spent)) * 100)}%` }}
                       transition={spring} style={{ background: over ? 'var(--neg)' : CAT_COLOR[r.id] }} />
                   </span>
                   {r.baseline > 0 && <span className="mt-1 block text-[11px] text-faint">до плана <Money value={r.baseline} /></span>}

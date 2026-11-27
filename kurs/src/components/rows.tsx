@@ -1,3 +1,4 @@
+import { needsPaymentReview } from '../domain/financialView';
 // Общие строки списков: трата, событие календаря, предупреждение.
 import { AlertTriangle, ArrowDownLeft, Check, ChevronRight, CreditCard, Info, PiggyBank, Receipt, Repeat, Sparkles, Wallet } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -41,32 +42,35 @@ export function whenText(e: CalEvent) {
 }
 
 /** Строка платежа или поступления. Кружок слева — отметить, остальное — открыть. */
+export const CalendarProof = createContext<ReadonlySet<string>>(new Set());
 export const CalendarFunding = createContext<ReadonlyMap<string, 'Обеспечено' | 'Нужны деньги' | 'Нужна сверка'>>(new Map());
 
 export function EventRow({ e, mark, now, onClick, onToggle, showDate = true }: { e: CalEvent; mark?: EventMark; now: string; onClick: () => void; onToggle?: () => void; showDate?: boolean }) {
   const u = urgency(e, mark, now);
   const g = eventGroup(e);
   const Icon = GROUP_ICON[g];
-  const hot = u === 'overdue' || u === 'soon';
+  const hot = u === 'soon';
+  const bankProven = useContext(CalendarProof).has(e.key);
   const status = incomeStatus(e, mark);
   const funding = useContext(CalendarFunding).get(e.key);
   // дата прошла, а отметки нет: в прогнозе оно стоит сегодняшним днём — пометка, чтобы отметить или перенести
-  const missed = u !== 'done' && e.date < now && !e.payroll?.documented;
+  const missed = needsPaymentReview(e, mark, now);
   return (
     <div className={`flex items-center gap-3 px-4 py-3 ${u === 'done' ? 'opacity-55' : ''}`}>
-      <button type="button" onClick={onToggle ?? onClick} aria-label={mark?.done ? 'Снять отметку' : g === 'income' ? 'Отметить: пришло' : g === 'weekly' ? 'Отметить: долито' : 'Отметить: оплачено'}
+      <button type="button" onClick={onToggle ?? onClick} aria-label={e.title + ' · детали'}
         className={`dot-tile size-11 transition ${mark?.done ? '!bg-pos !text-white' : hot ? 'ring-[1.5px] ring-neg/60' : ''}`}
         style={{ '--c': hot && !mark?.done ? 'var(--neg)' : GROUP_COLOR[g] } as CSSProperties}>
         {mark?.done
           ? <motion.span initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: 'spring', bounce: 0.4, duration: 0.35 }}><Check size={18} strokeWidth={2.4} /></motion.span>
           : <Icon size={18} strokeWidth={1.7} />}
       </button>
-      <button type="button" onClick={onClick} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+      <button type="button" onClick={onClick} className="flex min-h-11 min-w-0 flex-1 items-center gap-3 text-left">
         <span className="min-w-0 flex-1">
-          <span className={`block truncate text-[14.5px] font-medium ${u === 'done' ? 'line-through decoration-1' : ''}`}>{e.title}</span>
+          <span className={`block break-words text-[14.5px] font-medium`}>{e.title}</span>
           <span className={`block text-[12px] ${hot ? 'text-neg' : missed ? 'text-warn' : 'text-muted'}`}>
             {showDate ? `${whenText(e)}, ` : e.dateMode === 'until' ? 'внести до этой даты, ' : ''}
-            {mark?.done ? 'Факт'
+            {mark?.done ? (bankProven ? (g === 'income' ? 'Зачисление сверено' : 'Списано по банку') : 'Записано · ждёт сверки')
+              : missed ? (e.date < now ? 'Срок прошёл · проверьте оплату' : 'Нужно проверить')
               : e.economicType === 'loan_disbursement' ? 'заёмные средства'
               : status ? INCOME_STATUS_LABEL[status]
               : e.projection === 'conditional' ? 'условная досрочка'
@@ -75,7 +79,6 @@ export function EventRow({ e, mark, now, onClick, onToggle, showDate = true }: {
               : e.possibleExtra ? 'возможна доплата'
               : funding ?? (u === 'done' ? (g === 'income' ? 'пришло' : g === 'weekly' ? 'долито' : 'оплачено')
               : e.dateMode === 'month' ? 'дата не известна' : relDays(now, e.date))}
-            {missed ? ', не отмечено' : ''}
             {e.moved && u !== 'done' ? ', дата изменена' : ''}
             {e.planned && u !== 'done' ? `, по графику ${ddmm(e.planned)} по общему графику` : ''}
           </span>

@@ -59,6 +59,8 @@ interface Ui {
   focus: string | null;
   /** раздел настроек, к которому прокрутить */
   paymentQueue: boolean;
+  paymentReviewDate?: string;
+  historyRange?: { from: string; to: string };
   settingsFocus: 'reminders' | 'backup' | null;
   /** файл обмена, доставленный с сайта: открыть в окне обмена */
   inbox: { id: string; text: string } | null;
@@ -67,6 +69,7 @@ interface Ui {
   /** «Банк и чат»: выписка, сверка, обмен с чатом, премия — в одном месте */
   hub: boolean;
   finance: boolean;
+  financeView?: 'accounts' | 'journal' | 'split';
   workSheet: boolean;
   /** знакомство с новым интерфейсом */
   tour: boolean;

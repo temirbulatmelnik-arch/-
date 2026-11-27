@@ -5,6 +5,7 @@ import { CheckCircle2, ChevronDown, TriangleAlert } from 'lucide-react';
 import { useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { compareCoverage, coverage, coverageHints, coverageInput, discretionaryLiquidityCap, HORIZON_DAYS, NARROW, type Coverage, type CoverageInput, type CoverageStep, type Scenario } from '../domain/coverage';
+import { horizonUnverified, SCENARIO_LABEL } from '../domain/financialView';
 import { accountOptions, EMPTY_BOOK } from '../domain/accounts';
 import { addDays, dayMonth, ddmm, ddmmyyyy, monthName } from '../domain/dates';
 import { num } from '../domain/money';
@@ -20,7 +21,7 @@ import { Money, Segmented } from './ui';
  * status.coverage в файле для чата считаются одной функцией с одним входом (coverageInput). Результат запоминается:
  * экраны, которые живут одновременно, не пересчитывают его каждый своё.
  */
-let covCache: { key: unknown[]; input: CoverageInput; cov: Coverage } | null = null;
+const coverageCache = new Map<Scenario, { key: unknown[]; input: CoverageInput; cov: Coverage }>();
 export function useCoverage(override?: Scenario): { input: CoverageInput; cov: Coverage; now: string } {
   const selected = useUi(s => s.scenario);
   const scenario = override ?? selected;
@@ -31,9 +32,11 @@ export function useCoverage(override?: Scenario): { input: CoverageInput; cov: C
   return useMemo(() => {
     // ключ — сами данные хранилища (у каждого экрана свой объект cal, но поля в нём общие)
     const key = [...Object.values(cal), marks, expenses, led.reserve, led.incomeOnCard, led.heldOnCard, led.card, led.cashAccounts, led.reserveVerified, now, scenario];
+    let covCache = coverageCache.get(scenario);
     if (!covCache || covCache.key.some((k, i) => k !== key[i])) {
       const input = coverageInput({ ...cal, marks, expenses }, led);
       covCache = { key, input, cov: coverage(input, now, scenario) };
+      coverageCache.set(scenario, covCache);
     }
     return { input: covCache.input, cov: covCache.cov, now };
   }, [cal, marks, expenses, led.reserve, led.incomeOnCard, led.heldOnCard, led.card, led.cashAccounts, led.reserveVerified, now, scenario]);
@@ -113,6 +116,7 @@ export function CoverageCard() {
   const { input, cov, now } = useCoverage();
   const scenario = useUi(s => s.scenario);
   const risk = cov.accountRisk;
+  const unverified = horizonUnverified(input);
   const riskName = accountOptions(input.cal.accountBook ?? EMPTY_BOOK).find(a => a.id === risk?.accountId)?.name;
   const [open, setOpen] = useState(false);
   const [compare, setCompare] = useState(false);
@@ -130,22 +134,23 @@ export function CoverageCard() {
   return (
     <section className="mx-4 mt-4">
       <div className="mb-3"><Segmented value={scenario} onChange={scenario => set({ scenario })} options={[
-        { id: 'base', label: 'С премиями' }, { id: 'cautious', label: 'Осторожный' }, { id: 'stress', label: 'Стрессовый' },
+        { id: 'base', label: SCENARIO_LABEL.base }, { id: 'cautious', label: SCENARIO_LABEL.cautious }, { id: 'stress', label: SCENARIO_LABEL.stress },
       ]} /></div>
       <div className="deep-card px-5 pt-5 pb-4">
         <span aria-hidden="true" className="deep-sheen" />
         <div className="flex items-start gap-3">
-          {s || risk ? <TriangleAlert size={22} strokeWidth={1.8} className="mt-0.5 shrink-0 text-[#ff9a70]" /> : <CheckCircle2 size={22} strokeWidth={1.8} className="mt-0.5 shrink-0 text-[#9ff0d4]" />}
+          {s || risk || unverified ? <TriangleAlert size={22} strokeWidth={1.8} className="mt-0.5 shrink-0 text-[#ff9a70]" /> : <CheckCircle2 size={22} strokeWidth={1.8} className="mt-0.5 shrink-0 text-[#9ff0d4]" />}
           <div className="min-w-0">
             <h2 className="font-display text-[21px] leading-tight font-medium">
-              {s ? <>Кассовый разрыв по прогнозу <Money value={s.amount} kopecks /></> : risk ? <>Счёт требует проверки</> : <>Хватает по прогнозу до {dayMonth(cov.to)}</>}
+              {s ? <>Кассовый разрыв по прогнозу <Money value={s.amount} kopecks /></> : risk || unverified ? <>Нужна сверка для прогноза</> : <>Хватает по прогнозу до {dayMonth(cov.to)}</>}
             </h2>
             <p className="mt-1 text-[13.5px] leading-snug text-card-muted">
-              {s ? <>Первый дефицит {dayMonth(s.date)} после «{s.title}». Минимум {ddmm(m?.date ?? now)}, расчёт до {ddmmyyyy(cov.to)}.</>
+              {s ? <>Первый дефицит {dayMonth(s.date)} после «{s.title}». {m && <>Минимум {ddmm(m.date)} · <Money value={m.balance} kopecks />.</>} Расчёт до {ddmmyyyy(cov.to)}.</>
                 : m ? <>Минимум {dayMonth(m.date)} · <Money value={m.balance} className="text-card" /></> : null}
             </p>
           </div>
         </div>
+        {unverified && <p className="mt-2 text-[13px] text-card-muted">Расчёт уточнится после сверки счетов.</p>}
         <ReserveScrub steps={cov.steps} start={cov.start} from={cov.from} to={cov.to} focus={focus} />
       </div>
 

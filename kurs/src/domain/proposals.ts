@@ -27,6 +27,7 @@ export interface Review {
   summary: string;
   warnings: string[];
   items: Proposal[];
+  duplicates?: Pick<DraftTx, 'id' | 'date' | 'amount' | 'merchant'>[];
 }
 
 const BONUS = ['bonusQuarter', 'bonusYear', 'vacation', 'thirteenth'];
@@ -137,7 +138,11 @@ export function fromDrafts(txs: DraftTx[], ctx: Ctx, summary: string, extra: { c
       item.op.date === transfer.date && cents(item.op.amount) === cents(transfer.amount));
   };
   const checked = markDuplicates(txs.map(tx => tx.structured && !tx.accountId && /накопительн.*сч[её]т|^резерв$/i.test(tx.bankAccount ?? '')
-    ? { ...tx, source: 'reserve' as const } : tx), ctx.expenses).filter(tx => !tx.structured || !known.has(tx.fingerprint));
+    ? { ...tx, source: 'reserve' as const } : tx), ctx.expenses);
+  const alreadyRecorded = (tx: DraftTx) => tx.structured && known.has(tx.fingerprint);
+  const duplicates = checked.filter(tx => alreadyRecorded(tx) || tx.duplicate && !tx.needsDuplicateReview)
+    .map(({ id, date, amount, merchant }) => ({ id, date, amount, merchant }));
+  const unrecorded = checked.filter(tx => !alreadyRecorded(tx));
   const upcoming = new Map<string, CalEvent[]>();
   const nearbyEvents = (date: string) => {
     const existing = upcoming.get(date);
@@ -147,7 +152,7 @@ export function fromDrafts(txs: DraftTx[], ctx: Ctx, summary: string, extra: { c
     return events;
   };
   const structuredPayments = new Set<string>();
-  for (const tx of checked.filter(t => t.structured && !t.unknownDirection && !t.income && !t.duplicate)) {
+  for (const tx of unrecorded.filter(t => t.structured && !t.unknownDirection && !t.income && !t.duplicate)) {
     const label = tx.merchant.toUpperCase();
     const debtId = /ПОГАШ|ПЛАТ[ЕЁ]Ж ПО|КРЕДИТ|ЗАДОЛЖ|СПЛИТ|РАССРОЧ/.test(label) ? guessDebt(label, ctx.cal.debts) : '';
     const candidates = nearbyEvents(tx.date).filter(event => {
@@ -163,7 +168,7 @@ export function fromDrafts(txs: DraftTx[], ctx: Ctx, summary: string, extra: { c
       items.push({ id: pid(), type: 'mark', on: true, event: { ...event, accountId: tx.accountId ?? (tx.source === 'reserve' ? RESERVE_ACCOUNT : event.accountId) }, amount: tx.amount, date: tx.date, ...bankEvidence(tx) });
     }
   }
-  for (const tx of checked.filter(t => !t.income && !structuredPayments.has(t.id))) {
+  for (const tx of unrecorded.filter(t => !t.income && !structuredPayments.has(t.id))) {
     const posting = structuredPosting(tx, ctx, tx.amount);
     if (posting && !alreadyProposed(posting)) {
       items.push(posting);
@@ -176,7 +181,7 @@ export function fromDrafts(txs: DraftTx[], ctx: Ctx, summary: string, extra: { c
   const existing = ctx.cal.accountBook?.operations ?? [];
   const matchedDocs = new Set([...payrollReceiptParts(existing).keys(), ...existing.flatMap(op =>
     !op.legacy && op.status === 'confirmed' && op.eventKey ? [op.eventKey] : [])]);
-  const incomes = checked.filter(t => t.income && !(t.structured && t.duplicate));
+  const incomes = unrecorded.filter(t => t.income && !(t.structured && t.duplicate));
   for (const t of incomes) {
     // вид поступления по подписи: «Зарплата» не должна закрыть ожидаемый «Аванс»
     const m = t.merchant.toUpperCase();
@@ -208,7 +213,7 @@ export function fromDrafts(txs: DraftTx[], ctx: Ctx, summary: string, extra: { c
     }
     items.push({ id: pid(), type: 'income', on: !!ev, event: ev, amount: t.amount, date: t.date, bonus: !t.structured && !!ev?.incomeKind && BONUS.includes(ev.incomeKind), ...bankEvidence(t) });
   }
-  return { summary, warnings: [], items };
+  return { summary, warnings: [], items, ...(duplicates.length ? { duplicates } : {}) };
 }
 
 export function fromAi(r: AiResult, ctx: Ctx): Review {

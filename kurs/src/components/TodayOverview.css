@@ -224,3 +224,7 @@
     backdrop-filter: none;
   }
 }
+
+body:has([aria-modal="true"], [data-quick-menu], input:focus, textarea:focus) .rc-today-sticky { visibility: hidden; }
+.today-cash [data-part="prepared"] { background: var(--warn); }
+.today-cash [data-part="pending"] { background: var(--pos); }

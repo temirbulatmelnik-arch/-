@@ -164,7 +164,7 @@ function Body() {
         <input ref={file} type="file" accept="application/json,.json" hidden onChange={e => { void restore(e.target.files?.[0]); e.target.value = ''; }} />
         <div className="grid grid-cols-2 gap-2">
           <SecondaryButton onClick={backup}><Download size={17} /> Сохранить</SecondaryButton>
-          <SecondaryButton onClick={() => file.current?.click()}><Upload size={17} /> Загрузить</SecondaryButton>
+          {!import.meta.env.VITE_DEMO && <SecondaryButton onClick={() => file.current?.click()}><Upload size={17} /> Загрузить</SecondaryButton>}
         </div>
         {hasMigrationBackup && <SecondaryButton className="w-full" onClick={() => {
           try {

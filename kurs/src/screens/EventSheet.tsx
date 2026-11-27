@@ -8,6 +8,7 @@ import { actionableEvent, cashIncomeEvent, eventGroup, incomeStatus, INCOME_STAT
 import { addDays, dayMonth, ddmmyyyy, relDays, weekdayFull } from '../domain/dates';
 import { DEFAULT_PREPARATION_TIME, moscowClock, paymentPreparations, weeklyTopUp } from '../domain/funds';
 import { ledger } from '../domain/ledger';
+import { payrollReceiptParts } from '../domain/payrollReceipts';
 import { parseAmount, rub } from '../domain/money';
 import type { CalEvent } from '../domain/types';
 import { useLedger } from './Checkup';
@@ -60,6 +61,8 @@ function Body({ e }: { e: CalEvent }) {
   });
   const [editing, setEditing] = useState(false);
   const book = useStore(s => s.accountBook);
+  const receiptDate = pay ? payrollReceiptParts(book.operations).get(pay.key)?.date ??
+    book.operations.find(op => op.eventKey === e.key && op.type === 'income' && op.origin === 'bank' && op.status === 'confirmed')?.date : undefined;
   const payment = mark?.done ? book.operations.find(row => row.eventKey === e.key && row.status === 'confirmed' &&
     (row.type === 'debt_payment' || row.type === 'expense') && row.budget?.unknown) : undefined;
   const account = assigned ?? LIFE_ACCOUNT;
@@ -160,8 +163,9 @@ function Body({ e }: { e: CalEvent }) {
             <Row label="Номинальная дата">{ddmmyyyy(pay.nominalDate)}</Row>
             <Row label="Ожидаемая дата">{pay.documented && !pay.actualPayDate ? 'Дата требует сверки' : ddmmyyyy(pay.expectedPayDate)}</Row>
             {pay.alternatePayDate && <Row label="Альтернативная дата">{ddmmyyyy(pay.alternatePayDate)} · после подтверждения</Row>}
-            <Row label="Банковская отметка">{mark?.done ? (pay.actualPayDate ? ddmmyyyy(pay.actualPayDate) : 'Отмечено') : 'Ожидает сверки'}</Row>
-            {pay.documented && !mark?.done && pay.actualPayDate && <Row label="Дата по документам">{ddmmyyyy(pay.actualPayDate)}</Row>}
+            <Row label="Банковское зачисление">{receiptDate ? ddmmyyyy(receiptDate) : mark?.done && mark.paidDate
+              ? `Записано вручную · ${ddmmyyyy(mark.paidDate)}` : 'Ожидает сверки'}</Row>
+            {pay.documented && pay.actualPayDate && <Row label="Дата по документам">{ddmmyyyy(pay.actualPayDate)}</Row>}
             <Row label={pay.actualGrossKnown ? 'Начислено по листку' : 'Оценка начисления'}>{pay.gross ? <Money value={pay.gross} approx={!pay.actualGrossKnown} kopecks /> : 'Нет данных'}</Row>
             <Row label={pay.actualTaxKnown ? 'НДФЛ по листку' : 'Оценка НДФЛ'}><Money value={pay.tax} approx={!pay.actualTaxKnown} kopecks /></Row>
             {!!pay.taxDeduction && <Row label="Предполагаемый вычет"><Money value={pay.taxDeduction} approx /></Row>}

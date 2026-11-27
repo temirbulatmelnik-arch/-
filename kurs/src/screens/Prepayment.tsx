@@ -1,3 +1,5 @@
+import { useCoverage } from '../components/Coverage';
+import { prepaymentReadiness } from '../domain/coverage';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, CalendarDays, Check, ChevronRight, ShieldAlert, TrendingDown } from 'lucide-react';
 import { Field, Money, PrimaryButton, SecondaryButton, Segmented, Sheet } from '../components/ui';
@@ -61,14 +63,18 @@ function Bank({ id, name }: { id: string; name?: string }) {
 export function PrepaymentCard() {
   const { date: today } = useMoscowClock();
   const [open, setOpen] = useState(false);
-  const preview = useAnalysis('suggest', today < march ? march : today, true);
+  const preview = useAnalysis('suggest', today < march ? march : today, open);
+  const { input, cov } = useCoverage('cautious');
+  const readiness = useMemo(() => prepaymentReadiness(input, today, 'reserve'), [input, today]);
+  const reason = readiness.reason ?? (cov.shortage ? 'В осторожном сценарии есть кассовый разрыв' :
+    cov.accountRisk ? 'Нужна сверка ближайшего платежа' : cov.bufferRisk ? 'Нужно сохранить минимальный резерв' : 'Свободного остатка для досрочки пока нет');
   return <section className="mx-4 mt-3">
     <button type="button" className="card flex w-full items-center gap-3 p-4 text-left" onClick={() => setOpen(true)}>
       <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-sea/12 text-sea"><TrendingDown size={22} /></span>
       <span className="min-w-0 flex-1">
-        <span className="block font-medium">Выгодная досрочка</span>
-        <span className="block text-[13px] text-muted">{preview?.next ? `${ddmm(preview.next.date)} · ${preview.next.result.title}` :
-          preview && !preview.failed ? 'Проверить, когда выгодно погасить долг' : 'Расчёт экономии и проверка платежей'}</span>
+        <span className="block font-medium">Безопасная досрочка · <Money value={readiness.amount ?? 0} kopecks /></span>
+        <span className="block text-[13px] text-muted">{readiness.amount ? 'Посмотреть варианты погашения' : reason}
+          <span className="block text-sea">Рассчитать выгоду</span></span>
       </span>
       <ChevronRight size={18} className="shrink-0 text-muted" />
     </button>

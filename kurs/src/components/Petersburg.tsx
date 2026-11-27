@@ -395,7 +395,7 @@ export const lampAt = (i: number) => ({ x: (18 + (i + 0.5) * (354 / 7)) / 390, y
 /** Узкая панорама для шапок «Платежей», «Плана» и «Бюджета»: вечернее небо (конечный кадр заката), город, полоска
  *  воды. Закат здесь не проигрывается: вкладки собираются в фоне, и анимация шла бы впустую. Живые мелочи (звёзды, блики, чайка) — отдельные HTML-слои поверх картинки: их прозрачность и сдвиг крутит видеокарта,
  *  и картинка неба не перерисовывается каждый кадр (анимации внутри SVG на iPhone идут через основной поток) */
-export function SkyHeader({ title, subtitle, action, back }: { title: ReactNode; subtitle?: ReactNode; action?: ReactNode; back?: { label: string; onClick: () => void } }) {
+export function SkyHeader({ title, subtitle, action, back, compact }: { title: ReactNode; subtitle?: ReactNode; action?: ReactNode; compact?: boolean; back?: { label: string; onClick: () => void } }) {
   // у каждой шапки свои имена градиентов: вкладки живут одновременно, и при общих именах браузер брал бы градиенты
   // из скрытой вкладки — там они не рисуются, и небо выходило пустым
   const id = `sh${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
@@ -410,7 +410,7 @@ export function SkyHeader({ title, subtitle, action, back }: { title: ReactNode;
   }, []);
   return (
     <header ref={ref} className="relative overflow-hidden">
-      <svg viewBox="0 0 390 160" className="block h-auto w-full" aria-hidden="true">
+      <svg viewBox="0 0 390 160" preserveAspectRatio={compact ? "xMidYMax slice" : undefined} className={compact ? "block h-[110px] w-full" : "block h-auto w-full"} aria-hidden="true">
         <defs>
           <SkyGradients id={id} />
           <clipPath id={`${id}-skyclip`}><rect width="390" height="149" /></clipPath>

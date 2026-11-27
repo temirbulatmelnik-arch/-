@@ -33,7 +33,7 @@ const r = (n: number) => `${num(Math.abs(n))} ₽`;
  * Что будет после записи траты — одной строкой под суммой. amount = 0 — что сейчас. skipId — правим эту трату:
  * её прежняя сумма не считается. reserve — резерв по учёту.
  */
-export function spendEffect(s: SpendState, x: { amount: number; source: Source; date: string; now: string; reserve: number; lifeAvailable?: number | null; liquidityCap?: number | null; skipId?: string; creditCard?: string; category?: Expense['category']; budgetScope?: Expense['budgetScope']; accountId?: string }): SpendEffect {
+export function spendEffect(s: SpendState, x: { amount: number; source: Source; date: string; now: string; reserve: number; lifeAvailable?: number | null; liquidityCap?: number | null; budgetOnly?: boolean; skipId?: string; creditCard?: string; category?: Expense['category']; budgetScope?: Expense['budgetScope']; accountId?: string }): SpendEffect {
   const draft: Expense = { id: '~', date: x.date, amount: x.amount, category: x.category ?? 'fun', budgetScope: x.budgetScope, source: x.source, accountId: x.accountId, creditCard: x.creditCard ?? s.bridge?.card, createdAt: '' };
   if (cashAccount(draft) === RESERVE_ACCOUNT) {
     const budget = countsWeekly(draft) ? 'Трата входит в недельный бюджет' : 'Вне недельного лимита';
@@ -65,6 +65,7 @@ export function spendEffect(s: SpendState, x: { amount: number; source: Source; 
     const cashDelta = cents(x.amount) - cents(existing?.amount ?? 0);
     const cardDelta = (cashAccount(draft) === LIFE_ACCOUNT ? cents(x.amount) : 0) -
       (existing && cashAccount(existing) === LIFE_ACCOUNT ? cents(existing.amount) : 0);
+    if (x.budgetOnly) return { text: `По бюджету дня ${x.amount > 0 ? 'останется' : 'осталось'} ${r(day.canSpend)} · доступность требует сверки`, tone: 'warn' };
     const remaining = x.lifeAvailable === undefined ? day.canSpend : availableToday(day,
       x.lifeAvailable === null ? null : rubles(Math.max(0, cents(x.lifeAvailable) - cardDelta)),
       x.liquidityCap == null ? null : rubles(Math.max(0, cents(x.liquidityCap) - cashDelta)));

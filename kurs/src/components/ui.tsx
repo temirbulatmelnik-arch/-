@@ -55,12 +55,12 @@ export function IconButton({ onClick, label, children, className = '' }: { onCli
   );
 }
 
-export function PrimaryButton({ onClick, children, className = '', disabled, tone = 'sea' }: {
-  onClick: () => void; children: ReactNode; className?: string; disabled?: boolean; tone?: 'sea' | 'ink' | 'neg';
+export function PrimaryButton({ onClick, children, className = '', disabled, tone = 'sea', type = 'button' }: {
+  onClick?: () => void; children: ReactNode; className?: string; disabled?: boolean; tone?: 'sea' | 'ink' | 'neg'; type?: 'button' | 'submit';
 }) {
   const tones = { sea: 'btn-sea', ink: 'bg-ink text-bg', neg: 'bg-neg text-white' };
   return (
-    <motion.button type="button" whileTap={{ scale: 0.97 }} transition={{ duration: 0.12, ease: [0.23, 1, 0.32, 1] }} onClick={onClick} disabled={disabled}
+    <motion.button type={type} whileTap={{ scale: 0.97 }} transition={{ duration: 0.12, ease: [0.23, 1, 0.32, 1] }} onClick={onClick} disabled={disabled}
       className={`flex h-[52px] w-full items-center justify-center gap-2 rounded-[18px] text-[15.5px] font-medium disabled:opacity-35 ${tones[tone]} ${className}`}>
       {children}
     </motion.button>
@@ -95,21 +95,56 @@ export function Chip({ children, tone = 'neutral', className = '' }: { children:
 /** Лист снизу, как в iOS: выезжает пружиной, тянется пальцем за шапку вниз и закрывается.
  *  compact — не выше трёх четвертей экрана: над ним видно, откуда он открылся */
 /** bare — содержимое само раскладывает высоту (например, прокрутка сверху и закреплённая клавиатура снизу) */
+const openSheets: HTMLElement[] = [];
+let overflowBeforeSheets = '';
+
 export function Sheet({ open, onClose, title, subtitle, children, footer, compact, action, bare }: {
   open: boolean; onClose: () => void; title: string; subtitle?: ReactNode; children: ReactNode; footer?: ReactNode; compact?: boolean; action?: ReactNode; bare?: boolean;
 }) {
   const fade = useMotionValue(1);
   const pull = useMotionValue(0);
+  const panel = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  useEffect(() => { close.current = onClose; }, [onClose]);
   useEffect(() => {
-    if (!open) return;
+    const element = panel.current;
+    if (!open || !element) return;
     fade.set(1);
     pull.set(0);
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    const prev = document.body.style.overflow;
+    const previous = document.activeElement;
+    if (!openSheets.length) overflowBeforeSheets = document.body.style.overflow;
+    openSheets.push(element);
     document.body.style.overflow = 'hidden';
-    return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
-  }, [open, onClose, fade, pull]);
+    const isTop = () => openSheets.at(-1) === element;
+    if (!element.contains(previous)) element.focus({ preventScroll: true });
+    const onKey = (event: KeyboardEvent) => {
+      if (!isTop() || event.defaultPrevented || event.isComposing) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        close.current();
+      } else if (event.key === 'Tab') {
+        const nodes = Array.from(element.querySelectorAll<HTMLElement>(
+          'button, input, select, textarea, a[href], summary, [tabindex]:not([tabindex="-1"])',
+        )).filter(node => node.tabIndex >= 0 && !node.matches(':disabled') && node.getClientRects().length);
+        const active = document.activeElement;
+        const target = event.shiftKey ? nodes.at(-1) : nodes[0];
+        if (active === (event.shiftKey ? nodes[0] : nodes.at(-1)) || active === element || !element.contains(active)) {
+          event.preventDefault();
+          (target ?? element).focus();
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      const top = isTop();
+      openSheets.splice(openSheets.indexOf(element), 1);
+      window.removeEventListener('keydown', onKey);
+      if (!openSheets.length) document.body.style.overflow = overflowBeforeSheets;
+      if (top && previous instanceof HTMLElement && previous.isConnected && !element.contains(previous)) {
+        previous.focus({ preventScroll: true });
+      }
+    };
+  }, [open, fade, pull]);
 
   // за шапку лист тянется вниз; закрыть можно и коротким броском — не нужно тянуть далеко (apple-design: drag to
   // dismiss). Жест — usePan, а не drag из motion: тот перемерял бы лист при каждой перерисовке (каждой цифре траты)
@@ -127,7 +162,7 @@ export function Sheet({ open, onClose, title, subtitle, children, footer, compac
       {open && (
         <motion.div className="fixed inset-0 z-50 flex items-end justify-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.2 } }} transition={{ duration: 0.25 }}>
           <motion.div className="absolute inset-0 bg-[rgba(4,14,22,.5)] backdrop-blur-[4px]" style={{ opacity: fade }} onClick={onClose} />
-          <motion.div role="dialog" aria-modal="true" aria-label={title} className="relative w-full max-w-md"
+          <motion.div ref={panel} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} className="relative w-full max-w-md"
             initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%', transition: { duration: 0.26, ease: [0.32, 0.72, 0, 1] } }}
             transition={{ duration: 0.45, ease: [0.32, 0.72, 0, 1] }}>
           <motion.div style={{ y: pull }}
@@ -142,7 +177,7 @@ export function Sheet({ open, onClose, title, subtitle, children, footer, compac
                 </div>
                 <div className="flex shrink-0 items-center gap-2" onPointerDown={e => e.stopPropagation()}>
                   {action}
-                  <IconButton onClick={onClose} label="Закрыть" className="size-10"><X size={17} strokeWidth={1.6} /></IconButton>
+                  <IconButton onClick={onClose} label="Закрыть" className="size-11"><X size={17} strokeWidth={1.6} /></IconButton>
                 </div>
               </div>
             </div>

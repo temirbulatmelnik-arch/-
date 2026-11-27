@@ -28,8 +28,8 @@ function Arc({ frac, reverse, stroke }: { frac: number; reverse?: boolean; strok
  *  сторону и подпись «сверх нормы на …»; лимит недели исчерпан — 0 и «до воскресенья» (итог недели — в заголовке).
  *  Кольцо можно крутить пальцем: «а если потрачу?» — сумма растёт по кругу, дуга показывает, что останется;
  *  onScrub получает сумму (null — отпустили), onCommit — на какой сумме отпустили */
-export function DayRing({ day, canSpend, mode, overDay, nextWeek, onClick, scrubMax, onScrub, onCommit }: {
-  day: number; canSpend: number; mode: 'ok' | 'day' | 'week'; overDay: number; nextWeek: boolean; onClick: () => void;
+export function DayRing({ day, canSpend, mode, overDay, nextWeek, provisional, onClick, scrubMax, onScrub, onCommit }: {
+  day: number; canSpend: number; mode: 'ok' | 'day' | 'week'; overDay: number; nextWeek: boolean; provisional?: boolean; onClick: () => void;
   scrubMax?: number; onScrub?: (amount: number | null) => void; onCommit?: (amount: number) => void;
 }) {
   const shown = useCountUp(canSpend, 1100, day);
@@ -41,8 +41,8 @@ export function DayRing({ day, canSpend, mode, overDay, nextWeek, onClick, scrub
   const frac = day > 0 && (!over || scrub != null) ? Math.min(1, Math.max(0, after / day)) : 0;
   const overFrac = scrub != null ? (after < 0 ? Math.min(1, -after / Math.max(1, day)) : 0) : mode === 'day' ? (day > 0 ? Math.min(1, overDay / day) : 1) : 0;
   const ink = scrub != null ? (after < 0 ? 'var(--ring-neg)' : 'var(--ring-ink)') : over ? 'var(--ring-neg)' : 'var(--ring-ink)';
-  const label = mode === 'week' ? (nextWeek ? 'до понедельника' : 'до воскресенья') : mode === 'day' ? 'сверх нормы' : 'на сегодня';
-  const aria = mode === 'week' ? 'Лимит недели исчерпан, сегодня можно 0 ₽' : mode === 'day' ? `Сегодня сверх нормы на ${rub(overDay)}` : `На сегодня осталось ${rub(canSpend)} из ${rub(day)}`;
+  const label = mode === 'week' ? (nextWeek ? 'до понедельника' : 'до воскресенья') : mode === 'day' ? 'сверх нормы' : provisional ? 'по бюджету' : 'можно сегодня';
+  const aria = mode === 'week' ? 'Лимит недели исчерпан, сегодня можно 0 ₽' : mode === 'day' ? `Сегодня сверх нормы на ${rub(overDay)}` : provisional ? `По бюджету осталось ${rub(canSpend)}. Доступность требует сверки` : `Сегодня можно ${rub(canSpend)} из ${rub(day)}`;
   const max = scrubMax ?? 3000;
   const down = (e: ReactPointerEvent<HTMLButtonElement>) => {
     const r = e.currentTarget.getBoundingClientRect();

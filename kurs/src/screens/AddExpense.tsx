@@ -1,24 +1,26 @@
-import { LIFE_ACCOUNT } from '../domain/accounts';
-// Запись траты: своя клавиатура в листе (iPhone не закрывает экран своей), сумма, категория, «Записать».
+import { countsWeekly, LIFE_ACCOUNT } from '../domain/accounts';
+// Запись траты: нативный ввод суммы, категория и сохранение.
 // Больше 5 000 — предложить паузу 48 часов. Сверху — «Из банка»: загрузить траты разом.
-import { CalendarDays, CreditCard, Delete, Hourglass, PiggyBank, ScanText, Trash2, Wallet, type LucideIcon } from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
-import { createPortal } from 'react-dom';
+import { CreditCard, Hourglass, PiggyBank, Trash2, Wallet, type LucideIcon } from 'lucide-react';
+import { motion } from 'motion/react';
+import { useMemo, useRef, useState, type CSSProperties } from 'react';
 import { snappy } from '../components/motion';
+import { runQuick } from '../components/TabBar';
 import { useShallow } from 'zustand/react/shallow';
 import { haptic } from '../components/haptics';
-import { CAT_COLOR, CATEGORY_ICON, Money, PrimaryButton, SecondaryButton, Sheet } from '../components/ui';
+import { AmountInput, CAT_COLOR, CATEGORY_ICON, Money, PrimaryButton, SecondaryButton, Sheet } from '../components/ui';
 import { activeBridge, bridgeState } from '../domain/bridge';
-import { dayMonth, today, weekday } from '../domain/dates';
+import { dayMonth, today } from '../domain/dates';
 import { parseAmount, rub } from '../domain/money';
 import { BIG_PURCHASE, CATEGORIES, CATEGORY } from '../domain/plan';
 import { DEFAULT_SPEND_SOURCE, SOURCE_LABEL, SOURCES, spendEffect, type SpendEffect } from '../domain/sources';
 import { guessCategory, parseSpoken } from '../domain/spoken';
 import type { CategoryId, Expense, Source } from '../domain/types';
 import { useStore } from '../store/store';
-import { toast, useBudgetExpenses, useUi, type AddPrefill } from '../store/ui';
-import { useDailyLiquidityCap } from '../components/Coverage';
+import { toast, useBudgetExpenses, useUi, withUndo, type AddPrefill } from '../store/ui';
+import { useCoverage } from '../components/Coverage';
+import { horizonUnverified } from '../domain/financialView';
+import { positionBeforeIncome } from '../domain/coverage';
 import { useLedger } from './Checkup';
 
 /** Источник денег: свои — Нева, в долг — сиреневая штриховка (чужие деньги), резерв — сумерки */
@@ -34,11 +36,7 @@ export function AddExpenseSheet() {
   const set = useUi(s => s.set);
   const close = () => set({ add: null });
   return (
-    <Sheet bare open={!!prefill} onClose={close} title={prefill?.edit ? 'Трата' : 'Новая трата'}
-      action={!prefill?.edit && (
-        <motion.button type="button" whileTap={{ scale: 0.94 }} onClick={() => { set({ add: null }); window.setTimeout(() => set({ scan: true }), 200); }}
-          className="flex h-9 items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-[13px] font-medium"><ScanText size={15} strokeWidth={1.7} className="text-sea" /> Из банка</motion.button>
-      )}>
+    <Sheet open={!!prefill} onClose={close} title={prefill?.edit ? 'Трата' : 'Новая операция'}>
       {prefill && <Form key={prefill.edit?.id ?? prefill.wishId ?? 'new'} p={prefill} onDone={close} />}
     </Sheet>
   );
@@ -49,13 +47,14 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   const store = useStore.getState();
   const edit = p.edit ? store.expenses.find(e => e.id === p.edit!.id) ?? p.edit : undefined;
   const [amount, setAmount] = useState(edit ? String(edit.amount) : p.amount ? String(p.amount) : '');
-  const [category, setCategory] = useState<CategoryId | null>(edit?.category ?? p.category ?? null);
+  const recent = store.expenses.filter(item => item.source === 'life' && item.budgetScope !== 'separate').at(-1)?.category;
+  const [category, setCategory] = useState<CategoryId | null>(edit?.category ?? p.category ?? recent ?? null);
+  const categoryPicked = useRef(!!(edit || p.category));
   const [note, setNote] = useState(edit?.note ?? p.note ?? '');
   const [date, setDate] = useState(edit?.date ?? p.date ?? today());
   const suggested = DEFAULT_SPEND_SOURCE;
   const [source, setSource] = useState<Source>(edit?.source ?? p.source ?? suggested);
   const [advanced, setAdvanced] = useState(!!(edit || p.source || p.date));
-  const [picked, setPicked] = useState(!!(edit || p.source));
   const [card, setCard] = useState(edit?.creditCard ?? p.creditCard ?? '');
   const [account, setAccount] = useState(edit?.accountId ?? LIFE_ACCOUNT);
   const [funding, setFunding] = useState<NonNullable<Expense['fundingSource']>>(edit?.fundingSource ?? 'unknown');
@@ -64,30 +63,17 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   const expenses = useBudgetExpenses();
   const [debts, weeklyOverrides, bridge] = useStore(useShallow(s => [s.debts, s.weeklyOverrides, s.bridge] as const));
   const led = useLedger();
-  const liquidityCap = useDailyLiquidityCap();
+  const { input, now } = useCoverage('cautious');
+  const budgetOnly = horizonUnverified(input);
+  const liquidityCap = useMemo(() => positionBeforeIncome(input, now).available, [input, now]);
   const loan = useMemo(() => (activeBridge(bridge) ? bridgeState(expenses, bridge) : null), [expenses, bridge]);
   const [askPause, setAskPause] = useState(false);
-  const dateInput = useRef<HTMLInputElement>(null);
 
-  /** своя клавиатура: цифры, запятая, стереть; до двух знаков после запятой */
-  const press = (k: string) => setAmount(a => {
-    if (k === 'del') return a.slice(0, -1);
-    if (k === ',') return a.includes(',') ? a : (a || '0') + ',';
-    if (a.includes(',') && a.split(',')[1].length >= 2) return a;
-    if (a.replace(',', '').length >= 9) return a;
-    return a === '0' ? k : a + k;
-  });
-  // с клавиатуры компьютера тоже можно
-  useEffect(() => {
-    const on = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).tagName === 'INPUT') return;
-      if (/^\d$/.test(e.key)) press(e.key);
-      else if (e.key === ',' || e.key === '.') press(',');
-      else if (e.key === 'Backspace') press('del');
-    };
-    window.addEventListener('keydown', on);
-    return () => window.removeEventListener('keydown', on);
-  }, []);
+  const saving = useRef(false);
+  const openAlternative = (action: () => void) => {
+    onDone();
+    action();
+  };
 
   // трата одной фразой: в поле «Что купили» можно набрать или продиктовать «обед 340» — сумма и категория встанут сами.
   // Текст поля при этом не трогаем (иначе диктовка iPhone обрывается); число уйдёт из примечания при записи.
@@ -106,7 +92,7 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
       a.amount = null;
     }
     const guess = guessCategory(said.words, store.expenses);
-    if (guess && (category == null || category === a.category)) { a.category = guess; setCategory(guess); }
+    if (guess && !categoryPicked.current) { a.category = guess; setCategory(guess); }
   };
   /** примечание для записи: сумма пришла из фразы — остаются только слова */
   const noteText = () => (auto.current.amount != null && auto.current.amount === amount ? parseSpoken(note).words : note.trim());
@@ -116,57 +102,24 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
   // что будет после записи — одной строкой под суммой: остаток дня, долг по мосту или остаток резерва
   const effect = useMemo(() => spendEffect({ expenses, debts, weeklyOverrides, bridge }, {
     amount: value, source, date, now: today(), reserve: led.reserve, lifeAvailable: led.lifeAvailable, liquidityCap, skipId: edit?.id, creditCard: card,
-    category: category ?? undefined, budgetScope: scope ?? (edit ? undefined : 'weekly'), accountId: source === 'life' ? account : undefined,
-  }), [expenses, debts, weeklyOverrides, bridge, value, source, date, led.reserve, led.lifeAvailable, liquidityCap, edit?.id, card, category, account, scope]);
+    category: category ?? undefined, budgetOnly, budgetScope: scope, accountId: source === 'life' ? account : undefined,
+  }), [expenses, debts, weeklyOverrides, bridge, value, source, date, led.reserve, led.lifeAvailable, liquidityCap, budgetOnly, edit?.id, card, category, account, scope]);
 
-  /** src — источник, если сумму бросили в сосуд: состояние ещё не успело обновиться */
-  const save = (src: Source = source) => {
-    if (!valid) return;
+  const save = () => {
+    const src = source;
+    if (!valid || saving.current) return;
     if (src === 'credit' && !card) { setSource(src); toast('Выберите кредитную карту'); return; }
     if (!edit && !p.wishId && value > BIG_PURCHASE && src === 'life' && !askPause) { setAskPause(true); return; }
     const item = { date, amount: value, category: category!, note: noteText() || undefined, source: src, origin: 'manual' as const, creditCard: src === 'credit' ? card : undefined, accountId: src === 'life' && account !== LIFE_ACCOUNT ? account : undefined,
-      fundingSource: src === 'credit' ? 'borrowed' as const : funding, budgetScope: scope ?? (edit ? undefined : 'weekly' as const) };
-    const done = src === source ? effect : spendEffect({ expenses, debts, weeklyOverrides, bridge }, {
-      amount: value, source: src, date, now: today(), reserve: led.reserve, lifeAvailable: led.lifeAvailable, liquidityCap, skipId: edit?.id, creditCard: card,
-      category: item.category, accountId: item.accountId, budgetScope: item.budgetScope,
+      fundingSource: src === 'credit' ? 'borrowed' as const : funding, budgetScope: scope };
+    saving.current = true;
+    withUndo(`Записано. ${effect.text}`, () => {
+      if (edit) store.updateExpense(edit.id, item);
+      else store.addExpenses([item]);
     });
-    if (edit) store.updateExpense(edit.id, item);
-    else store.addExpenses([item]);
     haptic('success');
     if (p.wishId) store.resolveWish(p.wishId, 'bought');
-    // то же, что было написано под суммой
-    toast(`Записано. ${done.text}`);
     onDone();
-  };
-
-  // сумму можно потянуть пальцем и бросить в сосуд: «Свои», «В долг» или «Резерв». Сосуд под пальцем подрастает;
-  // отпустили над ним — источник выбран, а если сумма и категория есть — трата сразу записана
-  const vessels = useRef<Partial<Record<Source, HTMLElement | null>>>({});
-  const grab = useRef<{ x: number; y: number } | null>(null);
-  const [drag, setDrag] = useState<{ x: number; y: number; over: Source | null } | null>(null);
-  const hit = (x: number, y: number): Source | null => SOURCES.find(id => {
-    const r = vessels.current[id]?.getBoundingClientRect();
-    return !!r && x >= r.left - 4 && x <= r.right + 4 && y >= r.top - 14 && y <= r.bottom + 14;
-  }) ?? null;
-  const dragHandlers = {
-    onPointerDown: (e: ReactPointerEvent<HTMLElement>) => { if (advanced && value > 0) { grab.current = { x: e.clientX, y: e.clientY }; e.currentTarget.setPointerCapture?.(e.pointerId); } },
-    onPointerMove: (e: ReactPointerEvent<HTMLElement>) => {
-      const g = grab.current;
-      if (!g || (!drag && Math.hypot(e.clientX - g.x, e.clientY - g.y) < 10)) return;
-      const over = hit(e.clientX, e.clientY);
-      if (over !== (drag?.over ?? null) && over) haptic();
-      setDrag({ x: e.clientX, y: e.clientY, over });
-    },
-    onPointerUp: () => {
-      grab.current = null;
-      if (!drag) return;
-      const over = drag.over;
-      setDrag(null);
-      if (!over) return;
-      setSource(over); setPicked(true);
-      if (valid) save(over);
-    },
-    onPointerCancel: () => { grab.current = null; setDrag(null); },
   };
 
   const pause = () => {
@@ -191,24 +144,21 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
     );
   }
 
-  return (
-    <>
-    {/* сверху — сумма, когда, откуда, категория; прокручивается сама, если экран невысокий */}
-    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-5 pb-4 [mask-image:linear-gradient(to_bottom,black_calc(100%-18px),transparent)]">
-      {/* сумма: цифры выпрыгивают по одной */}
-      <div {...dragHandlers} className={`flex min-h-[64px] touch-none items-end justify-center gap-1 pt-1 transition-opacity duration-150 ${drag ? 'opacity-30' : ''}`} aria-live="polite" aria-label={`Сумма ${amount || 0} ₽`}>
-        <span className="figure flex text-[52px] leading-none">
-          <AnimatePresence initial={false} mode="popLayout">
-            {(amount || '0').split('').map((ch, i) => (
-              <motion.span key={`${i}-${ch}`} layout initial={{ y: 18, opacity: 0, scale: 0.6 }} animate={{ y: 0, opacity: amount ? 1 : 0.3, scale: 1 }} exit={{ y: -14, opacity: 0, scale: 0.6 }} transition={snappy}>{ch}</motion.span>
-            ))}
-          </AnimatePresence>
-        </span>
-        <span className="mb-1.5 text-[26px] text-muted">₽</span>
-      </div>
+  const budgetDraft = { source, category: category ?? 'fun' as const, accountId: source === 'life' ? account : undefined };
+  const weekly = countsWeekly({ ...budgetDraft, budgetScope: scope });
+  const defaultWeekly = countsWeekly(budgetDraft);
 
-      {/* что будет после записи: остаток дня, долг по мосту, остаток резерва — меняется вместе с суммой и источником */}
-      <p className="-mt-1 min-h-[18px] text-center text-[12.5px] leading-snug font-medium" style={{ color: EFFECT_COLOR[effect.tone] }} aria-live="polite">{effect.text}</p>
+  return (
+    <form className="space-y-3 pb-3" onSubmit={event => { event.preventDefault(); save(); }}>
+      <AmountInput value={amount} autoFocus={!edit} onChange={text => {
+        const next = text.replace(/\s/g, '').replace('.', ',');
+        if (/^\d{0,9}(,\d{0,2})?$/.test(next)) setAmount(next);
+      }} />
+      <p className="text-center text-[13px] leading-snug" aria-live="polite">
+        {value > 0 && <><Money value={-value} kopecks /> · {source === 'life' && account === LIFE_ACCOUNT ? 'с карты жизни' : SOURCE_LABEL[source]}
+          {' · '}{scope === 'unknown' ? 'бюджет требует сверки' : weekly ? 'из недельного бюджета' : 'вне недельного бюджета'}</>}
+      </p>
+      <p className="text-center text-[12px] leading-snug" style={{ color: EFFECT_COLOR[effect.tone] }}>{effect.text}</p>
 
       <button type="button" aria-expanded={advanced} onClick={() => setAdvanced(value => !value)}
         className="flex min-h-10 w-full items-center justify-between gap-2 rounded-xl bg-surface-2 px-3 text-left text-[13px]">
@@ -224,8 +174,8 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
           const Icon = SRC_UI[id].icon;
           const on = source === id;
           return (
-            <button key={id} ref={el => { vessels.current[id] = el; }} type="button" role="radio" aria-checked={on} onClick={() => { setSource(id); setPicked(true); haptic(); }}
-              className={`relative flex flex-col items-center gap-px rounded-[15px] py-1.5 transition-[color,transform,box-shadow] duration-200 ${on ? 'text-white' : 'text-muted'} ${drag?.over === id ? 'drop-over shadow-[0_0_0_2px_var(--ink)]' : ''}`}>
+            <button key={id} type="button" role="radio" aria-checked={on} onClick={() => { setSource(id); haptic(); }}
+              className={`relative flex flex-col items-center gap-px rounded-[15px] py-1.5 transition-[color,transform,box-shadow] duration-200 ${on ? 'text-white' : 'text-muted'}`}>
               <span className="flex items-center gap-1.5 text-[13.5px] font-medium"><Icon size={15} strokeWidth={1.8} />{SOURCE_LABEL[id]}</span>
               <span className={`text-[11px] leading-tight ${on ? 'opacity-85' : 'opacity-80'}`}>
                 {id === 'life' ? (led.lifeAvailable != null ? <>свободно <Money value={led.lifeAvailable} /></> : 'с карты')
@@ -254,40 +204,31 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
           <option value="borrowed">Подтверждено: ранее полученный заём</option>
         </select>
       </label>}
-      {(category === 'fixed' || scope === 'separate' || scope === 'unknown') && <label className="block text-[13px]">Участие в недельном бюджете
-        <select className="field mt-1" value={scope ?? (edit ? '' : 'weekly')} onChange={e => setScope(e.target.value as Expense['budgetScope'] || undefined)}>
-          {edit && <option value="">По правилам старой записи</option>}
+      {<label className="block text-[13px]">Участие в недельном бюджете
+        <select className="field mt-1" value={scope ?? ''} onChange={e => setScope(e.target.value as Expense['budgetScope'] || undefined)}>
+          <option value="">По умолчанию · {defaultWeekly ? 'в недельном бюджете' : 'вне недельного бюджета'}</option>
           <option value="weekly">Из недельных денег</option>
           <option value="separate">Оплачено отдельно</option>
           <option value="unknown">Источник требует сверки</option>
         </select>
       </label>}
-        <button type="button" onClick={() => dateInput.current?.showPicker?.() ?? dateInput.current?.focus()} className="relative flex h-10 shrink-0 items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-[13px] font-medium">
-          <CalendarDays size={15} strokeWidth={1.6} className="text-sea" />{date === today() ? 'Сегодня' : `${weekday(date)}, ${dayMonth(date)}`}
-          <input ref={dateInput} type="date" value={date} onChange={e => setDate(e.target.value || today())} className="absolute inset-0 opacity-0" aria-label="Дата" />
-        </button>
+        <label className="block text-[13px]">Дата расхода
+          <input type="date" value={date} max={now} onChange={e => setDate(e.target.value || now)} className="field mt-1" />
+        </label>
       </div>}
-      {/* подсказка не исчезает во время жеста: иначе сосуды съезжали бы из-под пальца */}
-      {advanced && value > 0 && !!category && !edit && <p className={`-mt-1.5 text-center text-[11.5px] text-faint ${drag ? 'invisible' : ''}`}>Потяните сумму в «Свои», «В долг» или «Резерв» — запишется сразу</p>}
-      {drag && createPortal(
-        <div className="pointer-events-none fixed z-[90] -translate-x-1/2 -translate-y-[130%] rounded-full bg-ink px-4 py-2 text-bg shadow-[0_14px_30px_-10px_rgba(4,14,22,.7)]" style={{ left: drag.x, top: drag.y }}>
-          <span className="figure text-[20px]"><Money value={value} /></span>
-        </div>, document.body)}
-      {!picked && source === 'credit' && <p className="-mt-1 text-center text-[12px] leading-snug" style={{ color: 'var(--loan)' }}>Недельные деньги на карте кончились — предлагаю мост на кредитке</p>}
-
       {/* когда и что купили */}
-      <div className="flex items-center gap-2">
-        <input value={note} onChange={e => typeNote(e.target.value)} placeholder={edit ? 'Что купили' : 'Что купили — или «обед 340»'} enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }} className="h-10 min-w-0 flex-1 rounded-full border border-line bg-surface px-3.5 text-[16px] outline-none placeholder:text-faint focus:border-sea" />
-      </div>
+      {advanced && <div className="flex items-center gap-2">
+        <input aria-label="Описание расхода" value={note} onChange={e => typeNote(e.target.value)} placeholder={edit ? 'Что купили' : 'Что купили — или «обед 340»'} enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }} className="h-10 min-w-0 flex-1 rounded-full border border-line bg-surface px-3.5 text-[16px] outline-none placeholder:text-faint focus:border-sea" />
+      </div>}
 
       <div className="grid grid-cols-5 gap-2">
         {CATEGORIES.map(c => {
           const Icon = CATEGORY_ICON[c.id];
           const on = category === c.id;
           return (
-            <motion.button key={c.id} type="button" onClick={() => setCategory(c.id)} whileTap={{ scale: 0.95 }} transition={snappy}
+            <motion.button key={c.id} type="button" aria-pressed={on} onClick={() => { categoryPicked.current = true; setCategory(c.id); }} whileTap={{ scale: 0.95 }} transition={snappy}
               style={{ '--c': CAT_COLOR[c.id], ...(on ? {} : { background: `color-mix(in oklab, ${CAT_COLOR[c.id]} 13%, var(--surface))` }) } as CSSProperties}
-              className={`relative flex aspect-[1/0.92] flex-col items-center justify-center gap-1 overflow-hidden rounded-[18px] text-center transition-shadow duration-200 ${on ? 'tile' : ''}`}>
+              className={`relative flex min-h-11 flex-col items-center justify-center gap-1 overflow-hidden rounded-[18px] text-center transition-shadow duration-200 ${on ? 'tile' : ''}`}>
               <motion.span className="relative" animate={on ? { rotate: [0, -12, 10, 0], scale: [1, 1.25, 1] } : { rotate: 0, scale: 1 }} transition={{ duration: 0.45 }}>
                 <Icon size={21} strokeWidth={1.8} style={on ? undefined : { color: CAT_COLOR[c.id] }} />
               </motion.span>
@@ -302,24 +243,20 @@ function Form({ p, onDone }: { p: AddPrefill; onDone: () => void }) {
           <Trash2 size={16} strokeWidth={1.5} /> Удалить
         </SecondaryButton>
       )}
-    </div>
-
-    {/* снизу всегда на месте — клавиатура и «Записать», как в банковских приложениях */}
-    <div className="pb-safe bg-bg px-5 pt-2">
-      <div className="grid grid-cols-3 gap-2" role="group" aria-label="Клавиатура">
-        {['1', '2', '3', '4', '5', '6', '7', '8', '9', ',', '0', 'del'].map(k => (
-          <motion.button key={k} type="button" onClick={() => press(k)} whileTap={{ scale: 0.95, backgroundColor: 'var(--surface-2)' }} transition={snappy}
-            aria-label={k === 'del' ? 'Стереть' : k === ',' ? 'Запятая' : k}
-            className="figure grid h-[46px] place-items-center rounded-[15px] bg-surface text-[23px] select-none">
-            {k === 'del' ? <Delete size={22} strokeWidth={1.6} /> : k}
-          </motion.button>
-        ))}
-      </div>
-
-      <div className="pt-2.5 pb-3">
-        <PrimaryButton onClick={() => save()} disabled={!valid || (source === 'credit' && !card)}>{edit ? 'Сохранить' : !value ? 'Введите сумму' : category ? `Записать ${rub(value)}` : 'Выберите категорию'}</PrimaryButton>
-      </div>
-    </div>
-    </>
+      <PrimaryButton type="submit" disabled={!valid || (source === 'credit' && !card)}>
+        {edit ? 'Сохранить' : !value ? 'Введите сумму' : category ? `Записать ${rub(value)}` : 'Выберите категорию'}
+      </PrimaryButton>
+      {!edit && <details className="rounded-xl bg-surface-2 px-3">
+        <summary className="flex min-h-11 cursor-pointer items-center text-[13px] font-medium text-sea">Другие действия</summary>
+        <div className="grid grid-cols-2 gap-1 pb-2 text-left text-[13px]">
+          <button type="button" className="min-h-11 text-left" onClick={() => openAlternative(() => runQuick('bonus'))}>Поступление</button>
+          <button type="button" className="min-h-11 text-left" onClick={() => openAlternative(() => useUi.getState().set({ finance: true, financeView: 'journal' }))}>Перевод</button>
+          <button type="button" className="min-h-11 text-left" onClick={() => openAlternative(() => useUi.getState().set({ paymentQueue: true }))}>Платёж</button>
+          <button type="button" className="min-h-11 text-left" onClick={() => openAlternative(() => runQuick('scan'))}>Из банка</button>
+          <button type="button" className="min-h-11 text-left" onClick={() => openAlternative(() => runQuick('checkup'))}>Сверка</button>
+          <button type="button" className="min-h-11 text-left" onClick={() => openAlternative(() => runQuick('sync'))}>Чат</button>
+        </div>
+      </details>}
+    </form>
   );
 }

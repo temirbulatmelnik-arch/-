@@ -1,5 +1,5 @@
 import { payrollReceiptParts } from './payrollReceipts';
-import { accountMovement, canonicalBook, cents, EMPTY_BOOK, LIFE_ACCOUNT, linkedExpenseId, recordedAfter, RESERVE_ACCOUNT, rubles, type AccountBook, type AccountOperation, type BankBalance } from './accounts';
+import { accountMovement, canonicalBook, cashAccount, cents, EMPTY_BOOK, LIFE_ACCOUNT, linkedExpenseId, recordedAfter, RESERVE_ACCOUNT, rubles, type AccountBook, type AccountOperation, type BankBalance } from './accounts';
 import { today } from './dates';
 import type { CalEvent, EventMark, Expense, ReserveMove } from './types';
 
@@ -67,9 +67,17 @@ export function materializeJournal<T extends JournalInput>(state: T, refresh = f
   if (book.journalVersion && !refresh) return state;
   const normalized = canonicalBook(book, state.expenses);
   const explicit = normalized.operations.filter(op => !op.legacy);
-  return { ...state, accountBook: { ...normalized, journalVersion: 1,
+  // Preserve a reviewed link only while the original calendar payment still matches its archived entry.
+  const reviewed = new Map(book.operations.flatMap(op =>
+    op.legacy === 'mark' && op.type === 'expense' && op.expenseId ? [[op.id, op] as const] : []));
+  const operations = legacyEntries(state, explicit).map(op => {
+    const linked = op.legacy === 'mark' ? reviewed.get(op.id) : undefined;
+    return linked && linked.date === op.date && linked.accountId === op.accountId && cents(linked.amount) === cents(op.amount) &&
+      state.expenses.some(expense => expense.id === linked.expenseId) ? { ...linked, at: op.at } : op;
+  });
+  return { ...state, accountBook: canonicalBook({ ...normalized, journalVersion: 1,
     historicalPaymentKeys: [...new Set(state.reserveLog.flatMap(move => move.forKeys ?? []))],
-    operations: legacyEntries(state, explicit) } };
+    operations }, state.expenses) };
 }
 
 export interface JournalAnchor extends BankBalance {
@@ -153,5 +161,16 @@ export function journalReview(s: JournalInput & { fixed?: { id: string; name: st
       }
     }
     return findings;
+  });
+}
+
+/** Offer grouped review only when both sides have one candidate and agree on the account. */
+export function groupablePaymentMatches(issues: JournalReview[], expenses: Expense[]) {
+  const possible = issues.filter(issue => issue.kind === 'possible_duplicate');
+  return possible.flatMap(issue => {
+    const expense = expenses.find(row => row.id === issue.relatedId);
+    if (!expense || expense.bankRoutePending || cashAccount(expense) !== issue.accountId ||
+        possible.filter(other => other.operationId === issue.operationId || other.relatedId === issue.relatedId).length !== 1) return [];
+    return [{ ...issue, relatedId: expense.id }];
   });
 }

@@ -56,6 +56,30 @@ it('keeps the prior posting in the correction history after an erroneous confirm
 describe('обратная совместимость и подтверждение операций', () => {
   beforeEach(() => storage.clear());
 
+  it('связывает проверенные совпадения одной записью, сохраняет связь при обновлении журнала', async () => {
+    const fixed = [{ id: 'phone', name: 'Связь', day: 20, amount: 90.50 }];
+    const key = 'fix:phone:2026-11';
+    const expense = { id: 'phone', date, amount: 90.50, category: 'fixed', note: 'Связь', source: 'life',
+      origin: 'manual', createdAt: at };
+    const source = { ...old, fixed, expenses: [expense],
+      marks: { [key]: { done: true, paidDate: date, amount: 90.50, paidFrom: 'card', at } } };
+    const bad = await reopen(9, { ...source, expenses: [expense, { ...expense, id: 'another' }] });
+    const pair = { operationId: 'mark:' + key, expenseId: 'phone' };
+    expect(bad.getState().linkReviewedPayments([pair])).toBe(false);
+
+    const store = await reopen(9, source);
+    expect(store.getState().linkReviewedPayments([pair])).toBe(true);
+    expect(store.getState().linkReviewedPayments([pair])).toBe(false);
+    expect(store.getState().expenses).toMatchObject([expense]);
+    const expectLinked = () => {
+      expect(store.getState().accountBook.operations.filter(op => op.id === pair.operationId || op.id === 'expense:phone'))
+        .toMatchObject([{ id: pair.operationId, expenseId: 'phone', budget: { unknown: 90.50, weekly: 0 } }]);
+    };
+    expectLinked();
+    store.getState().markEvent({ key: 'unrelated', title: 'Другой платёж', kind: 'payment', date, amount: 11 }, true, 11);
+    expectLinked();
+  });
+
   it('открывает прежнее хранилище и полный JSON с отметками, журналом и сверкой', async () => {
     const store = await reopen(4, old);
     expect(store.getState()).toMatchObject(old);

@@ -77,6 +77,18 @@ it('учитывает дебетовую и кредитовую стороны
   ]);
 });
 
+it('показывает ранее записанную проводку в предпросмотре пересекающихся выписок', () => {
+  const rows = parseCsv(file, 'fixture')!.rows;
+  const old = rows.find(row => row.income)!;
+  const bank: AccountOperation = { id: 'known', externalId: old.fingerprint, type: 'income', origin: 'bank',
+    status: 'confirmed', date: old.date, accountId: 'life', fundingSource: 'own', amount: old.amount };
+  const ctx = { now: old.date, reserve: 0, expenses: [], marks: {}, cal: { debts: [], incomes: [], fixed: [], oneOff: [],
+    weeklyOverrides: [], templateFrom: '2027-01', accountBook: { ...EMPTY_BOOK, operations: [bank] } } };
+  const review = fromDrafts(rows, ctx, 'Проверка');
+  expect(review.duplicates).toMatchObject([{ merchant: 'Кэшбэк', amount: 40 }]);
+  expect(review.items).toMatchObject([{ type: 'tx', on: true, tx: { amount: 100.25 } }]);
+});
+
 it('читает проводки ВТБ из колонок счёта и проверяет остаток по дате обработки', async () => {
   const { parseStatementText } = await import('./pdf');
   const text = [

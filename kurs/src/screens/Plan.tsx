@@ -1,5 +1,6 @@
 import { useCoverage } from '../components/Coverage';
-import { prepaymentReadiness } from '../domain/coverage';
+import { ForecastNotice } from '../components/ForecastNotice';
+import { horizonUnverified } from '../domain/financialView';
 import { monthDebtActivity } from '../domain/accounts';
 import { useLedger } from './Checkup';
 // «Долги» — тает ли долг. Общий долг досчитывает вниз от начального, фарватер: долги буями по порядку закрытия,
@@ -16,10 +17,10 @@ import { SkyHeader } from '../components/Petersburg';
 import { Bar, Chip, Empty, LinkButton, Money, SectionTitle } from '../components/ui';
 import { bridgeState } from '../domain/bridge';
 import { eventsBetween } from '../domain/calendar';
-import { addDays, addMonths, ddmm, monthIn, monthKey, monthName } from '../domain/dates';
+import { addDays, addMonths, ddmm, monthKey, monthName } from '../domain/dates';
 import { forecast } from '../domain/forecast';
 import { pct } from '../domain/money';
-import { currentPhase, monthlyInterest, planConfig, targetDebt, totalDebt } from '../domain/plan';
+import { currentPhase, monthlyInterest, planConfig, targetDebt } from '../domain/plan';
 import { checklistDue } from '../domain/planUpdate';
 import type { ChecklistItem, Debt } from '../domain/types';
 import { useStore } from '../store/store';
@@ -44,44 +45,33 @@ export function Plan() {
 
   return (
     <div>
-      <SkyHeader back={{ label: 'Сегодня', onClick: () => useUi.getState().setTab('week') }} title="Финансы" subtitle="Курс к свободе" action={
+      <SkyHeader compact title="Финансы" subtitle="Курс к свободе" action={
         <motion.button type="button" whileTap={{ scale: 0.97 }} onClick={() => set({ bonus: {} })} className="flex h-11 items-center gap-1.5 rounded-full bg-ink px-4 text-[13.5px] font-medium text-bg"><Gift size={15} strokeWidth={1.8} /> Пришла премия</motion.button>
       } />
-      <FinanceOverview />
       <DebtHero />
+      <FinanceOverview />
       <Pager<PlanView> className="mt-5" value={view} onChange={v => set({ planView: v })} pages={[
         { id: 'debts', label: 'Долги', render: () => <DebtsView /> },
         { id: 'strategy', label: 'План', render: () => <StrategyView /> },
-        { id: 'checklist', label: <>Чек-лист{open ? <span className="ml-1 text-sea">{open}</span> : null}</>, render: () => <ChecklistView /> },
+        { id: 'checklist', label: <>Задачи{open ? <span className="ml-1 text-sea">{open}</span> : null}</>, render: () => <ChecklistView /> },
       ]} />
     </div>
   );
 }
 
 function FinanceOverview() {
-  const led = useLedger();
   const set = useUi(s => s.set);
-  const { input, now } = useCoverage('cautious');
-  const prepayment = useMemo(() => prepaymentReadiness(input, now, 'reserve'), [input, now]);
-  return <section className="card mx-4 mt-2 space-y-2 p-4" aria-label="Собственные деньги">
-    <div className="text-[13px] text-muted">Собственные деньги</div>
-    <div className="figure text-[30px]">{led.totalCash == null ? 'Нужна сверка' : <Money value={led.totalCash} kopecks />}</div>
-    <div className="grid grid-cols-2 gap-2 text-[13px]">
-      <button type="button" className="min-h-11 rounded-xl bg-surface-2 text-left px-2" onClick={() => set({ card: true })}>
-        <span className="block text-muted">На карте</span>{led.card == null ? 'Нужна сверка' : <Money value={led.card} kopecks />}
-      </button>
-      <button type="button" className="min-h-11 rounded-xl bg-surface-2 text-left px-2" onClick={() => set({ reserve: true })}>
-        <span className="block text-muted">В резерве</span><Money value={led.reserve} kopecks />
-      </button>
+  const scenario = useUi(s => s.scenario);
+  const { input, cov } = useCoverage();
+  return <div className="mx-4 mt-3 space-y-2">
+    <ForecastNotice cov={cov} scenario={scenario} verified={!horizonUnverified(input)} onOpen={() => {
+      useUi.getState().setTab('payments'); set({ payView: 'cover' });
+    }} />
+    <div className="flex flex-wrap gap-x-4 text-[13px] text-sea">
+      <button type="button" className="min-h-11" onClick={() => set({ finance: true })}>Счета и операции</button>
+      <button type="button" className="min-h-11" onClick={() => set({ workSheet: true })}>Работа и доходы</button>
     </div>
-    <p className="text-[13px] text-muted">{prepayment.amount == null
-      ? <>Безопасная досрочка требует сверки. {prepayment.reason}.</>
-      : <>Безопасная досрочка <Money value={prepayment.amount} kopecks /></>}</p>
-    <div className="flex flex-wrap gap-x-3">
-      <button type="button" onClick={() => set({ finance: true })} className="min-h-11 text-[13px] text-sea">Счета и операции</button>
-      <button type="button" onClick={() => set({ workSheet: true })} className="min-h-11 text-[13px] text-sea">Работа и доходы</button>
-    </div>
-  </section>;
+  </div>;
 }
 
 /** Прогноз по модели плана — один на вкладку и сохраняется между открытиями: те же данные — тот же ответ */
@@ -107,7 +97,10 @@ function DebtHero() {
   const set = useUi(s => s.set);
   const led = useLedger();
   const total = Object.values(led.debtBalances).reduce((sum, d) => sum + d.estimated, 0);
-  const start = plan[0]?.[1] ?? debts.reduce((s, d) => s + d.startBalance, 0);
+  const start = plan[0]?.[1] ?? (debts.every(d => d.startBalance > 0) ? debts.reduce((s, d) => s + d.startBalance, 0) : 0);
+  const now = useToday();
+  const comparable = start > 0 && debts.length > 0;
+  const delta = total - start;
   const fc = useDebtForecast();
   const planEnd = plan.at(-1)?.[0];
   const target = targetDebt(debts);
@@ -121,22 +114,27 @@ function DebtHero() {
     <section className="deep-card deep-dusk mx-4 mt-3 pt-5 pb-3">
         <span aria-hidden="true" className="deep-sheen" />
       <div className="px-5">
-        <div className="text-[13px] text-card-muted">Общий долг</div>
+        <div className="text-[13px] text-card-muted">Общий долг по учёту · оценка</div>
         <CountTo to={total} from={start > total ? start : total} className="figure mt-1 block text-[42px] leading-none" />
-        {start > 0 && (
+        {comparable && (
           <div className="mt-4 h-[5px] overflow-hidden rounded-full bg-card/12">
             <motion.div className="h-full rounded-full bg-card-sea" initial={{ width: 0 }} animate={{ width: `${Math.max(0, (1 - total / start) * 100)}%` }} transition={{ ...spring, delay: 0.4 }} />
           </div>
         )}
         <div className="mt-3 grid grid-cols-2 gap-3 text-[12px] text-card-muted">
-          <div>Изменение долга с начала<Money value={total - start} sign className="mt-0.5 block text-[15px] text-card" /></div>
-          <div>Проценты в месяц<Money value={monthlyInterest(debts)} approx className="mt-0.5 block text-[15px] text-card" /></div>
+          {comparable && <div>{delta < 0 ? 'Долг уменьшился' : delta > 0 ? 'Долг вырос' : 'Изменение долга'}
+            <Money value={Math.abs(delta)} kopecks className="mt-0.5 block text-[15px] text-card" />
+            <span className="block">{plan[0] ? 'К началу плана · ' + monthName(plan[0][0]) : 'К сумме исходных долгов'}</span>
+          </div>}
+          <div>Проценты за месяц · оценка<Money value={monthlyInterest(debts)} approx className="mt-0.5 block text-[15px] text-card" />
+            <span className="block">По остаткам и ставкам на {ddmm(now)}</span></div>
         </div>
       </div>
       {/* фарватер: листается вбок; буй — открыть долг, судно — у текущей цели, в конце — гавань «Свобода».
           Бесконечные мелочи (круги у буя, пульс гавани, качка судна) — HTML-слои с CSS-анимацией: их крутит
           видеокарта, а не скрипт на каждом кадре, и картинка фарватера не перерисовывается */}
-      <div className="no-scrollbar mt-2 overflow-x-auto" data-noswipe>
+      <p className="px-5 pt-3 text-[12px] text-card-muted">Маршрут погашения · прокрутите вправо</p>
+      <div className="no-scrollbar overflow-x-auto" data-noswipe tabIndex={0} aria-label="Маршрут погашения">
         <div className="relative" style={{ width: W, height: H }}>
           <span aria-hidden="true" className="fw-pulse absolute size-9 rounded-full bg-card-sea" style={{ left: W - 40 - 18, top: 62 - 18 }} />
           {route[ti] && !route[ti].closed && (
@@ -162,7 +160,7 @@ function DebtHero() {
                         <rect x={p.x - 10} y={p.y + 8} width="20" height="4" rx="2" fill="var(--card-muted)" />
                       </g>}
                   <text x={p.x} y={p.y + 30} textAnchor="middle" fontSize="12" fontWeight={cur ? 600 : 400} fill="var(--card-ink)" opacity={d.closed ? 0.55 : 1} style={{ fontFamily: 'var(--font-sans)' }}>{d.short}</text>
-                  {!d.closed && <text x={p.x} y={p.y + 45} textAnchor="middle" fontSize="11" fill="var(--card-muted)" style={{ fontFamily: 'var(--font-sans)' }}>{Math.round(d.balance / 1000).toLocaleString('ru-RU')} тыс.</text>}
+                  {!d.closed && <text x={p.x} y={p.y + 45} textAnchor="middle" fontSize="11" fill="var(--card-muted)" style={{ fontFamily: 'var(--font-sans)' }}>{Math.round((led.debtBalances[d.id]?.estimated ?? d.balance) / 1000).toLocaleString('ru-RU')} тыс.</text>}
                 </motion.g>
               );
             })}
@@ -180,8 +178,8 @@ function DebtHero() {
       </div>
       <div className="mx-5 mt-1 border-t border-card-line pt-3 text-[12.5px] leading-snug text-card-muted">
         {fc.freeMonth
-          ? <>Свобода по текущему темпу — <span className="text-card">{monthName(fc.freeMonth)}</span>{planEnd ? <>, по плану — {monthName(planEnd)}</> : null}.</>
-          : 'При текущих суммах долг не закрывается за 6 лет.'}
+          ? <>Прогноз при текущих платежах · <span className="text-card">{monthName(fc.freeMonth)}</span>{planEnd ? <>. Цель стратегии · {monthName(planEnd)}</> : null}.</>
+          : 'В шестилетнем горизонте расчёта даты полного погашения пока нет.'}
       </div>
     </section>
   );
@@ -194,8 +192,8 @@ function BridgeCard() {
   if (!st || st.bridge.closed) return null;
   const card = debts.find(d => d.id === st.bridge.card)?.short ?? 'кредитке';
   return (
-    <section className="mx-4 mt-3 rounded-[24px] border p-4" style={{ background: 'var(--stack-money)', borderColor: 'var(--stack-money-line)' }}>
-      <div className="text-[12.5px]" style={{ color: 'var(--stack-money-kicker)' }}>Мост на кредитке {card}</div>
+    <details className="mx-4 mt-3 rounded-[24px] border p-4" style={{ background: 'var(--stack-money)', borderColor: 'var(--stack-money-line)' }}>
+      <summary className="min-h-11 cursor-pointer text-[13px]" style={{ color: 'var(--stack-money-kicker)' }}>Мост на кредитке {card} · условный сценарий</summary>
       <div className="mt-0.5 text-[16px] font-medium">использовано <Money value={st.used} /> из <Money value={st.bridge.cap} /></div>
       <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-line">
         <div className={`h-full rounded-full ${st.left < 0 ? 'bg-neg' : ''}`} style={{ width: `${Math.min(100, (st.used / st.bridge.cap) * 100)}%`, background: st.left < 0 ? undefined : 'repeating-linear-gradient(135deg, #c77dff 0 5px, #9b5de5 5px 10px)' }} />
@@ -213,69 +211,58 @@ function BridgeCard() {
         Долг {card} вырос на <Money value={st.used} className="text-ink" />.
         {st.bridge.repayBy && <> Погасить до {ddmm(st.bridge.repayBy)}.{st.bridge.repayBy.slice(0, 4)}.</>}{st.bridge.repayNote && <> {st.bridge.repayNote.replace(/^./, c => c.toUpperCase())}.</>} Только покупки картой: без переводов и снятия.
       </p>
-    </section>
+    </details>
   );
 }
 
 function DebtsView() {
   const now = useToday();
   const cal = useCal();
-  const [debts, plan, baseline, snapshots] = useStore(useShallow(s => [s.debts, s.planTrajectory, s.baselineTrajectory, s.snapshots] as const));
+  const debts = useStore(s => s.debts);
+  const led = useLedger();
   const set = useUi(s => s.set);
   const [adding, setAdding] = useState(false);
-  const total = totalDebt(debts);
+  const [sort, setSort] = useState('strategy');
   const target = targetDebt(debts);
-  // текущий месяц уже идёт по календарю — модель считает со следующего
   const fc = useDebtForecast();
   const next = useMemo(() => {
-    const ev = eventsBetween(cal, now, addDays(now, 45)).filter(e => e.kind === 'payment' && e.debtId);
+    const ev = eventsBetween(cal, now, addDays(now, 45)).filter(e => e.kind === 'payment' && e.debtId && !cal.marks?.[e.key]?.done && !e.projection);
     return Object.fromEntries(debts.map(d => [d.id, ev.find(e => e.debtId === d.id)]));
   }, [cal, debts, now]);
-  const fact: [string, number][] = useMemo(() => {
-    const cur = monthKey(now);
-    return [...snapshots.map(s => [s.month, s.total] as [string, number]).filter(p => p[0] !== cur), [cur, Math.round(total)] as [string, number]].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [snapshots, total, now]);
-  const forecastLine: [string, number][] = [fact[fact.length - 1], ...fc.trajectory.filter(p => p[0] > monthKey(now))];
-  const openDebts = debts.filter(d => !d.closed).sort((a, b) => a.order - b.order);
+  const openDebts = debts.filter(d => !d.closed).sort((a, b) => sort === 'rate' ? b.rate - a.rate :
+    sort === 'date' ? (next[a.id]?.date ?? '9999').localeCompare(next[b.id]?.date ?? '9999') || a.order - b.order : a.order - b.order);
   const closed = debts.filter(d => d.closed);
 
   return (
     <>
       <PrepaymentCard />
-      <BridgeCard />
 
       {target && (
         <div className="mx-4 mt-3 flex items-start gap-3 rounded-[22px] border border-sea/30 bg-sea/8 px-4 py-3.5">
           <Target size={18} strokeWidth={1.5} className="mt-0.5 shrink-0 text-sea" />
           <div className="text-[13.5px] leading-snug">
-            <span className="font-medium">Цель: {target.short}</span> <span className="text-muted">под {pct(target.rate)}</span><br />
-            <span className="text-muted">
-              {target.targetClose && target.targetClose > monthKey(now)
-                ? <>Закрываем {monthIn(target.targetClose)} премией, до этого — только обязательные платежи.</>
-                : <>Все премии сверх резерва — сюда, пока не закроется.</>}
-            </span>
+            <button type="button" className="text-left font-medium text-sea" onClick={() => set({ debt: target.id })}>Следующая цель · {target.short}</button>
+            {next[target.id] && <p className="mt-1 text-muted">Платёж {ddmm(next[target.id]!.date)} · <Money value={next[target.id]!.amount} approx={next[target.id]!.approx} kopecks /></p>}
           </div>
         </div>
       )}
 
-      {(plan.length > 0 || fact.length > 1) && (
-        <>
-          <SectionTitle>План и факт</SectionTitle>
-          <div className="card mx-4 p-4"><DebtChart plan={plan} fact={fact} forecast={forecastLine} baseline={baseline} /></div>
-        </>
-      )}
-
-      <SectionTitle>По порядку закрытия</SectionTitle>
+      <div className="mx-4 mt-4 flex items-center justify-between gap-2">
+        <h2 className="font-medium">Обязательства</h2>
+        <select className="min-h-11 min-w-0 rounded-xl bg-surface px-2 text-[13px]" aria-label="Сортировка долгов" value={sort} onChange={event => setSort(event.target.value)}>
+          <option value="strategy">По стратегии</option><option value="date">По сроку платежа</option><option value="rate">По ставке</option>
+        </select>
+      </div>
       <motion.div className="space-y-2.5 px-4" variants={listAnim} initial={false} animate="show">
         {openDebts.length === 0 && <Empty>{debts.length ? 'Все долги закрыты. Свобода.' : 'Долгов пока нет.'}</Empty>}
-        {openDebts.map((d, i) => <DebtCard key={d.id} n={i + 1} d={d} next={next[d.id]} closeMonth={fc.closeMonth[d.id]} target={target?.id === d.id} onClick={() => set({ debt: d.id })} />)}
+        {openDebts.map((d, i) => <DebtCard key={d.id} n={i + 1} d={d} balance={led.debtBalances[d.id]?.estimated ?? d.balance} next={next[d.id]} closeMonth={fc.closeMonth[d.id]} target={target?.id === d.id} onClick={() => set({ debt: d.id })} />)}
         <motion.button variants={item} type="button" onClick={() => setAdding(true)} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-line text-[13.5px] text-muted"><Plus size={16} /> Добавить долг</motion.button>
       </motion.div>
 
       {closed.length > 0 && (
-        <>
-          <SectionTitle>Закрыты</SectionTitle>
-          <div className="card divide-hair mx-4 overflow-hidden">
+        <details className="card mx-4 mt-4 px-3">
+          <summary className="min-h-11 cursor-pointer py-2 font-medium">Закрытые ({closed.length})</summary>
+          <div className="divide-hair overflow-hidden">
             {closed.map(d => (
               <button key={d.id} type="button" onClick={() => set({ debt: d.id })} className="flex w-full items-center justify-between px-4 py-3 text-left">
                 <span className="flex items-center gap-2 text-[14.5px]"><Check size={15} className="text-pos" /> {d.short}</span>
@@ -283,16 +270,18 @@ function DebtsView() {
               </button>
             ))}
           </div>
-        </>
+        </details>
       )}
+      <BridgeCard />
       <NewDebtSheet open={adding} onClose={() => setAdding(false)} />
     </>
   );
 }
 
 /** n — место в очереди закрытия: порядок здесь и есть план (лавина), поэтому номер — не украшение */
-function DebtCard({ n, d, next, closeMonth, target, onClick }: { n: number; d: Debt; next?: { date: string; amount: number; approx?: boolean; dateMode: string }; closeMonth: string | null; target: boolean; onClick: () => void }) {
-  const progress = d.startBalance ? 1 - d.balance / d.startBalance : 0;
+function DebtCard({ n, d, balance, next, closeMonth, target, onClick }: { n: number; d: Debt; balance: number; next?: { date: string; amount: number; approx?: boolean; dateMode: string }; closeMonth: string | null; target: boolean; onClick: () => void }) {
+  const paid = Math.max(0, d.startBalance - balance);
+  const progress = d.startBalance > 0 && paid > 0;
   const late = closeMonth && d.targetClose && closeMonth > d.targetClose;
   return (
     <motion.button variants={item} whileTap={{ scale: 0.98 }} type="button" onClick={onClick} className={`card block w-full p-4 text-left ${target ? 'border-sea/50' : ''}`}>
@@ -301,17 +290,20 @@ function DebtCard({ n, d, next, closeMonth, target, onClick }: { n: number; d: D
           <div className="flex flex-wrap items-center gap-1.5">
             <span className={`grid size-6 place-items-center rounded-full text-[12px] font-semibold ${target ? 'bg-sea text-on-sea' : 'bg-surface-2 text-muted'}`} aria-label={`${n}-й по очереди`}>{n}</span>
             <span className="text-[15.5px] font-medium">{d.short}</span>
-            <Chip>{pct(d.rate)}</Chip>
+            <Chip>{pct(d.rate)} годовых</Chip>
             {d.frozen && <Chip tone="neg"><Lock size={10} /> не тратить</Chip>}
           </div>
-          <div className="mt-0.5 truncate text-[12px] text-muted">{d.name}</div>
+          <div className="mt-0.5 break-words text-[12px] text-muted">{d.name}</div>
         </div>
-        <Money value={d.balance} className="figure shrink-0 text-[22px] leading-none" />
+        <span className="shrink-0 text-right"><Money value={balance} approx={!(d.bankBalance && balance === d.bankBalance.amount)} kopecks className="figure text-[18px]" /><small className="block text-muted">{d.bankBalance && balance === d.bankBalance.amount ? 'По банку' : 'По учёту'}</small></span>
       </div>
-      <Bar value={progress} tone={target ? 'sea' : 'pos'} className="mt-4" />
+      {progress && <div className="mt-3 text-xs text-muted">Погашено <Money value={paid} /> из <Money value={d.startBalance} /><Bar value={paid / d.startBalance} tone={target ? 'sea' : 'pos'} className="mt-1.5" /></div>}
       <div className="mt-2.5 flex flex-wrap justify-between gap-x-3 gap-y-0.5 text-[12px] text-muted">
         <span>{next ? <>платёж {next.dateMode === 'until' ? 'до ' : ''}{ddmm(next.date)}: <Money value={next.amount} approx={next.approx} className="text-ink" /></> : 'платежей в 45 дней нет'}</span>
-        <span className={late ? 'text-warn' : ''}>{closeMonth ? `закроется ~${monthName(closeMonth)}` : 'срок не виден'}{late ? ` (план — ${monthName(d.targetClose!)})` : ''}</span>
+        <span className="basis-full">Цель стратегии · {d.targetClose ? monthName(d.targetClose) : 'дата не задана'}</span>
+        <span className={late ? 'basis-full text-warn' : 'basis-full'}>{closeMonth ? 'Прогноз при текущих платежах · ' + monthName(closeMonth) :
+          'Недостаточно данных для расчёта срока · откройте график долга'}</span>
+        {late && <span className="basis-full">Цель зависит от будущих выплат и досрочного погашения. Прогноз использует текущие платежи и доступные поступления.</span>}
       </div>
     </motion.button>
   );
@@ -395,6 +387,24 @@ function DebtActivityPanel() {
   </div>;
 }
 
+function PlanChart() {
+  const now = useToday();
+  const [plan, baseline, snapshots] = useStore(useShallow(s => [s.planTrajectory, s.baselineTrajectory, s.snapshots] as const));
+  const led = useLedger();
+  const fc = useDebtForecast();
+  const cur = monthKey(now);
+  const total = Object.values(led.debtBalances).reduce((sum, row) => sum + row.estimated, 0);
+  const fact: [string, number][] = [...snapshots.filter(s => s.month < cur).map(s => [s.month, s.total] as [string, number]),
+    [cur, total] as [string, number]].sort((a, b) => a[0].localeCompare(b[0]));
+  const comparison: [string, number][] = [fact[fact.length - 1], ...fc.trajectory.filter(p => p[0] > cur)];
+  if (!plan.length && fact.length < 2) return null;
+  return <details className="card mx-4 mt-3 p-4">
+    <summary className="min-h-11 cursor-pointer py-2 font-medium">План и факт</summary>
+    <p className="mb-3 text-xs text-muted">Долг в рублях · срез {ddmm(now)}. Пунктир — прогноз при текущих платежах. Отдельная линия показывает только минимальные платежи.</p>
+    <DebtChart plan={plan} fact={fact} forecast={comparison} baseline={baseline} />
+  </details>;
+}
+
 function StrategyView() {
   const now = useToday();
   const [debts, strategy, rules] = useStore(useShallow(s => [s.debts, s.strategy, s.rules] as const));
@@ -403,6 +413,7 @@ function StrategyView() {
   const closedNames = (p: number) => debts.filter(d => d.phase === p).every(d => d.closed);
   return (
     <>
+      <PlanChart />
       <SectionTitle>Ликвидность</SectionTitle>
       <DebtActivityPanel />
       <ul className="card mx-4 mt-3 list-disc space-y-2 py-4 pl-8 pr-4 text-[13px]">

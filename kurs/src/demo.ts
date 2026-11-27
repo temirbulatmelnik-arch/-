@@ -9,6 +9,21 @@ const d = (p: Partial<Debt> & Pick<Debt, 'id' | 'name' | 'short' | 'kind' | 'bal
   startBalance: p.balance * 1.08, rate: 0.35, dueDay: 15, frozen: p.kind === 'card', closed: false, ...p,
 });
 
+export function loadDemoWork() {
+  const state = useStore.getState();
+  if (state.work) return;
+  const now = today();
+  const from = addDays(now, -45);
+  state.saveWork({
+    from, accountId: 'life', rates: [{
+      from, unit: 1800, positionUnits: 13, rankUnits: 4, seniority: 0.12, conditions: 0.18,
+      monthlyBonus: 0.25, confidence: 'estimate', source: 'Учебная ставка',
+    }],
+    vacations: [{ id: 'demo-leave', from: addDays(now, 45), to: addDays(now, 56), status: 'planned',
+      allowance: true, dailyGross: 2350, basis: 'Учебный расчёт' }],
+  });
+}
+
 export function startDemo() {
   const s = useStore.getState();
   if (s.ready) return;
@@ -66,6 +81,7 @@ export function startDemo() {
     strategy: [{ title: 'Почему такой порядок', text: 'Сначала самые дорогие долги: каждый рубль в них экономит больше процентов.\n\n- Рассрочка без процентов — по графику\n- Альфа под 60% — премией, как только хватит\n- Дальше Сплит и Т-Банк, потом Сбер' }],
   };
   s.loadSeed(seed);
+  loadDemoWork();
   // траты этой и прошлой недели — чтобы экраны были живыми
   const spends: [number, number, Expense['category'], string][] = [
     [-9, 1840, 'groceries', 'Пятёрочка'], [-8, 420, 'work', 'Столовая'], [-8, 95, 'transport', 'Метро'], [-7, 2600, 'fun', 'Кафе с друзьями'],

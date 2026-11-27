@@ -92,7 +92,7 @@ export function TabBar() {
     <>
       <AnimatePresence>
         {fan && (
-          <motion.div key="fan" className="fixed inset-0 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.14 } }} transition={{ duration: 0.2 }} onClick={() => setFan(false)}>
+          <motion.div key="fan" data-quick-menu className="fixed inset-0 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.14 } }} transition={{ duration: 0.2 }} onClick={() => setFan(false)}>
             <div className="absolute inset-0 bg-[rgba(4,14,22,.42)] backdrop-blur-[6px]" />
             <div className="pb-safe absolute inset-x-0 bottom-0">
               <div className="relative mx-auto h-[210px] w-full max-w-md">

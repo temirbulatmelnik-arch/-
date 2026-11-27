@@ -1,23 +1,25 @@
 import { useLedger } from './Checkup';
 // Итог недели: траты по категориям против лимита, воскресное пополнение карты жизни из резерва до лимита и все траты недели.
 import { FileUp, Undo2 } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { ExpenseRow } from '../components/rows';
 import { Bar, CatIcon, Money, PrimaryButton, SecondaryButton, Sheet } from '../components/ui';
-import { weeklyTopUp } from '../domain/funds';
+import { useCoverage } from '../components/Coverage';
+import { DEFAULT_PREPARATION_TIME, weeklyTopUp } from '../domain/funds';
 import { addDays, ddmm } from '../domain/dates';
 import { CATEGORY } from '../domain/plan';
 import { bridgeWeek } from '../domain/bridge';
 import { weekReport } from '../domain/weekly';
 import { useStore } from '../store/store';
-import { toast, useBudgetExpenses, useUi } from '../store/ui';
+import { toast, useBudgetExpenses, useMoscowClock, useUi } from '../store/ui';
 
 export function WeekSheet() {
   const monday = useUi(s => s.week);
   const set = useUi(s => s.set);
+  const now = useMoscowClock().date;
+  const finished = !!monday && now > addDays(monday, 6);
   return (
-    <Sheet open={!!monday} onClose={() => set({ week: null })} title="Итог недели" subtitle={monday ? `${ddmm(monday)}–${ddmm(addDays(monday, 6))}` : undefined}>
+    <Sheet open={!!monday} onClose={() => set({ week: null })} title={finished ? "Итог недели" : "Бюджет недели"} subtitle={monday ? `${ddmm(monday)}–${ddmm(addDays(monday, 6))}` : undefined}>
       {monday && <Body key={monday} monday={monday} />}
     </Sheet>
   );
@@ -29,12 +31,19 @@ function Body({ monday }: { monday: string }) {
   const set = useUi(s => s.set);
   const r = useMemo(() => weekReport(expenses, debts, overrides, monday, bridge), [expenses, debts, overrides, monday, bridge]);
   const led = useLedger();
+  const [inspect, setInspect] = useState(false);
+  const clock = useMoscowClock();
+  const { cov } = useCoverage('cautious');
+  const canClose = clock.date > r.sunday || clock.date === r.sunday && clock.time >= DEFAULT_PREPARATION_TIME;
+  const horizon = addDays(r.sunday, 7);
+  const tight = !!(cov.shortage && cov.shortage.date <= horizon || cov.accountRisk && cov.accountRisk.date <= horizon);
   const available = led.card == null ? null : led.lifeAvailable;
   const topUp = available == null ? 0 : weeklyTopUp(r.nextLimit, available);
-  const max = Math.max(...r.byCategory.map(c => c.spent), 1);
+  const budget = Math.max(1, r.limit);
   const list = useMemo(() => expenses.filter(e => e.date >= monday && e.date <= r.sunday).sort((a, b) => b.date.localeCompare(a.date)), [expenses, monday, r.sunday]);
 
   const close = (topUp: number) => {
+    if (!canClose) return;
     if (topUp > 0 && !useStore.getState().confirmWeeklyTransfer(`wk:${addDays(monday, 7)}`, topUp)) {
       toast('Пополнение уже отмечено или остатки требуют сверки');
       return;
@@ -50,8 +59,9 @@ function Body({ monday }: { monday: string }) {
         <div className="text-[13px] text-card-muted">{r.left >= 0 ? 'Осталось в недельном бюджете' : 'Перерасход'}</div>
         <Money value={Math.abs(r.left)} className={`figure mt-1 block text-[48px] leading-none ${r.left < 0 ? 'text-[#f2a596]' : ''}`} />
         <Bar value={r.limit ? r.spent / r.limit : 0} tone={r.left < 0 ? 'neg' : 'card'} onCard className="mt-5" />
+        <p className="mt-2 text-[12px] text-card-muted">{clock.date > r.sunday ? 'Неделя завершена' : 'До ' + ddmm(r.sunday) + ' включительно'}</p>
         <div className="mt-3 flex justify-between text-[12.5px] text-card-muted">
-          <span>потрачено <Money value={r.spent} className="text-card" /></span>
+          <span>потрачено <Money value={r.spent} kopecks className="text-card" /></span>
           <span>лимит <Money value={r.limit} className="text-card" /></span>
         </div>
       </section>
@@ -70,7 +80,7 @@ function Body({ monday }: { monday: string }) {
               <CatIcon id={c.id} className="size-9" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline justify-between gap-2"><span className="truncate text-[14px]">{CATEGORY[c.id].short}</span><Money value={c.spent} className="text-[14px]" /></div>
-                <Bar value={c.spent / max} className="mt-2" />
+                <Bar value={c.spent / budget} className="mt-2" />
               </div>
             </div>
           ))}
@@ -87,25 +97,32 @@ function Body({ monday }: { monday: string }) {
           </p>
           <SecondaryButton onClick={() => reopenWeek(monday)} className="w-full"><Undo2 size={16} strokeWidth={1.5} /> Открыть заново</SecondaryButton>
         </>
-      ) : (
-        <div className="card space-y-3 p-4">
-          <div className="text-[14px] leading-snug">
-            В воскресенье вечером долейте карту жизни <b className="font-medium">из резерва</b> до лимита следующей недели — <Money value={r.nextLimit} />.{' '}
-            {available == null ? 'Остаток карты требует сверки.' : <>Свободно на карте <Money value={available} /> · долить <Money value={topUp} />.</>}
-          </div>
-          <PrimaryButton onClick={() => set({ week: null, checkup: monday })}>Сверить с банком и закрыть</PrimaryButton>
-          <p className="text-[12px] leading-snug text-muted">Впишете остатки на карте, в резерве и на кредитке — приложение найдёт невнесённые траты и посчитает перевод. Или без сверки:</p>
-          {topUp > led.reserve && <p className="text-[13px] text-warn">В резерве не хватает <Money value={topUp - led.reserve} kopecks />.</p>}
-          <SecondaryButton onClick={() => close(topUp)} disabled={topUp <= 0 || topUp > led.reserve || available == null} className="w-full">Перевёл на карту <Money value={topUp} kopecks /></SecondaryButton>
-          <button type="button" onClick={() => close(0)} className="w-full py-1 text-[13px] text-muted">Закрыть без пополнения</button>
+      ) : (canClose || inspect) ? (
+        <div className="card space-y-2 p-4">
+          <h3 className="font-medium">{canClose ? 'Проверить и закрыть неделю' : 'План следующей недели'}</h3>
+          <p className="text-sm">Лимит <Money value={r.nextLimit} kopecks />. {available == null ? 'Нужна сверка карты.' :
+            <>Свободно на карте <Money value={available} kopecks /> · до лимита <Money value={topUp} kopecks />.</>}</p>
+          {(tight || topUp > led.reserve || !led.reserveVerified) && <p className="text-[13px] text-warn">
+            {!led.reserveVerified ? 'Сверьте резерв перед переводом.' : topUp > led.reserve ? <>В резерве не хватает <Money value={topUp - led.reserve} kopecks />.</>
+              : 'Проверьте покрытие ближайших обязательств перед переводом.'}
+          </p>}
+          {canClose ? <>
+            <PrimaryButton onClick={() => set({ week: null, checkup: monday })}>Сверить с банком</PrimaryButton>
+            <details>
+              <summary className="min-h-11 cursor-pointer py-2 text-[13px] text-sea">Закрыть без новой сверки</summary>
+              <div className="space-y-1">
+                {topUp > 0 && <SecondaryButton onClick={() => close(topUp)} disabled={topUp > led.reserve || available == null || !led.reserveVerified} className="w-full">Подтвердить сделанный перевод</SecondaryButton>}
+                <button type="button" className="min-h-11 w-full text-[13px] text-muted" onClick={() => close(0)}>Закрыть неделю без перевода</button>
+              </div>
+            </details>
+          </> : <p className="text-[13px] text-muted">Подготовка к закрытию откроется в воскресенье в 20:00 МСК.</p>}
         </div>
-      )}
+      ) : <SecondaryButton className="w-full" onClick={() => setInspect(true)}>Следующая неделя</SecondaryButton>}
 
       {list.length > 0 && (
-        <section>
-          <div className="mb-2 px-1 text-[13px] text-muted">Все траты недели</div>
-          <div className="card divide-hair overflow-hidden">{list.map(e => <ExpenseRow key={e.id} e={e} onClick={() => set({ week: null, add: { edit: e } })} />)}</div>
-        </section>
+        <SecondaryButton className="w-full" onClick={() => {
+          set({ week: null, historyRange: { from: monday, to: r.sunday } }); useUi.getState().setTab('budget');
+        }}>Траты этой недели · {list.length}</SecondaryButton>
       )}
     </div>
   );

@@ -617,6 +617,7 @@ export interface DayMoney {
   sum: number;
   /** события дня есть, и все отмечены (оплачены, пришли, долито) */
   paid: boolean;
+  documented?: boolean;
   /** всего отмечено в этот день — для зачёркнутой подписи, на суммы не влияет */
   paidTotal: number;
   /** резерв к вечеру по прогнозу покрытия; null — день прошёл или за горизонтом прогноза */
@@ -637,13 +638,15 @@ export function monthDays(events: CalEvent[], marks: Record<string, EventMark>, 
     const date = `${month}-${String(i + 1).padStart(2, '0')}`;
     const list = events.filter(e => e.date === date);
     const open = list.filter(e => !marks[e.key]?.done && projectedEvent(e, 'base'));
-    const done = list.filter(e => marks[e.key]?.done || e.payroll?.documented);
+    const done = list.filter(e => marks[e.key]?.done || e.payroll?.bankConfirmed);
+    const documented = list.some(e => e.payroll?.documented && !marks[e.key]?.done && !e.payroll.bankConfirmed);
     const extra = cov.steps.filter(x => x.kind === 'bridge' && x.date === date).map(x => ({ title: x.title, delta: x.delta }));
     const out = open.filter(e => e.kind !== 'income').reduce((t, e) => t + e.amount, 0) - extra.reduce((t, x) => t + Math.min(0, x.delta), 0);
     const inc = open.filter(e => e.kind === 'income').reduce((t, e) => t + e.amount, 0);
     return {
       date, out, in: inc, sum: inc - out,
-      paid: done.length > 0 && open.length === 0,
+      paid: done.length > 0 && open.length === 0 && !documented,
+      ...(documented ? { documented } : {}),
       paidTotal: done.filter(e => e.kind !== 'income' || cashIncomeEvent(e)).reduce((t, e) => t + (marks[e.key]?.amount ?? e.amount), 0),
       total: level[date],
       past: date < now,

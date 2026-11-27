@@ -1,6 +1,5 @@
 import { MotionConfig } from 'motion/react';
 import { lazy, Suspense, startTransition, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { Island } from './components/Island';
 import { Salute } from './components/Salute';
 import { TABS, TabBar } from './components/TabBar';
 import { Toast } from './components/ui';
@@ -148,17 +147,6 @@ export default function App() {
   const set = useUi(s => s.set);
   useTabScroll(tab);
   const mounted = useMountedTabs(tab, ready);
-  // «Остров» появляется, когда шапка вкладки (на «Сегодня» — сцена) ушла за верхний край
-  const mark = useRef<HTMLDivElement>(null);
-  const [island, setIsland] = useState(false);
-  useEffect(() => {
-    const el = mark.current;
-    if (!el) return;
-    const io = new IntersectionObserver(([e]) => setIsland(!e.isIntersecting && e.boundingClientRect.top < 0));
-    io.observe(el);
-    return () => io.disconnect();
-  }, [ready]);
-
   useEffect(() => {
     // просим браузер не вычищать данные при нехватке места
     void navigator.storage?.persist?.().catch(() => {});
@@ -221,8 +209,6 @@ export default function App() {
   return (
     <MotionConfig reducedMotion="user">
       <div className="pt-safe relative mx-auto min-h-dvh w-full max-w-md overflow-x-clip pb-36">
-        <div ref={mark} aria-hidden="true" className="pointer-events-none absolute left-0 h-px w-px" style={{ top: tab === 'week' ? 'clamp(340px, 101vw, 455px)' : 150 }} />
-        <Island show={island} />
         <Salute />
         <div aria-hidden="true" className="fixed inset-x-0 top-0 z-40 h-[env(safe-area-inset-top)]" style={{ background: 'var(--sky-1)' }} />
         {/* Все вкладки живут сразу, скрытые — блоками с hidden: переключение только показывает готовое, без

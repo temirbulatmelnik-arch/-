@@ -136,12 +136,12 @@ function Body() {
           <span className="mt-2 block text-[15.5px] leading-tight font-medium">Скопировать для чата</span>
           <span className="mt-1 block text-[12px] leading-snug text-white/75">короткий файл для сверки</span>
         </button>
-        <button type="button" onClick={() => void pasteAnswer()} className="deep-card px-4 py-4 text-left transition-transform duration-100 active:scale-[.97]">
+        {!import.meta.env.VITE_DEMO && <button type="button" onClick={() => void pasteAnswer()} className="deep-card px-4 py-4 text-left transition-transform duration-100 active:scale-[.97]">
           <span aria-hidden="true" className="deep-sheen" />
           <ArrowDownToLine size={22} strokeWidth={1.9} />
           <span className="mt-2 block text-[15.5px] leading-tight font-medium">Вставить ответ чата</span>
           <span className="mt-1 block text-[12px] leading-snug text-card-muted">покажу, что изменится</span>
-        </button>
+        </button>}
       </div>
       <section className="card space-y-3 p-4">
         <h3 className="flex items-center gap-2.5 text-[15px] font-medium"><Tile c="#8b63e0" className="size-8 !rounded-[10px]"><ArrowUpFromLine size={16} strokeWidth={2} /></Tile>Из приложения в чат</h3>
@@ -155,7 +155,7 @@ function Body() {
         </div>
       </section>
 
-      <section className="card space-y-3 p-4">
+      {!import.meta.env.VITE_DEMO && <section className="card space-y-3 p-4">
         <h3 className="flex items-center gap-2.5 text-[15px] font-medium"><Tile c="#1f8fb0" className="size-8 !rounded-[10px]"><ArrowDownToLine size={16} strokeWidth={2} /></Tile>Из чата в приложение</h3>
         <p className="text-[13.5px] leading-snug">Попросите в чате: <i>«внеси изменения в приложение»</i>. Чат ответит файлом обмена — блоком кода или файлом. Вставьте ответ целиком или выберите файл.</p>
         {errors.length > 0 && <ul role="alert" className="space-y-1 rounded-xl bg-neg/10 p-3 text-[13px] text-neg">
@@ -172,7 +172,7 @@ function Body() {
           <SecondaryButton onClick={() => picker.current?.click()} className="px-2"><FileUp size={15} strokeWidth={1.5} /> Файл</SecondaryButton>
           <PrimaryButton tone="ink" onClick={() => parse(text)} disabled={!text.trim()} className="h-12">Разобрать</PrimaryButton>
         </div>
-      </section>
+      </section>}
 
       {imports.length > 0 && (
         <section className="card p-4">

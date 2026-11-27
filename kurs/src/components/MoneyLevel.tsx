@@ -3,7 +3,7 @@
 // Ячейка — сумма неоплаченных событий дня; оплаченное на числа не влияет.
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { NARROW, type DayMoney } from '../domain/coverage';
-import { fromKey, lastDay, weekday } from '../domain/dates';
+import { dayMonth, fromKey, lastDay, weekday } from '../domain/dates';
 import { num } from '../domain/money';
 import { isWorkday } from '../domain/workdays';
 
@@ -71,8 +71,8 @@ const DayCell = memo(function DayCell({ d, i, top, on, isToday, onTap }: {
   const n = Number(d.date.slice(8));
   const low = d.total != null && d.total < NARROW;
   const level = d.total == null ? 0 : Math.max(10, Math.min(80, (Math.max(0, d.total) / (top || 1)) * 80));
-  const aria = [`${n}`, !isWorkday(d.date) && 'выходной', d.sum !== 0 && `${d.sum < 0 ? 'уходит' : 'приходит'} ${num(Math.abs(d.sum))} ₽`,
-    d.paid && 'всё отмечено', d.total != null && `в резерве к вечеру ${num(d.total)} ₽`].filter(Boolean).join(', ');
+  const aria = [dayMonth(d.date), !isWorkday(d.date) && 'выходной', d.out > 0 && ('уходит ' + num(d.out) + ' ₽'), d.in > 0 && ('приходит ' + num(d.in) + ' ₽'),
+    d.paid && 'записано', d.documented && 'начисление по листку ждёт сверки с банком', d.total != null && `в резерве к вечеру ${num(d.total)} ₽`].filter(Boolean).join(', ');
   return (
     <button type="button" onClick={e => onTap(d.date, e.currentTarget.getBoundingClientRect())} aria-label={aria} aria-pressed={on}
       className="relative flex h-[54px] flex-col items-start gap-px overflow-hidden rounded-t-[16px] rounded-b-[6px] border border-line bg-surface px-[5px] pt-1 text-left [text-shadow:0_0_3px_var(--surface),0_0_2px_var(--surface)]">
@@ -88,10 +88,10 @@ const DayCell = memo(function DayCell({ d, i, top, on, isToday, onTap }: {
         </span>
       )}
       <span className={`relative text-[13px] leading-tight ${on || isToday ? 'font-semibold' : 'font-medium'} ${isToday ? 'text-sea' : isWorkday(d.date) ? '' : 'text-faint'}`}>{n}</span>
-      {/* сумма неоплаченных событий дня со знаком; если всё отмечено — что ушло, зачёркнуто и бледно */}
-      {d.sum !== 0
-        ? <span className={`relative text-[10.5px] leading-tight font-semibold tracking-[-0.01em] ${d.sum < 0 ? 'text-neg' : 'text-pos'}`}>{short(d.sum)}</span>
-        : d.paid && d.paidTotal > 0 && <span className="relative text-[10.5px] leading-tight font-semibold tracking-[-0.01em] text-muted line-through">{short(-d.paidTotal).slice(1)}</span>}
+      {d.out > 0 && <span className="relative text-[10px] leading-none font-semibold tracking-tight text-neg">{short(-d.out)}</span>}
+      {d.in > 0 && <span className="relative text-[10px] leading-none font-semibold tracking-tight text-pos">{short(d.in)}</span>}
+      {d.documented && <span className="relative text-[10px] leading-tight text-warn" aria-hidden="true">•</span>}
+      {d.paid && d.paidTotal > 0 && <span className="relative text-[10px] leading-tight text-muted">✓</span>}
       {isToday && !on && <span className="absolute inset-0 rounded-t-[14px] rounded-b-[4px] ring-[1.5px] ring-sea ring-inset" />}
       {on && (
         <>
