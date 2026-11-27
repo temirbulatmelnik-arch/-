@@ -11,13 +11,13 @@ export const PREVIOUS_FINANCE_KEY = 'kurs:journal-v10';
 export const MIGRATION_BACKUP_KEY = 'kurs:before-1.0';
 
 type Storage = Pick<globalThis.Storage, 'getItem' | 'setItem' | 'removeItem'>;
-type Problem = 'storage' | 'quota' | 'verification' | 'other-version' | 'changed';
+export type FinanceStorageProblem = 'storage' | 'quota' | 'verification' | 'other-version' | 'changed';
 type CompactBook = Omit<AccountBook, 'operations'> & { operations: (AccountOperation | { expenseRef: string })[] };
 type FinancialData = { expenses?: Expense[]; accountBook?: AccountBook };
 type CompactData = Omit<FinancialData, 'accountBook'> & { accountBook?: CompactBook };
 
 const subscribers = new Set<() => void>();
-let problem: Problem | null = null;
+let problem: FinanceStorageProblem | null = null;
 export const migrationProblem = () => problem;
 export function subscribeMigration(listener: () => void) {
   subscribers.add(listener);
@@ -110,8 +110,9 @@ function compressedRecord(record: Payload, raw: string) {
   return encoded;
 }
 
-const isQuotaError = (error: unknown) => typeof error === 'object' && error !== null &&
-  'name' in error && (error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED');
+const isQuotaError = (error: unknown) => typeof error === 'object' && error !== null && (
+  ('name' in error && ['QuotaExceededError', 'QUOTA_EXCEEDED_ERR', 'NS_ERROR_DOM_QUOTA_REACHED'].includes(String(error.name))) ||
+  ('code' in error && (error.code === 22 || error.code === 1014)));
 
 function verifiedWrite(storage: Storage, key: string, raw: string) {
   storage.setItem(key, raw);
@@ -166,7 +167,7 @@ export function createFinanceStorage<T extends WithSnapshots>(getStorage: () => 
   let blocked = false;
   let compactActive = false;
 
-  const fail = (reason: Problem): never => {
+  const fail = (reason: FinanceStorageProblem): never => {
     blocked = true;
     updateProblem(reason);
     throw new Error('finance storage unavailable');

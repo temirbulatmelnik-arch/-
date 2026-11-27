@@ -42,5 +42,6 @@ if (!import.meta.env.VITE_NO_SW && 'serviceWorker' in navigator && window.isSecu
     document.addEventListener('visibilitychange', check);
     window.addEventListener('pageshow', event => { if (event.persisted) check(); });
     window.addEventListener('online', check);
+    check();
   }).catch(() => {});
 }

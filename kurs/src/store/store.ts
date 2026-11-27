@@ -903,8 +903,10 @@ export function migrationBackupFile(): string | null {
 export function currentLegacyFile(): string | null {
   const storage = window.localStorage;
   if (storage.getItem(PREVIOUS_FINANCE_KEY)) {
-    const source = readMigrationBackup(storage, true);
-    return source ? exportBackup(prepareLegacyData(source.state, source.version ?? 0)) : null;
+    try {
+      const source = readMigrationBackup(storage, true);
+      if (source) return exportBackup(prepareLegacyData(source.state, source.version ?? 0));
+    } catch { /* Try the independently readable legacy state. */ }
   }
   const raw = storage.getItem(LEGACY_KEY);
   if (!raw) return null;
