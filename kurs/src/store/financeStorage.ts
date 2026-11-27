@@ -1,4 +1,5 @@
 import { sha256 } from '@noble/hashes/sha2.js';
+import { deflateSync, inflateSync, strFromU8, strToU8 } from 'fflate';
 import type { PersistStorage, StorageValue } from 'zustand/middleware';
 import { expenseOperation, linkedExpenseId, type AccountBook, type AccountOperation } from '../domain/accounts';
 import type { Expense } from '../domain/types';
@@ -10,7 +11,7 @@ export const PREVIOUS_FINANCE_KEY = 'kurs:journal-v10';
 export const MIGRATION_BACKUP_KEY = 'kurs:before-1.0';
 
 type Storage = Pick<globalThis.Storage, 'getItem' | 'setItem' | 'removeItem'>;
-type Problem = 'storage' | 'verification' | 'other-version' | 'changed';
+type Problem = 'storage' | 'quota' | 'verification' | 'other-version' | 'changed';
 type CompactBook = Omit<AccountBook, 'operations'> & { operations: (AccountOperation | { expenseRef: string })[] };
 type FinancialData = { expenses?: Expense[]; accountBook?: AccountBook };
 type CompactData = Omit<FinancialData, 'accountBook'> & { accountBook?: CompactBook };
@@ -86,27 +87,70 @@ export function unpackFinanceState<T extends WithSnapshots>(payload: string): T 
   } as T;
 }
 
-type Archive = { version: number; payload: string; checksum: string; legacyChecksum: string | null; previousChecksum?: string | null };
-type Backup = { version: number; createdAt: string; payload: string; checksum: string };
+type Payload = { payload: string; checksum: string; encoding?: 'deflate' };
+type Archive = Payload & { version: number; legacyChecksum: string | null; previousChecksum?: string | null };
+type Backup = Payload & { version: number; createdAt: string };
+
+function checkedPayload(record: Payload) {
+  if (typeof record.payload !== 'string') throw new Error('missing archive payload');
+  const { encoding } = record;
+  if (encoding !== undefined && encoding !== 'deflate') throw new Error('unknown archive encoding');
+  const payload = encoding === 'deflate'
+    ? strFromU8(inflateSync(strToU8(atob(record.payload), true))) : record.payload;
+  if (digest(payload) !== record.checksum) throw new Error('invalid archive checksum');
+  return payload;
+}
+
+function compressedRecord(record: Payload, raw: string) {
+  const payload = btoa(strFromU8(deflateSync(strToU8(record.payload), { level: 1 }), true));
+  const compact = { ...record, payload, encoding: 'deflate' as const };
+  const encoded = JSON.stringify(compact);
+  if (encoded.length >= raw.length) return null;
+  if (checkedPayload(compact) !== record.payload) throw new Error('archive compression changed the payload');
+  return encoded;
+}
+
+const isQuotaError = (error: unknown) => typeof error === 'object' && error !== null &&
+  'name' in error && (error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED');
+
+function verifiedWrite(storage: Storage, key: string, raw: string) {
+  storage.setItem(key, raw);
+  if (storage.getItem(key) !== raw) throw new Error('archive read-back failed');
+}
+
+function writeRecord(storage: Storage, key: string, record: Payload, preferCompact = false) {
+  const raw = JSON.stringify(record);
+  if (!preferCompact) {
+    try {
+      verifiedWrite(storage, key, raw);
+      return { raw, compact: false };
+    } catch (error) {
+      if (!isQuotaError(error)) throw error;
+    }
+  }
+  const compact = compressedRecord(record, raw);
+  verifiedWrite(storage, key, compact ?? raw);
+  return { raw: compact ?? raw, compact: compact != null };
+}
 
 export function readMigrationBackup(storage: Storage, allowChangedPrior = false): StorageValue<unknown> | null {
   const previous = storage.getItem(PREVIOUS_FINANCE_KEY);
   const current = storage.getItem(FINANCE_KEY);
   if (previous) {
     const old = JSON.parse(previous) as Archive;
-    if (old.version !== 10 || typeof old.payload !== 'string' || digest(old.payload) !== old.checksum) throw new Error('invalid prior archive');
+    if (old.version !== 10) throw new Error('invalid prior archive version');
+    const payload = checkedPayload(old);
     if (current) {
       let expected: string | null | undefined;
       try { expected = (JSON.parse(current) as Archive).previousChecksum; } catch { /* The source archive is verified independently. */ }
       if (!allowChangedPrior && expected && expected !== digest(previous)) throw new Error('prior archive changed');
     }
-    return { version: 10, state: unpackFinanceState(old.payload) };
+    return { version: 10, state: unpackFinanceState(payload) };
   }
   const raw = storage.getItem(MIGRATION_BACKUP_KEY);
   if (!raw) return null;
   const backup = JSON.parse(raw) as Backup;
-  if (typeof backup.payload !== 'string' || digest(backup.payload) !== backup.checksum) throw new Error('invalid backup');
-  const original = JSON.parse(backup.payload) as StorageValue<unknown>;
+  const original = JSON.parse(checkedPayload(backup)) as StorageValue<unknown>;
   if ((original.version ?? 0) !== backup.version) throw new Error('invalid backup version');
   return original;
 }
@@ -120,24 +164,25 @@ export function createFinanceStorage<T extends WithSnapshots>(getStorage: () => 
   let previousChecksum: string | null = null;
   let sourceChecksum: string | null = null;
   let blocked = false;
+  let compactActive = false;
 
   const fail = (reason: Problem): never => {
     blocked = true;
     updateProblem(reason);
     throw new Error('finance storage unavailable');
   };
-  const archive = (state: T) => {
+  const archive = (state: T): Archive => {
     const payload = packFinanceState(state);
-    return JSON.stringify({ version: FINANCE_SCHEMA, payload, checksum: digest(payload), legacyChecksum: sourceChecksum, previousChecksum });
+    return { version: FINANCE_SCHEMA, payload, checksum: digest(payload), legacyChecksum: sourceChecksum, previousChecksum };
   };
   const storageOrFail = () => {
     try { return getStorage(); } catch { return fail('storage'); }
   };
-  const verifiedWrite = (storage: Storage, key: string, raw: string) => {
-    try {
-      storage.setItem(key, raw);
-      if (storage.getItem(key) !== raw) fail('storage');
-    } catch { fail('storage'); }
+  const failWrite = (error: unknown): never => fail(isQuotaError(error) ? 'quota' : 'storage');
+  const writeActive = (storage: Storage, record: Archive, preferCompact = compactActive) => {
+    const written = writeRecord(storage, FINANCE_KEY, record, preferCompact);
+    activeRaw = written.raw;
+    compactActive = written.compact;
   };
 
   return {
@@ -148,6 +193,7 @@ export function createFinanceStorage<T extends WithSnapshots>(getStorage: () => 
       previousRaw = storage.getItem(PREVIOUS_FINANCE_KEY);
       previousChecksum = previousRaw == null ? null : digest(previousRaw);
       blocked = false;
+      compactActive = false;
       activeRaw = current;
       sourceRaw = original;
       sourceChecksum = original == null ? null : digest(original);
@@ -155,8 +201,8 @@ export function createFinanceStorage<T extends WithSnapshots>(getStorage: () => 
         try {
           const row = JSON.parse(current) as Archive;
           if (row.version !== FINANCE_SCHEMA) fail('other-version');
-          if (typeof row.payload !== 'string' || digest(row.payload) !== row.checksum) fail('verification');
-          const state = unpackFinanceState<T>(row.payload);
+          const state = unpackFinanceState<T>(checkedPayload(row));
+          compactActive = row.encoding === 'deflate';
           if (row.legacyChecksum !== sourceChecksum || (row.previousChecksum ?? null) !== previousChecksum) {
             blocked = true;
             updateProblem('changed');
@@ -170,17 +216,16 @@ export function createFinanceStorage<T extends WithSnapshots>(getStorage: () => 
       if (previousRaw != null) {
         try {
           const prior = JSON.parse(previousRaw) as Archive;
-          if (prior.version !== 10 || typeof prior.payload !== 'string' || digest(prior.payload) !== prior.checksum) fail('verification');
+          if (prior.version !== 10) fail('verification');
           if (prior.legacyChecksum !== sourceChecksum) fail('changed');
-          const before = unpackFinanceState<T>(prior.payload);
+          const before = unpackFinanceState<T>(checkedPayload(prior));
           const after = normalize(before);
           const candidate = archive(after);
-          const decoded = unpackFinanceState<T>((JSON.parse(candidate) as Archive).payload);
+          const decoded = unpackFinanceState<T>(candidate.payload);
           if (stableJson(after) !== stableJson(decoded) || !verify(before, decoded)) fail('verification');
           if (storage.getItem(LEGACY_KEY) !== original || storage.getItem(PREVIOUS_FINANCE_KEY) !== previousRaw ||
               storage.getItem(FINANCE_KEY) !== null) fail('changed');
-          verifiedWrite(storage, FINANCE_KEY, candidate);
-          activeRaw = candidate;
+          try { writeActive(storage, candidate); } catch (error) { failWrite(error); }
           updateProblem(null);
           return { version: FINANCE_SCHEMA, state: after };
         } catch {
@@ -192,7 +237,7 @@ export function createFinanceStorage<T extends WithSnapshots>(getStorage: () => 
 
       let legacy: StorageValue<unknown>;
       let prepared: T;
-      let candidate: string;
+      let candidate: Archive;
       try {
         legacy = JSON.parse(original) as StorageValue<unknown>;
         const version = legacy.version ?? 0;
@@ -200,7 +245,7 @@ export function createFinanceStorage<T extends WithSnapshots>(getStorage: () => 
         const before = prepare(legacy.state, version);
         prepared = normalize(before);
         candidate = archive(prepared);
-        const decoded = unpackFinanceState<T>((JSON.parse(candidate) as Archive).payload);
+        const decoded = unpackFinanceState<T>(candidate.payload);
         if (stableJson(prepared) !== stableJson(decoded) || !verify(before, decoded)) fail('verification');
       } catch {
         if (blocked) throw new Error('finance storage unavailable');
@@ -209,12 +254,16 @@ export function createFinanceStorage<T extends WithSnapshots>(getStorage: () => 
 
       // Фаза 1 закончена. Ниже записываем и проверяем точную копию, старый ключ остаётся доступен старой PWA.
       if (storage.getItem(LEGACY_KEY) !== original || storage.getItem(PREVIOUS_FINANCE_KEY) !== previousRaw || storage.getItem(FINANCE_KEY) !== null) fail('changed');
+      let savedBackup: string | null = null;
       try {
         const backup = storage.getItem(MIGRATION_BACKUP_KEY);
         if (backup == null) {
           const record: Backup = { version: legacy.version ?? 0, createdAt: new Date().toISOString(), payload: original, checksum: sourceChecksum! };
-          verifiedWrite(storage, MIGRATION_BACKUP_KEY, JSON.stringify(record));
-        } else if ((JSON.parse(backup) as Backup).payload !== original) fail('changed');
+          try { savedBackup = writeRecord(storage, MIGRATION_BACKUP_KEY, record).raw; } catch (error) { failWrite(error); }
+        } else {
+          if (checkedPayload(JSON.parse(backup) as Backup) !== original) fail('changed');
+          savedBackup = backup;
+        }
         if (!readMigrationBackup(storage)) fail('verification');
       } catch {
         if (blocked) throw new Error('finance storage unavailable');
@@ -223,8 +272,24 @@ export function createFinanceStorage<T extends WithSnapshots>(getStorage: () => 
 
       // Фаза 2. Единственная атомарная запись указывает на новое состояние.
       if (storage.getItem(LEGACY_KEY) !== original || storage.getItem(PREVIOUS_FINANCE_KEY) !== previousRaw || storage.getItem(FINANCE_KEY) !== null) fail('changed');
-      verifiedWrite(storage, FINANCE_KEY, candidate);
-      activeRaw = candidate;
+      try {
+        writeActive(storage, candidate);
+      } catch (error) {
+        if (!isQuotaError(error) || savedBackup == null) return failWrite(error);
+        // A failed earlier migration may already have written a large, uncompressed backup.
+        try {
+          const backup = JSON.parse(savedBackup) as Backup;
+          const compact = backup.encoding ? null : compressedRecord(backup, savedBackup);
+          if (!compact) return failWrite(error);
+          if (storage.getItem(LEGACY_KEY) !== original || storage.getItem(PREVIOUS_FINANCE_KEY) !== previousRaw ||
+              storage.getItem(FINANCE_KEY) !== null || storage.getItem(MIGRATION_BACKUP_KEY) !== savedBackup) fail('changed');
+          verifiedWrite(storage, MIGRATION_BACKUP_KEY, compact);
+          writeActive(storage, candidate, true);
+        } catch (retryError) {
+          if (blocked) throw retryError;
+          failWrite(retryError);
+        }
+      }
       updateProblem(null);
       return { version: FINANCE_SCHEMA, state: prepared };
     },
@@ -237,10 +302,8 @@ export function createFinanceStorage<T extends WithSnapshots>(getStorage: () => 
         return;
       }
       try {
-        const raw = archive(value.state);
-        verifiedWrite(storage, FINANCE_KEY, raw);
-        activeRaw = raw;
-      } catch { fail('storage'); }
+        writeActive(storage, archive(value.state));
+      } catch (error) { failWrite(error); }
     },
     removeItem() {
       storageOrFail().removeItem(FINANCE_KEY);

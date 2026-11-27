@@ -145,6 +145,7 @@ export default function App() {
   const toast = useUi(s => s.toast);
   const undo = useUi(s => s.undo);
   const set = useUi(s => s.set);
+  const [copyUnavailable, setCopyUnavailable] = useState(false);
   useTabScroll(tab);
   const mounted = useMountedTabs(tab, ready);
   useEffect(() => {
@@ -189,14 +190,19 @@ export default function App() {
   if (storageProblem) return <main className="mx-auto max-w-md space-y-4 px-4 pt-12">
     <h1 className="text-xl font-semibold">Нужно проверить данные</h1>
     <p>{storageProblem === 'changed' ? 'Данные изменились в другой вкладке или старой версии. Закройте другие окна «Курса» перед повторной проверкой.'
+      : storageProblem === 'quota' ? 'Для записи журнала не хватило места в хранилище приложения. Сохраните копию перед повторной проверкой.'
       : 'Хранилище не прошло проверку. Исходная копия сохраняется, если браузер дал к ней доступ.'}</p>
     <button type="button" className="card block min-h-11 px-4" onClick={() => window.location.reload()}>Проверить снова</button>
     <button type="button" className="card block min-h-11 px-4" onClick={() => {
-      try {
-        const copy = ready ? useStore.getState().exportData() : migrationBackupFile() ?? currentLegacyFile();
-        if (copy) downloadFile('kurs-lokalnaya-kopiya.json', copy, 'application/json');
-      } catch { /* Несверенную копию не выдаём за проверенную. */ }
+      let copy: string | null = null;
+      try { copy = ready ? useStore.getState().exportData() : migrationBackupFile(); } catch { /* Сначала проверяем архив. */ }
+      if (!copy) {
+        try { copy = currentLegacyFile(); } catch { /* Остальные данные остаются в хранилище. */ }
+      }
+      setCopyUnavailable(!copy);
+      if (copy) downloadFile('kurs-lokalnaya-kopiya.json', copy, 'application/json');
     }}>Сохранить копию</button>
+    {copyUnavailable && <p role="status">Копия пока недоступна. Код проверки {storageProblem}.</p>}
     {storageProblem === 'changed' && <button type="button" className="card block min-h-11 px-4" onClick={() => {
       try {
         const copy = currentLegacyFile();

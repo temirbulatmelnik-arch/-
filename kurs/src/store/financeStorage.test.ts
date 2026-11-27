@@ -13,11 +13,15 @@ function memory(version = 9) {
   const legacy = JSON.stringify({ version, state });
   const map = new Map<string, string>([[LEGACY_KEY, legacy]]);
   let refuse: string | null = null;
+  let capacity = Infinity;
   const writes: string[] = [];
   const storage = {
     getItem: (key: string) => map.get(key) ?? null,
     setItem: (key: string, value: string) => {
       if (key === refuse) throw new Error('quota');
+      const occupied = [...map].reduce((sum, [storedKey, storedValue]) =>
+        sum + (storedKey === key ? 0 : storedKey.length + storedValue.length), 0);
+      if (occupied + key.length + value.length > capacity) throw new DOMException('localStorage quota', 'QuotaExceededError');
       writes.push(key);
       map.set(key, value);
     },
@@ -25,7 +29,8 @@ function memory(version = 9) {
   };
   const open = (verify: (before: Fixture, after: Fixture) => boolean = (a, b) => stableJson(a) === stableJson(b)) =>
     createFinanceStorage(() => storage, (input) => input as Fixture, verify);
-  return { map, legacy, storage, writes, open, refuse: (key: typeof refuse) => { refuse = key; } };
+  return { map, legacy, storage, writes, open, refuse: (key: typeof refuse) => { refuse = key; },
+    limit: (units: number) => { capacity = units; } };
 }
 
 describe('двухфазный перенос локального журнала', () => {
@@ -91,6 +96,51 @@ describe('двухфазный перенос локального журнал�
     const packed = packFinanceState({ ...state, accountBook: book });
     expect(JSON.parse(packed).accountBook.operations).toMatchObject([{ id: 'original', cashBooked: true }, { expenseRef: expense.id }]);
     expect(stableJson(unpackFinanceState(packed))).toBe(stableJson({ ...state, accountBook: book }));
+  });
+
+  const largerState = { ...state, note: 'Сохранённая история и Unicode 🚢\n'.repeat(1000) };
+  const largerSource = JSON.stringify({ version: 9, state: largerState });
+
+  it('укладывает архив и журнал в квоту и сохраняет точные данные при повторном открытии', () => {
+    const m = memory();
+    m.map.set(LEGACY_KEY, largerSource);
+    m.limit(largerSource.length + 4500);
+    const opened = m.open();
+    expect(opened.getItem(FINANCE_KEY)).toEqual({ version: FINANCE_SCHEMA, state: largerState });
+    expect(JSON.parse(m.map.get(MIGRATION_BACKUP_KEY)!)).toMatchObject({ encoding: 'deflate', checksum: digest(largerSource) });
+    expect(JSON.parse(m.map.get(FINANCE_KEY)!)).toMatchObject({ encoding: 'deflate' });
+    expect(readMigrationBackup(m.storage)).toEqual({ version: 9, state: largerState });
+    expect(m.map.get(LEGACY_KEY)).toBe(largerSource);
+    opened.setItem(FINANCE_KEY, { version: FINANCE_SCHEMA, state });
+    expect(m.open().getItem(FINANCE_KEY)).toEqual({ version: FINANCE_SCHEMA, state });
+    expect(readMigrationBackup(m.storage)).toEqual({ version: 9, state: largerState });
+  });
+
+  it('переупаковывает проверенный архив от предыдущей попытки при заполненной квоте', () => {
+    const m = memory();
+    const backup = { version: 9, createdAt: '2026-11-27T13:00:00Z', payload: largerSource, checksum: digest(largerSource) };
+    const saved = JSON.stringify(backup);
+    m.map.set(LEGACY_KEY, largerSource);
+    m.map.set(MIGRATION_BACKUP_KEY, saved);
+    m.limit(largerSource.length + saved.length + 80);
+    expect(m.open().getItem(FINANCE_KEY)).toEqual({ version: FINANCE_SCHEMA, state: largerState });
+    expect(m.map.get(LEGACY_KEY)).toBe(largerSource);
+    expect(JSON.parse(m.map.get(MIGRATION_BACKUP_KEY)!)).toMatchObject({
+      encoding: 'deflate', createdAt: backup.createdAt, checksum: backup.checksum,
+    });
+    expect(readMigrationBackup(m.storage)).toEqual({ version: 9, state: largerState });
+    expect(migrationProblem()).toBeNull();
+  });
+
+  it('показывает нехватку места, если даже компактная копия не помещается', () => {
+    const m = memory();
+    m.map.set(LEGACY_KEY, largerSource);
+    m.limit(largerSource.length + LEGACY_KEY.length);
+    expect(() => m.open().getItem(FINANCE_KEY)).toThrow();
+    expect(migrationProblem()).toBe('quota');
+    expect(m.map.get(LEGACY_KEY)).toBe(largerSource);
+    expect(m.map.has(FINANCE_KEY)).toBe(false);
+    expect(m.writes).toEqual([]);
   });
 });
 
