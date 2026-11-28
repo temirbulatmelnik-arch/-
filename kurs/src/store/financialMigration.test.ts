@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EMPTY_BOOK, RESERVE_ACCOUNT, type AccountOperation } from '../domain/accounts';
 import { applyExchange, buildExchange, exchangeRevision, prepareExchange, previewExchange, type ExchangeFile } from '../domain/exchange';
 import { ledger } from '../domain/ledger';
+import { PROTOCOL_VERSION } from '../domain/sync';
 import { FINANCE_KEY, FINANCE_SCHEMA, MIGRATION_BACKUP_KEY } from './financeStorage';
 import type { Debt } from '../domain/types';
 
@@ -135,7 +136,7 @@ describe('обратная совместимость и подтвержден�
     expect(state.prepay(debt.id, 500, RESERVE_ACCOUNT, { principal: 500 })).toBe(false);
     expect(store.getState().accountBook).toBe(state.accountBook);
     const file = buildExchange(store.getState(), date, { short: true });
-    expect(file.protocolVersion).toBe('2.8');
+    expect(file.protocolVersion).toBe(PROTOCOL_VERSION);
     expect(file.status?.coverage).toMatchObject({ scenario: 'base' });
   });
 });

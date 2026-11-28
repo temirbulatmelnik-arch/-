@@ -268,7 +268,8 @@ export function eventsBetween(input: CalendarInput, rangeFrom: string, rangeTo: 
   }
   const partial = partialPayments(input.accountBook?.operations ?? []);
   return dated.filter(e => !linkedReviews.has(e.key))
-    .map(e => singleCard && e.kind === 'payment' && !input.marks?.[e.key]?.done ? { ...e, prepareOn: addDays(e.date, -1) } : e)
+    .map(e => singleCard && e.kind === 'payment' && !input.marks?.[e.key]?.done
+      ? { ...e, prepareOn: e.prepareOn && e.prepareOn < e.date ? e.prepareOn : addDays(e.date, -1) } : e)
     .map(e => possibleExtras.has(e.key) ? { ...e, possibleExtra: possibleExtras.get(e.key) } : e)
     .map(e => e.kind === 'payment' && !input.marks?.[e.key]?.done && partial.has(e.key)
       ? { ...e, originalAmount: e.amount, amount: Math.max(0, kopecks(e.amount - partial.get(e.key)! / 100)) } : e)

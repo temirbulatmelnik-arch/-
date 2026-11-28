@@ -43,7 +43,7 @@ function Body() {
   const [sections, setSections] = useState<ExchangeSection[]>([]);
   const [off, setOff] = useState<Set<SectionId>>(new Set());
   const [showInstr, setShowInstr] = useState(false);
-  const [short, setShort] = useState(true);
+  const [short, setShort] = useState(false);
   const [digest, setDigest] = useState<string[]>([]);
   const imports = useStore(s => s.imports);
   const picker = useRef<HTMLInputElement>(null);
@@ -69,7 +69,7 @@ function Body() {
     const list = result.sections;
     if (result.errors.length) return;
     if (!list.length) { toast('В файле нет ничего нового'); return; }
-    setFile(f); setSections(list); setOff(new Set()); setDigest(exchangeDigest(f, useStore.getState(), today()));
+    setFile(f); setSections(list); setOff(new Set()); setDigest(exchangeDigest(f, useStore.getState(), today(), result));
   };
   // файл, доставленный с сайта, сразу разбираем; отметка «применён» — когда его применили или вернулись назад
   useEffect(() => { if (inbox) parse(inbox.text); }, []);
@@ -109,7 +109,7 @@ function Body() {
   };
 
   // ответ чата разобран — на экране только его изменения, по одному
-  if (file && (file.recovery || file.protocolVersion === '2.8')) {
+  if (file && (file.recovery || file.protocolVersion === '2.8' || file.protocolVersion === PROTOCOL_VERSION)) {
     return <div className="space-y-3">
       <h3 className="text-[17px] font-medium">{file.recovery ? 'Безопасное восстановление' : 'До и после применения'}</h3>
       {file.summary && <p>{file.summary}</p>}
@@ -130,11 +130,11 @@ function Body() {
     <div className="space-y-5 pt-1">
       {/* обмен в два касания: скопировать файл для чата — и вставить его ответ. Подробности — ниже */}
       <div className="grid grid-cols-2 gap-2">
-        <button type="button" onClick={() => void copy(exportText(true))} className="deep-card px-4 py-4 text-left transition-transform duration-100 active:scale-[.97]" style={{ background: 'linear-gradient(165deg, #8f58e2 0%, #6a3fc0 55%, #432a86 100%)' }}>
+        <button type="button" onClick={() => void share()} className="deep-card px-4 py-4 text-left transition-transform duration-100 active:scale-[.97]" style={{ background: 'linear-gradient(165deg, #8f58e2 0%, #6a3fc0 55%, #432a86 100%)' }}>
           <span aria-hidden="true" className="deep-sheen" />
           <ArrowUpFromLine size={22} strokeWidth={1.9} />
-          <span className="mt-2 block text-[15.5px] leading-tight font-medium">Скопировать для чата</span>
-          <span className="mt-1 block text-[12px] leading-snug text-white/75">короткий файл для сверки</span>
+          <span className="mt-2 block text-[15.5px] leading-tight font-medium">Выгрузить для чата</span>
+          <span className="mt-1 block text-[12px] leading-snug text-white/75">{short ? 'короткая сверка' : 'полный файл JSON'}</span>
         </button>
         {!import.meta.env.VITE_DEMO && <button type="button" onClick={() => void pasteAnswer()} className="deep-card px-4 py-4 text-left transition-transform duration-100 active:scale-[.97]">
           <span aria-hidden="true" className="deep-sheen" />
@@ -145,10 +145,9 @@ function Body() {
       </div>
       <section className="card space-y-3 p-4">
         <h3 className="flex items-center gap-2.5 text-[15px] font-medium"><Tile c="#8b63e0" className="size-8 !rounded-[10px]"><ArrowUpFromLine size={16} strokeWidth={2} /></Tile>Из приложения в чат</h3>
-        <p className="text-[13.5px] leading-snug">Файл со всем, что знает приложение. Добавьте его в <b className="font-medium">файлы проекта «Финансы»</b> вместо прошлого или приложите к сообщению.</p>
-        <Segmented value={short ? 'short' : 'full'} onChange={v => setShort(v === 'short')} options={[{ id: 'short', label: 'Коротко, для сверки' }, { id: 'full', label: 'Полностью' }]} />
-        <p className="text-[12px] leading-snug text-muted">{short ? 'Календарь на 2 недели назад и 45 дней вперёд, траты за 14 дней, 4 недели, без стратегии — чтобы не вставлять в чат тысячи строк.' : 'Всё: календарь с дальними поправками, траты за 90 дней, шаблоны, стратегия и правила.'}</p>
-        <PrimaryButton onClick={() => void copy(exportText(short))}><Copy size={17} strokeWidth={1.6} /> Отправить в Claude — скопировать</PrimaryButton>
+        <p className="text-[13.5px] leading-snug">Приложите свежий файл к сообщению в чате «Финансы» или обновите файл в проекте.</p>
+        <Segmented value={short ? 'short' : 'full'} onChange={v => setShort(v === 'short')} options={[{ id: 'full', label: 'Полный файл' }, { id: 'short', label: 'Короткая сверка' }]} />
+        <p className="text-[12px] leading-snug text-muted">{short ? 'Траты за 14 дней и ближайшие платежи.' : 'Вся история трат и сверок, расчёт зарплаты и отпускных, счета, календарь, лимиты и чек-лист.'}</p>
         <div className="grid grid-cols-2 gap-2">
           <SecondaryButton onClick={() => void share()}><Share2 size={15} strokeWidth={1.5} /> Поделиться</SecondaryButton>
           <SecondaryButton onClick={() => downloadFile(name, exportText(short), 'application/json')}><Download size={15} strokeWidth={1.5} /> Сохранить</SecondaryButton>
@@ -165,10 +164,12 @@ function Body() {
         <input ref={picker} type="file" accept="application/json,.json,.txt,text/plain" hidden onChange={async e => {
           const f = e.target.files?.[0];
           e.target.value = '';
-          if (f) parse(await f.text());
+          if (!f) return;
+          try { parse(await f.text()); }
+          catch { setErrors(['Не удалось прочитать файл. Дождитесь его загрузки в «Файлы» или вставьте текст ответа.']); }
         }} />
         <div className="grid grid-cols-3 gap-2">
-          <SecondaryButton onClick={async () => { try { setText(await navigator.clipboard.readText()); } catch { toast('Вставьте вручную: удерживайте палец в поле'); } }} className="px-2"><ClipboardPaste size={15} strokeWidth={1.5} /> Из Claude</SecondaryButton>
+          <SecondaryButton onClick={async () => { try { setText(await navigator.clipboard.readText()); } catch { toast('Вставьте вручную: удерживайте палец в поле'); } }} className="px-2"><ClipboardPaste size={15} strokeWidth={1.5} /> Вставить</SecondaryButton>
           <SecondaryButton onClick={() => picker.current?.click()} className="px-2"><FileUp size={15} strokeWidth={1.5} /> Файл</SecondaryButton>
           <PrimaryButton tone="ink" onClick={() => parse(text)} disabled={!text.trim()} className="h-12">Разобрать</PrimaryButton>
         </div>

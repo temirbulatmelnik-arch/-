@@ -322,7 +322,7 @@ export const useStore = create<State>()(
         if (patch.savings != null && patch.savings !== s.savings) {
           next.savingsLog = [...s.savingsLog, { id: uid(), date: today(), amount: patch.savings - s.savings, note: 'Сверка из чата «Финансы»' }];
         }
-        if (patch.debts) Object.assign(next, withSnapshot(patch.debts, s.snapshots));
+        if (patch.debts && totalDebt(patch.debts) !== totalDebt(s.debts)) Object.assign(next, withSnapshot(patch.debts, s.snapshots));
         if (patch.expenses || patch.accountBook && s.accountBook.operations.some(op => op.legacyExpense)) {
           next.accountBook = withExpenses(next.accountBook ?? s.accountBook, next.expenses ?? s.expenses);
         }
